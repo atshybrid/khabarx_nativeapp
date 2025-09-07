@@ -22,24 +22,14 @@ function InnerLayout() {
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
         tabBarButton: HapticTab,
-        tabBarBackground: TabBarBackground,
-        tabBarStyle: [
-          {
-            display: isTabBarVisible ? 'flex' : 'none',
-          },
-          Platform.select({
-            ios: {
-              // Use a transparent background on iOS to show the blur effect
-              position: 'absolute',
-            },
-            default: {},
-          }),
-        ],
+        tabBarStyle: {
+            display: 'none',
+        },
       }}>
       <Tabs.Screen
-        name="index"
+        name="news"
         options={{
-          title: 'Home',
+          title: 'News',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="house" color={color} />,
         }}
       />

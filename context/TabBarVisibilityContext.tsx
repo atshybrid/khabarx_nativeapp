@@ -1,18 +1,28 @@
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 
-const TabBarVisibilityContext = createContext({
-  isTabBarVisible: true,
-  setIsTabBarVisible: (visible: boolean) => {},
-});
+type TabBarVisibilityContextType = {
+  isTabBarVisible: boolean;
+  setTabBarVisible: (visible: boolean) => void;
+};
 
-export const useTabBarVisibility = () => useContext(TabBarVisibilityContext);
+export const TabBarVisibilityContext = createContext<TabBarVisibilityContextType | undefined>(
+  undefined
+);
 
-export const TabBarVisibilityProvider = ({ children }) => {
-  const [isTabBarVisible, setIsTabBarVisible] = useState(true);
+export const TabBarVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [isTabBarVisible, setTabBarVisible] = useState(true);
 
   return (
-    <TabBarVisibilityContext.Provider value={{ isTabBarVisible, setIsTabBarVisible }}>
+    <TabBarVisibilityContext.Provider value={{ isTabBarVisible, setTabBarVisible }}>
       {children}
     </TabBarVisibilityContext.Provider>
   );
+};
+
+export const useTabBarVisibility = () => {
+  const context = useContext(TabBarVisibilityContext);
+  if (context === undefined) {
+    throw new Error('useTabBarVisibility must be used within a TabBarVisibilityProvider');
+  }
+  return context;
 };
