@@ -1,71 +1,67 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+
+import React, { forwardRef } from 'react';
+import { View, Text, StyleSheet, FlatList, TextInput } from 'react-native';
 import { BottomSheetModal, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
-import { Article } from '@/types';
-import { Image } from 'expo-image';
+import { FontAwesome } from '@expo/vector-icons';
 
-interface ArticleBottomSheetProps {
-  article: Article | null;
-}
+const comments = [
+  { id: '1', user: 'User1', text: 'Great article!' },
+  { id: '2', user: 'User2', text: 'Very informative, thanks for sharing.' },
+  { id: '3', user: 'User3', text: 'I have a question about the second paragraph.' },
+];
 
-const ArticleBottomSheet = React.forwardRef<BottomSheetModal, ArticleBottomSheetProps>((props, ref) => {
-  const { article } = props;
-  const snapPoints = useMemo(() => ['95%'], []);
+const recommendedComments = [
+  { id: '4', user: 'Expert1', text: 'Excellent point, I agree completely.' },
+  { id: '5', user: 'Expert2', text: 'This is a well-researched and thoughtful piece.' },
+];
 
-  if (!article) {
-    return null;
-  }
+const ArticleBottomSheet = forwardRef<BottomSheetModal>((_, ref) => {
+  const renderBackdrop = (props) => (
+    <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+  );
 
   return (
     <BottomSheetModal
       ref={ref}
-      index={0}
-      snapPoints={snapPoints}
-      backdropComponent={(backdropProps) => (
-        <BottomSheetBackdrop {...backdropProps} disappearsOnIndex={-1} appearsOnIndex={0} />
-      )}
+      snapPoints={['50%', '85%']}
+      backdropComponent={renderBackdrop}
     >
       <View style={styles.container}>
-        <Image source={{ uri: article.image }} style={styles.image} />
-        <View style={styles.header}>
-          <View style={styles.authorInfo}>
-            <Image source={{ uri: article.author.avatar }} style={styles.avatar} />
-            <View>
-              <Text style={styles.authorName}>{article.author.name}</Text>
-              <Text style={styles.authorDesignation}>Sr Reporter, మన రంగారెడ్డి</Text>
+        <Text style={styles.title}>Comments</Text>
+
+        <Text style={styles.subtitle}>Recommended</Text>
+        <FlatList
+          data={recommendedComments}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <View style={styles.commentContainer}>
+              <FontAwesome name="user-circle" size={24} color="#ccc" />
+              <View style={styles.commentTextContainer}>
+                <Text style={styles.commentUser}>{item.user}</Text>
+                <Text style={styles.commentText}>{item.text}</Text>
+              </View>
             </View>
-          </View>
-          <View style={styles.locationInfo}>
-            <Text style={styles.link}>way2.co/encmt8</Text>
-            <Text style={styles.location}>Ranga Reddy (D)</Text>
-          </View>
-        </View>
-        <View style={styles.contentContainer}>
-          <Text style={styles.title}>{article.title}</Text>
-          <Text style={styles.body}>{article.body}</Text>
-        </View>
-        <View style={styles.footer}>
-            <Text style={styles.pinned}>Top Story / Pinned</Text>
-            <View style={styles.actions}>
-                <View style={styles.action}>
-                    <Text>👍</Text>
-                    <Text style={styles.actionText}>19</Text>
-                </View>
-                <View style={styles.action}>
-                    <Text>👎</Text>
-                    <Text style={styles.actionText}>13</Text>
-                </View>
-                <View style={styles.action}>
-                    <Text>💬</Text>
-                    <Text style={styles.actionText}>1</Text>
-                </View>
+          )}
+        />
+
+        <Text style={styles.subtitle}>All Comments</Text>
+        <FlatList
+          data={comments}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <View style={styles.commentContainer}>
+              <FontAwesome name="user-circle" size={24} color="#ccc" />
+              <View style={styles.commentTextContainer}>
+                <Text style={styles.commentUser}>{item.user}</Text>
+                <Text style={styles.commentText}>{item.text}</Text>
+              </View>
             </View>
-        </View>
-        <View style={styles.bottomBar}>
-            <Text>💬</Text>
-            <Text>⚠️</Text>
-            <Text>...</Text>
-            <Text>➤</Text>
+          )}
+        />
+
+        <View style={styles.postCommentContainer}>
+          <TextInput placeholder="Add a comment..." style={styles.commentInput} />
+          <FontAwesome name="paper-plane" size={24} color="#007AFF" />
         </View>
       </View>
     </BottomSheetModal>
@@ -73,96 +69,53 @@ const ArticleBottomSheet = React.forwardRef<BottomSheetModal, ArticleBottomSheet
 });
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    image: {
-        width: '100%',
-        height: 250,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 15,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        position: 'absolute',
-        top: 180,
-        left: 0,
-        right: 0,
-    },
-    authorInfo: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    avatar: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        marginRight: 10,
-    },
-    authorName: {
-        color: '#fff',
-        fontWeight: 'bold',
-        fontSize: 16,
-    },
-    authorDesignation: {
-        color: '#fff',
-        fontSize: 12,
-    },
-    locationInfo: {
-        alignItems: 'flex-end',
-    },
-    link: {
-        color: '#fff',
-        fontSize: 12,
-    },
-    location: {
-        color: '#fff',
-        fontSize: 12,
-    },
-    contentContainer: {
-        padding: 15,
-    },
-    title: {
-        fontSize: 22,
-        fontWeight: 'bold',
-        marginTop: 10,
-        marginBottom: 10,
-    },
-    body: {
-        fontSize: 18,
-        lineHeight: 28,
-    },
-    footer: {
-        padding: 15,
-        borderTopWidth: 1,
-        borderTopColor: '#eee',
-    },
-    pinned: {
-        color: '#888',
-        fontSize: 12,
-        marginBottom: 15,
-    },
-    actions: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-    },
-    action: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    actionText: {
-        marginLeft: 5,
-        fontSize: 16,
-    },
-    bottomBar: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        padding: 15,
-        borderTopWidth: 1,
-        borderTopColor: '#eee',
-    }
+  container: {
+    flex: 1,
+    padding: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  subtitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  commentContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  commentTextContainer: {
+    marginLeft: 10,
+  },
+  commentUser: {
+    fontWeight: 'bold',
+    color: '#555',
+  },
+  commentText: {
+    color: '#333',
+  },
+  postCommentContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    paddingTop: 10,
+    marginTop: 10,
+  },
+  commentInput: {
+    flex: 1,
+    height: 40,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    marginRight: 10,
+  },
 });
 
 export default ArticleBottomSheet;
