@@ -4,6 +4,16 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## Project Setup
+
+When you clone this repository or set it up on a new machine (like a server), you need to install all the project dependencies. Run the following command in the project's root directory:
+
+```bash
+npm install
+```
+
+This will download all the necessary packages and create the `node_modules` folder. After this, you can run the application using the commands below.
+
 ## Get started
 
 #### Android
