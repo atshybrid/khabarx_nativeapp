@@ -1,23 +1,24 @@
 
+import { Article } from '@/types';
+import { Ramabhadra_400Regular, useFonts } from '@expo-google-fonts/ramabhadra';
+import { AntDesign, Feather } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import React, { useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
   Dimensions,
   ImageBackground,
   ScrollView,
-  TouchableOpacity,
   Share,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Article } from '@/types';
-import { Feather, AntDesign } from '@expo/vector-icons';
-import { useFonts, Ramabhadra_400Regular } from '@expo-google-fonts/ramabhadra';
-import { Image } from 'expo-image';
-import * as Haptics from 'expo-haptics';
-import { BottomSheetModal, BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import ArticleBottomSheet from './ArticleBottomSheet';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+// Bottom sheet removed for full page navigation
+import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
+import { useAutoHideBottomBar } from '@/hooks/useAutoHideBottomBar';
+import { useRouter } from 'expo-router';
 import ViewShot from 'react-native-view-shot';
 
 interface ArticlePageProps {
@@ -26,35 +27,55 @@ interface ArticlePageProps {
   totalArticles: number;
 }
 
-const EngagementButton = ({ icon, text, onPress }) => (
+type EngagementButtonProps = {
+  icon: React.ReactNode;
+  text?: number | string;
+  onPress: () => void;
+};
+
+const EngagementButton = ({ icon, text, onPress }: EngagementButtonProps) => (
   <TouchableOpacity onPress={onPress} style={styles.engagementButton}>
     {icon}
-    <Text style={styles.engagementButtonText}>{text}</Text>
+    {text !== undefined && text !== '' && (
+      <Text style={styles.engagementButtonText}>{text}</Text>
+    )}
   </TouchableOpacity>
 );
 
 const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles }) => {
-  const [likes, setLikes] = useState(article.likes);
-  const [dislikes, setDislikes] = useState(article.dislikes);
-  const bottomSheetModalRef = useRef<BottomSheetModal>(null);
+  const router = useRouter();
+  const [likes, setLikes] = useState<number>(article.likes ?? 0);
+  const [dislikes, setDislikes] = useState<number>(article.dislikes ?? 0);
   const viewShotRef = useRef<ViewShot>(null);
+  const { isTabBarVisible, setTabBarVisible } = useTabBarVisibility();
+  const { show, hide } = useAutoHideBottomBar(
+    () => setTabBarVisible(true),
+    () => setTabBarVisible(false),
+    { timeout: 5000, minVisible: 500, debug: true }
+  );
+  const lastScrollAtRef = useRef(0);
+  const lastScrollYRef = useRef(0);
+  const scrollThrottle = 200;
+  const lastTouchYRef = useRef(0);
+  const lastTouchStartAtRef = useRef(0);
+  const lastTouchMovedRef = useRef(false);
 
-  let [fontsLoaded] = useFonts({
+  const [fontsLoaded] = useFonts({
     Ramabhadra_400Regular,
   });
 
   const handleLike = () => {
-    setLikes(likes + 1);
+    setLikes((v) => v + 1);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
   const handleDislike = () => {
-    setDislikes(dislikes + 1);
+    setDislikes((v) => v + 1);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
   const handleComment = () => {
-    bottomSheetModalRef.current?.present();
+  router.push({ pathname: '/comments', params: { articleId: article.id } });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
@@ -62,8 +83,10 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
     try {
       // A small limitation: the screenshot will include the engagement bar.
       // This is a trade-off to keep the layout you prefer.
-      const uri = await viewShotRef.current.capture();
-      await Share.share({ url: uri });
+      const uri = await viewShotRef.current?.capture?.();
+      if (uri) {
+        await Share.share({ url: uri });
+      }
     } catch (error) {
       console.error('Failed to share', error);
     }
@@ -75,81 +98,128 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <BottomSheetModalProvider>
-        <View style={styles.container}>
-          <ScrollView
-            style={styles.scrollContainer}
-            contentContainerStyle={styles.scrollContentContainer}
-          >
-            <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
-              <ImageBackground source={{ uri: article.image }} style={styles.image}>
-                <View style={styles.header}>
-                  <View style={styles.authorInfo}>
-                    <Image source={{ uri: article.author.avatar }} style={styles.avatar} />
-                    <View>
-                      <Text style={styles.authorName}>{article.author.name}</Text>
-                      <Text style={styles.authorDesignation}>
-                        Sr Reporter, మన రంగారెడ్డి
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.brandInfo}>
-                    <Text style={styles.brandName}>khabarx</Text>
-                    <Text style={styles.brandLocation}>Ranga Reddy (D)</Text>
-                  </View>
-                </View>
-              </ImageBackground>
-
-              <View style={styles.articleArea}>
-                <View style={styles.articleContent}>
-                  <Text style={[styles.title, { fontFamily: 'Ramabhadra_400Regular' }]}>
-                    {article.title}
-                  </Text>
-                  <Text style={styles.body}>{article.body}</Text>
-                </View>
-
-                <View style={styles.engagementBar}>
-                  <EngagementButton
-                    icon={<AntDesign name="like2" size={24} color="#555" />}
-                    text={likes}
-                    onPress={handleLike}
-                  />
-                  <EngagementButton
-                    icon={<AntDesign name="dislike2" size={24} color="#555" />}
-                    text={dislikes}
-                    onPress={handleDislike}
-                  />
-                  <EngagementButton
-                    icon={<Feather name="message-square" size={24} color="#555" />}
-                    text={article.comments}
-                    onPress={handleComment}
-                  />
-                  <EngagementButton
-                    icon={<Feather name="download" size={24} color="#555" />}
-                    text="Save"
-                    onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
-                  />
-                  <EngagementButton
-                    icon={<Feather name="share" size={24} color="#555" />}
-                    text="Share"
-                    onPress={handleShare}
-                  />
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.scrollContentContainer}
+        onScrollBeginDrag={() => { console.log('[Article] onScrollBeginDrag -> hide'); hide(); setTabBarVisible(false); }}
+        onScroll={(e) => {
+          const now = Date.now();
+          const y = e.nativeEvent.contentOffset.y;
+          const dy = y - (lastScrollYRef.current || 0);
+          lastScrollYRef.current = y;
+          // If bar is visible and even a tiny upward swipe (content moves up => dy>0) happens, hide immediately
+          if (isTabBarVisible && dy > 1) {
+            hide();
+            setTabBarVisible(false);
+            return;
+          }
+          // console.log('[Article] onScroll dy=', dy);
+          if (Math.abs(dy) < 12) return; // ignore micro scroll noise when bar hidden
+          if (now - (lastScrollAtRef.current || 0) > scrollThrottle) {
+            lastScrollAtRef.current = now;
+            // Hide when swiping (scrolling)
+            hide();
+            setTabBarVisible(false);
+          }
+        }}
+        scrollEventThrottle={16}
+      >
+        <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
+          <ImageBackground source={{ uri: article.image }} style={styles.image}>
+            <View style={styles.header}>
+              <View style={styles.authorInfo}>
+                <Image source={{ uri: article.author.avatar }} style={styles.avatar} />
+                <View>
+                  <Text style={styles.authorName}>{article.author.name}</Text>
+                  <Text style={styles.authorDesignation}>Sr Reporter, మన రంగారెడ్డి</Text>
                 </View>
               </View>
-            </ViewShot>
-          </ScrollView>
+              <View style={styles.brandInfo}>
+                <Text style={styles.brandName}>khabarx</Text>
+                <Text style={styles.brandLocation}>Ranga Reddy (D)</Text>
+              </View>
+            </View>
+          </ImageBackground>
 
-          <View style={styles.footerContainer}>
-            <View style={styles.footerInfo}>
-              <Feather name="clock" size={14} color="#888" />
-              <Text style={styles.infoText}>2m ago / {index + 1} of {totalArticles} Pages</Text>
+          <View style={styles.articleArea}>
+            <View
+              style={styles.articleContent}
+              onTouchStart={(e) => {
+                lastTouchYRef.current = e.nativeEvent.pageY;
+                lastTouchStartAtRef.current = Date.now();
+                lastTouchMovedRef.current = false;
+              }}
+              onTouchMove={(e) => {
+                const y = e.nativeEvent.pageY;
+                const dy = y - (lastTouchYRef.current || y);
+                if (Math.abs(dy) > 2) lastTouchMovedRef.current = true;
+                lastTouchYRef.current = y;
+                // If visible and user slightly swipes up, hide immediately
+                if (isTabBarVisible && dy < -2) {
+                  console.log('[Article] small upward glide -> hide');
+                  hide();
+                  setTabBarVisible(false);
+                }
+              }}
+              onTouchEnd={() => {
+                const dt = Date.now() - (lastTouchStartAtRef.current || 0);
+                const isTap = !lastTouchMovedRef.current && dt < 300;
+                if (isTap) {
+                  // Toggle on content tap only
+                  if (isTabBarVisible) {
+                    hide();
+                    setTabBarVisible(false);
+                  } else {
+                    show();
+                    setTabBarVisible(true);
+                  }
+                }
+              }}
+            >
+              <Text style={[styles.title, { fontFamily: 'Ramabhadra_400Regular' }]}>
+                {article.title}
+              </Text>
+              <Text style={styles.body}>{article.body}</Text>
+            </View>
+            {/* Engagement bar (does not affect bottom nav visibility) */}
+            <View style={styles.engagementBar}>
+              <EngagementButton
+                icon={<AntDesign name="like2" size={24} color="#555" />}
+                text={likes}
+                onPress={() => { handleLike(); }}
+              />
+              <EngagementButton
+                icon={<AntDesign name="dislike2" size={24} color="#555" />}
+                text={dislikes}
+                onPress={() => { handleDislike(); }}
+              />
+              <EngagementButton
+                icon={<Feather name="message-square" size={24} color="#555" />}
+                onPress={() => { handleComment(); }}
+              />
+              <EngagementButton
+                icon={<Feather name="download" size={24} color="#555" />}
+                text="Save"
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
+              />
+              <EngagementButton
+                icon={<Feather name="share" size={24} color="#555" />}
+                text="Share"
+                onPress={() => { handleShare(); }}
+              />
             </View>
           </View>
-          <ArticleBottomSheet ref={bottomSheetModalRef} />
+        </ViewShot>
+      </ScrollView>
+
+  <View style={styles.footerContainer}>
+        <View style={styles.footerInfo}>
+          <Feather name="clock" size={14} color="#888" />
+          <Text style={styles.infoText}>2m ago / {index + 1} of {totalArticles} Pages</Text>
         </View>
-      </BottomSheetModalProvider>
-    </GestureHandlerRootView>
+      </View>
+    </View>
   );
 };
 

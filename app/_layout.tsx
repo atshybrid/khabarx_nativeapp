@@ -1,14 +1,15 @@
 
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack, SplashScreen } from 'expo-router';
+import { SplashScreen, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
-import { View, Text, StyleSheet } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useEffect } from 'react';
-import { useColorScheme } from '../hooks/useColorScheme';
+import { StyleSheet, Text, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import 'react-native-reanimated';
 import { AuthProvider } from '../context/AuthContext';
+import { useColorScheme } from '../hooks/useColorScheme';
 
 // Custom Header Component
 const CustomHeader = () => {
@@ -42,8 +43,9 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AuthProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      <BottomSheetModalProvider>
+        <AuthProvider>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             <Stack initialRouteName="splash">
               <Stack.Screen name="splash" options={{ headerShown: false }} />
               <Stack.Screen
@@ -52,16 +54,26 @@ export default function RootLayout() {
                   header: () => <CustomHeader />,
                   headerStyle: {
                     backgroundColor: '#fcfcff',
-                    height: 110,
                   },
                 }}
               />
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="comments"
+                options={{
+                  title: 'Comments',
+                  // Bottom-to-top slide
+                  animation: 'slide_from_bottom',
+                  // iOS modal presentation style
+                  presentation: 'modal',
+                }}
+              />
               <Stack.Screen name="+not-found" />
             </Stack>
-          <StatusBar style="auto" />
-        </ThemeProvider>
-      </AuthProvider>
+            <StatusBar style="auto" />
+          </ThemeProvider>
+        </AuthProvider>
+      </BottomSheetModalProvider>
     </GestureHandlerRootView>
   );
 }

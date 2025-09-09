@@ -1,10 +1,11 @@
 
-import { useEffect, useRef, useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { EmitterSubscription, Keyboard } from "react-native";
 
 type Options = {
   timeout?: number; // ms, default 5000
   minVisible?: number; // ms to keep visible before allowing hide again
+  debug?: boolean; // log internal state transitions
 };
 
 export function useAutoHideBottomBar(
@@ -14,46 +15,70 @@ export function useAutoHideBottomBar(
 ) {
   const timeout = opts.timeout ?? 5000;
   const minVisible = opts.minVisible ?? 500;
+  const debug = opts.debug ?? false;
   const hideTimer = useRef<number | null>(null);
   const lastShownAt = useRef<number>(0);
+  const onShowRef = useRef(onShow);
+  const onHideRef = useRef(onHide);
+  const didInitRef = useRef(false);
 
-  const clear = () => {
+  const clear = useCallback(() => {
     if (hideTimer.current) {
       clearTimeout(hideTimer.current);
       hideTimer.current = null;
+  if (debug) console.log('[TabBarAutoHide] clear inactivity timer');
     }
-  };
+  }, [debug]);
 
   const scheduleHide = useCallback(() => {
     clear();
     const elapsed = Date.now() - lastShownAt.current;
     const delay = Math.max(0, timeout - elapsed, minVisible);
+    if (debug) console.log(`[TabBarAutoHide] scheduleHide in ${delay}ms (elapsedVisible=${elapsed})`);
     hideTimer.current = (setTimeout(() => {
       hideTimer.current = null;
-      onHide();
+      if (debug) console.log('[TabBarAutoHide] inactivity fired -> onHide()');
+      onHideRef.current();
     }, delay) as unknown) as number;
-  }, [onHide, timeout, minVisible]);
+  }, [clear, timeout, minVisible, debug]);
 
   const show = useCallback(() => {
     lastShownAt.current = Date.now();
-    onShow();
+    if (debug) console.log('[TabBarAutoHide] show() called');
+    onShowRef.current();
     scheduleHide();
-  }, [onShow, scheduleHide]);
+  }, [scheduleHide, debug]);
+
+  const hide = useCallback(() => {
+    clear();
+    if (debug) console.log('[TabBarAutoHide] hide() called');
+    onHideRef.current();
+  }, [clear, debug]);
 
   useEffect(() => {
-    // Hide initially
-    onHide();
-    // Cleanup on unmount:
+    // Keep latest callbacks
+    onShowRef.current = onShow;
+    onHideRef.current = onHide;
+  }, [onShow, onHide]);
+
+  useEffect(() => {
+    // Hide initially - run once
+    if (!didInitRef.current) {
+      didInitRef.current = true;
+      if (debug) console.log('[TabBarAutoHide] init hide on mount');
+      onHideRef.current();
+    }
     return () => clear();
-  }, [onHide]);
+  }, [clear, debug]);
 
   // Optional: show when keyboard opens
   useEffect(() => {
     const showSub: EmitterSubscription = Keyboard.addListener("keyboardDidShow", () => {
-      show();
+    if (debug) console.log('[TabBarAutoHide] keyboardDidShow -> show()');
+    show();
     });
     return () => showSub.remove();
-  }, [show]);
+  }, [show, debug]);
 
-  return { show, scheduleHide, clear };
+  return { show, hide, scheduleHide, clear };
 }

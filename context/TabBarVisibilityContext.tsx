@@ -10,7 +10,8 @@ export const TabBarVisibilityContext = createContext<TabBarVisibilityContextType
 );
 
 export const TabBarVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isTabBarVisible, setTabBarVisible] = useState(true);
+  // Start hidden by default
+  const [isTabBarVisible, setTabBarVisible] = useState(false);
 
   return (
     <TabBarVisibilityContext.Provider value={{ isTabBarVisible, setTabBarVisible }}>

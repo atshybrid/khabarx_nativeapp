@@ -1,16 +1,15 @@
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  View,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Text,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-import { StackActions } from '@react-navigation/native';
-import { useNavigation } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Location from 'expo-location';
+// import * as Location from 'expo-location';
 // import * as Notifications from 'expo-notifications';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -18,7 +17,7 @@ import { LANGUAGES, Language } from '../constants/languages';
 import { registerGuestUser } from '../services/api';
 
 const LanguageSelectionScreen = () => {
-  const navigation = useNavigation();
+  // use expo-router to navigate to the News tab after selection
   const [selectedLanguage, setSelectedLanguage] = useState<Language | null>(
     LANGUAGES.find((l) => l.code === 'te') || null
   );
@@ -33,6 +32,14 @@ const LanguageSelectionScreen = () => {
     };
 
     try {
+      // If we already have tokens, skip re-registering
+      const existingJwt = await AsyncStorage.getItem('jwt');
+      const existingRefresh = await AsyncStorage.getItem('refreshToken');
+      if (existingJwt && existingRefresh) {
+  router.replace('/news');
+        return;
+      }
+
       const authResponse = await registerGuestUser({
         languageId: language.id,
         deviceDetails,
@@ -42,23 +49,29 @@ const LanguageSelectionScreen = () => {
       await AsyncStorage.setItem('jwt', authResponse.jwt);
       await AsyncStorage.setItem('refreshToken', authResponse.refreshToken);
 
-      // await requestPermissions();
-      navigation.dispatch(StackActions.replace('(tabs)'));
+  // await requestPermissions();
+  router.replace('/news');
     } catch (error) {
       console.error('Failed to register guest user:', error);
-      // Handle error appropriately
+      // If network fails but user selected a language, allow proceeding with app
+      const existingJwt2 = await AsyncStorage.getItem('jwt');
+      if (!existingJwt2) {
+        await AsyncStorage.setItem('jwt', 'mock-jwt-token');
+        await AsyncStorage.setItem('refreshToken', 'mock-refresh-token');
+      }
+  router.replace('/news');
     }
   };
 
-  const requestPermissions = async () => {
-    let { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      console.log('Permission to access location was denied');
-      return;
-    }
-
-    let location = await Location.getCurrentPositionAsync({});
-    await AsyncStorage.setItem('userLocation', JSON.stringify(location));
+  // const requestPermissions = async () => {
+  //   let { status } = await Location.requestForegroundPermissionsAsync();
+  //   if (status !== 'granted') {
+  //     console.log('Permission to access location was denied');
+  //     return;
+  //   }
+  //
+  //   let location = await Location.getCurrentPositionAsync({});
+  //   await AsyncStorage.setItem('userLocation', JSON.stringify(location));
 
     // const { status: existingStatus } = await Notifications.getPermissionsAsync();
     // let finalStatus = existingStatus;
@@ -73,7 +86,7 @@ const LanguageSelectionScreen = () => {
 
     // const token = (await Notifications.getExpoPushTokenAsync()).data;
     // console.log('FCM Token:', token);
-  };
+  // };
 
   const renderLanguageItem = (item: Language, isSelected: boolean) => (
     <TouchableOpacity

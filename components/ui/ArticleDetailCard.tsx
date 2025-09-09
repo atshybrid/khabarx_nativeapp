@@ -1,21 +1,22 @@
 
-import React, { useState, useRef, useImperativeHandle, forwardRef } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  StyleSheet,
-  TouchableOpacity,
-  Share,
-  Dimensions,
-} from 'react-native';
 import { AntDesign } from '@expo/vector-icons';
+import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import {
+    Dimensions,
+    Image,
+    Share,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import ViewShot from 'react-native-view-shot';
 
 const { width } = Dimensions.get('window');
 
 const COLORS = {
-  primary: '#1E90FF',
+  primary: '#032557',
+  secondary: '#fa7c05',
   white: '#FFFFFF',
   black: '#000000',
   darkGray: '#444',
@@ -75,7 +76,8 @@ const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>((
 
   const shareAsImage = async () => {
     try {
-      const uri = await viewShotRef.current?.capture();
+      const capture = viewShotRef.current?.capture?.bind(viewShotRef.current);
+      const uri = capture ? await capture() : undefined;
       if(uri){
         await Share.share({ url: uri, title: title });
       } else {
@@ -94,10 +96,10 @@ const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>((
       <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
         <View style={{ backgroundColor: COLORS.white }}>
           <View style={styles.imageContainer}>
-            <Image source={{ uri: imageUrl }} style={styles.image} />
+            <Image source={{ uri: imageUrl || '' }} style={styles.image} />
             <View style={styles.authorOverlay}>
               <TouchableOpacity onPress={() => onAuthorPress('author-id')} style={styles.authorPressable}>
-                <Image source={{ uri: authorAvatar }} style={styles.avatar} />
+                <Image source={{ uri: authorAvatar || '' }} style={styles.avatar} />
                 <View>
                   <Text style={styles.authorName}>{authorName}</Text>
                   <Text style={styles.metaText}>{`Published on ${date}`}</Text>
@@ -133,6 +135,9 @@ const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>((
     </View>
   );
 });
+
+// Set display name for better DevTools visibility
+(ArticleDetailCard as any).displayName = 'ArticleDetailCard';
 
 const styles = StyleSheet.create({
   container: {

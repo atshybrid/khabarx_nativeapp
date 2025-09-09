@@ -1,0 +1,88 @@
+version: 1
+updated_at: "2025-09-09T12:00:00+05:30"
+updated_by: "newsbuddy-infra@system"
+model_default:
+  model: "gpt-5-preview"
+  temperature: 0.2
+  max_tokens: 800
+
+prompts:
+  - id: "newsbuddy_base_system"
+    kind: "system"
+    model: "gpt-5-preview"
+    temperature: 0.2
+    text: |
+      You are NewsBuddy — a concise, neutral news assistant for Hyderabad-area users.
+      Always be factual; if you don’t know, say "I don't know".
+      Prefer Telugu when the user's preference is Telugu.
+      Keep responses under 60 words unless the user requests more.
+      Bold headlines, short summaries, avoid political persuasion, obey platform safety policies.
+    notes: "Base system prompt for all tasks."
+
+  - id: "summarize_v1"
+    kind: "task"
+    model: "gpt-5-preview"
+    temperature: 0.2
+    inputs: ["article_text", "audience?"]
+    output_schema: |
+      {
+        "bullets": ["string", "string", "string"],
+        "language": "string"
+      }
+    template: |
+      System: {{newsbuddy_base_system}}
+      User: Summarize this article in exactly 3 short bullet points for {{audience|rural readers}}.
+      Article:
+      {{article_text}}
+      Assistant:
+      1) ...
+      2) ...
+      3) ...
+    examples:
+      - article_text: "A 500-word article about heavy rains in Hyderabad..."
+        audience: "rural readers"
+        expect_shape: { bullets_len: 3 }
+
+  - id: "headline_v2"
+    kind: "task"
+    model: "gpt-5-preview"
+    temperature: 0.3
+    inputs: ["article_text", "tone?"]
+    output_schema: |
+      {
+        "headlines": ["string", "string", "string"],
+        "tone": "string"
+      }
+    template: |
+      System: {{newsbuddy_base_system}}
+      User: Create 3 headline options (short / catchy / formal). Tone: {{tone|neutral}}
+      Article:
+      {{article_text}}
+      Assistant:
+      1) ...
+      2) ...
+      3) ...
+    examples:
+      - tone: "neutral"
+        article_text: "Local council approved..."
+        expect_shape: { headlines_len: 3 }
+
+  - id: "moderation_v1"
+    kind: "task"
+    model: "gpt-5-preview"
+    temperature: 0
+    output_schema: |
+      {
+        "allowed": true,
+        "reason": "string",
+        "categories": ["Hate", "Violence", "Sexual", "Self-harm", "Political", "Other"]
+      }
+    template: |
+      System: You are a content safety checker. Return strict JSON only.
+      Content:
+      {{content}}
+      Assistant (JSON): {"allowed": true/false, "reason": "...", "categories": ["..."]}
+
+metadata:
+  languages: ["te-IN", "en-IN"]
+  owners: ["editorial@yourco.com", "mlops@yourco.com"]

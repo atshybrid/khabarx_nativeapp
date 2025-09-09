@@ -1,6 +1,6 @@
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { registerGuestUser } from '@/services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 
 interface AuthContextType {
   jwt: string | null;
@@ -22,15 +22,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const initAuth = async () => {
       try {
-        const guestUser = await registerGuestUser();
-        if (guestUser) {
-          setAuthTokens(guestUser.jwt, guestUser.refreshToken);
+        const storedJwt = await AsyncStorage.getItem('jwt');
+        const storedRefresh = await AsyncStorage.getItem('refreshToken');
+        if (storedJwt && storedRefresh) {
+          setAuthTokens(storedJwt, storedRefresh);
         }
       } catch (error) {
-        console.error('Failed to register guest user', error);
+        console.error('Auth init failed', error);
       }
     };
-
     initAuth();
   }, []);
 
