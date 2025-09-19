@@ -65,3 +65,8 @@ google-services.json
 
 # Local backup of dependencies
 node_modules.old/
+
+# Android release signing artifacts (never commit secrets)
+android/app/release.keystore
+android/app/*release*.keystore
+android/app/keystore.properties
