@@ -58,3 +58,10 @@ yarn-error.log*
 
 expo-env.d.ts
 # @end expo-cli
+
+# Sensitive Google / OAuth credentials (do NOT commit)
+client_secret_*.json
+google-services.json
+
+# Local backup of dependencies
+node_modules.old/

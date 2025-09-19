@@ -1,13 +1,17 @@
 import { Colors } from '@/constants/Colors';
+import { useCategorySheet } from '@/context/CategorySheetContext';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
-import { RupeeDonationIcon } from '@/icons';
-import { BottomTabBar, BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { PostArticleIcon } from '@/icons';
+import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { usePathname, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AutoHideTabBar(props: BottomTabBarProps) {
-  const { isTabBarVisible } = useTabBarVisibility();
+  const router = useRouter();
+  const { isTabBarVisible, setTabBarVisible } = useTabBarVisibility();
+  const { open: openCategorySheet } = useCategorySheet();
   const insets = useSafeAreaInsets();
   const [measuredHeight, setMeasuredHeight] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -18,7 +22,10 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
   const routes = props.state.routes;
   const activeIndex = props.state.index;
   const activeRouteName = routes[activeIndex]?.name;
-  const hiddenOnRoute = activeRouteName === 'explore' || activeRouteName === 'tech' || activeRouteName === 'media';
+  const pathname = usePathname();
+  // Hide the tab bar on full-screen flows like Post Article (explore) or Account (tech)
+  const onExplore = typeof pathname === 'string' && /(^|\/)explore$/.test(pathname);
+  const hiddenOnRoute = onExplore || activeRouteName === 'tech';
   const shouldShow = isTabBarVisible && !hiddenOnRoute;
 
   React.useEffect(() => {
@@ -53,22 +60,24 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
   const pillLeft = Math.max(0, activeIndex * tabWidth + (tabWidth - pillWidth) / 2);
 
   React.useEffect(() => {
-    // scale FAB when focused
-    const mediaIdx = routes.findIndex(r => r.name === 'media');
-    const focused = mediaIdx === activeIndex;
+    // scale FAB when Post Article (explore) is focused
+    const focused = onExplore;
     Animated.spring(fabScale.current, {
       toValue: focused ? 1.06 : 1,
       useNativeDriver: true,
       bounciness: 8,
       speed: 10,
     }).start();
-  }, [pillLeft, activeIndex, routes]);
+  }, [pillLeft, onExplore]);
 
   const onContainerLayout = (e: any) => setContainerWidth(e.nativeEvent.layout.width);
-  const goToMedia = () => {
-    const mediaIdx = routes.findIndex(r => r.name === 'media');
-    if (mediaIdx >= 0) props.navigation.navigate(routes[mediaIdx].name as never);
+  const goToPostArticle = () => {
+    // Prefer path-based navigation to avoid name mismatches when the route is hidden from tabs
+    router.push('/explore');
   };
+
+  // Debounce map for tab presses
+  const lastPressMap = React.useRef<Record<string, number>>({}).current;
 
   return (
     <Animated.View
@@ -86,16 +95,130 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
     >
       <Animated.View style={[styles.shadowWrap, { transform: [{ scale: scaleRef.current }] }]}>
         <View style={styles.inner} onLayout={onContainerLayout}>
-          <BottomTabBar {...props} />
-        </View>
-        {/* Floating center FAB (clickable). Hide if tab bar hidden */}
-        {!hiddenOnRoute && (
-          <Animated.View style={[styles.fabWrap, { transform: [{ scale: fabScale.current }] }]}> 
-          <Pressable onPress={goToMedia} style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]} android_ripple={{ color: 'rgba(0,0,0,0.08)', borderless: true }}>
-            <View style={styles.fabInner}>
-              <RupeeDonationIcon size={30} strokeColor="#ffffff" flat animated />
+          <View style={styles.tabRow}>
+            {/* Determine only the visible tab routes and enforce order [news, donations] [center] [career, tech] */}
+            {(['news', 'donations'] as const).map((name) => {
+              const route = routes.find((r) => r.name === name);
+              if (!route) return <View key={`missing-${name}`} style={styles.tabItem} />;
+              const isFocused = activeRouteName === route.name;
+              const { options } = props.descriptors[route.key];
+              const label = (options.tabBarLabel as string) || options.title || route.name;
+              const color = isFocused ? Colors.light.tint : Colors.light.tabIconDefault;
+              const size = 24;
+              const icon =
+                typeof options.tabBarIcon === 'function'
+                  ? options.tabBarIcon({ focused: isFocused, color, size })
+                  : null;
+              return (
+                <Pressable
+                  key={route.key}
+                  style={({ pressed }) => [styles.tabItem, pressed && { opacity: 0.7 }]}
+                  accessibilityRole="button"
+                  accessibilityState={isFocused ? { selected: true } : {}}
+                  accessibilityLabel={label}
+                  onPress={() => {
+                    if (!isFocused) {
+                      // @ts-ignore expo-router compatible
+                      props.navigation.navigate(route.name as never);
+                    }
+                  }}
+                >
+                  <View style={styles.tabIconWrap}>{icon}</View>
+                  <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+
+            {/* Center slot placeholder - shows the Post News label to align like a tab */}
+            <View style={styles.tabItem} pointerEvents="none">
+              <View style={{ height: 24 }} />
+              <Text
+                style={[
+                  styles.tabLabel,
+                  { color: onExplore ? Colors.light.tint : Colors.light.tabIconDefault },
+                ]}
+                numberOfLines={1}
+              >
+                Post News
+              </Text>
             </View>
-          </Pressable>
+
+            {/* Right two tabs */}
+            {(['career', 'tech'] as const).map((name) => {
+              const route = routes.find((r) => r.name === name);
+              if (!route) return <View key={`missing-${name}`} style={styles.tabItem} />;
+              const isFocused = activeRouteName === route.name;
+              const { options } = props.descriptors[route.key];
+              const label = (options.tabBarLabel as string) || options.title || route.name;
+              const color = isFocused ? Colors.light.tint : Colors.light.tabIconDefault;
+              const size = 24;
+              const icon =
+                typeof options.tabBarIcon === 'function'
+                  ? options.tabBarIcon({ focused: isFocused, color, size })
+                  : null;
+              const onPress = () => {
+                if (name === 'career') {
+                  // Debounce rapid double taps and force-show the tab bar before opening
+                  const now = Date.now();
+                  const last = lastPressMap[name] || 0;
+                  if (now - last < 250) return;
+                  lastPressMap[name] = now;
+                  // Hide the tab bar immediately to avoid a brief flash before opening the sheet
+                  setTabBarVisible(false);
+                  // Short delay to avoid racing with the previous sheet close animation/backdrop timers
+                  setTimeout(() => {
+                    openCategorySheet();
+                  }, 180);
+                  return;
+                }
+                if (!isFocused) {
+                  // @ts-ignore expo-router compatible
+                  props.navigation.navigate(route.name as never);
+                }
+              };
+              return (
+                <Pressable
+                  key={route.key}
+                  style={({ pressed }) => [styles.tabItem, pressed && { opacity: 0.7 }]}
+                  accessibilityRole="button"
+                  accessibilityState={isFocused ? { selected: true } : {}}
+                  accessibilityLabel={label}
+                  onPress={onPress}
+                >
+                  <View style={styles.tabIconWrap}>{icon}</View>
+                  <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        {/* Floating center FAB (clickable). Only show when tab bar is visible */}
+        {shouldShow && (
+          <Animated.View
+            style={[
+              styles.fabWrap,
+              {
+                // Place FAB so the label visually aligns with other tab labels
+                bottom: Math.max(insets.bottom, 8) + 14,
+                transform: [{ scale: fabScale.current }],
+              },
+            ]}
+          >
+            <Pressable
+              onPress={goToPostArticle}
+              accessibilityRole="button"
+              accessibilityLabel="Post News"
+              style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+              android_ripple={{ color: 'rgba(0,0,0,0.08)', borderless: true }}
+            >
+              <View style={styles.fabInner}>
+                <PostArticleIcon size={30} color="#ffffff" active />
+              </View>
+            </Pressable>
           </Animated.View>
         )}
       </Animated.View>
@@ -119,6 +242,30 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     minHeight: 62,
     backgroundColor: '#fff', // 100% opacity white
+    paddingHorizontal: 0, // remove left/right padding to maximize usable width
+  },
+  tabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 6,
+    paddingHorizontal: 0,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  tabIconWrap: {
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   fabWrap: {
     position: 'absolute',
@@ -142,6 +289,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  fabLabel: {
+    marginTop: 8,
+    textAlign: 'center',
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.light.text,
   },
   fabDot: {
     width: 12,

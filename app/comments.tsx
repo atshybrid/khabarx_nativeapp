@@ -183,7 +183,7 @@ export default function CommentsScreen() {
           </View>
           <View style={styles.actionsRow}>
             <TouchableOpacity onPress={() => toggleLike(item.id)} style={styles.actionBtn}>
-              <AntDesign name={item.liked ? 'like1' : 'like2'} size={16} color={item.liked ? '#0a84ff' : '#666'} />
+              <AntDesign name="like" size={16} color={item.liked ? '#0a84ff' : '#666'} />
               <Text style={[styles.actionText, item.liked && { color: '#0a84ff' }]}>{item.likes}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => startReply(item.id, item.user.name)} style={styles.actionBtn}>

@@ -1,4 +1,4 @@
-import { log } from '@/services/logger';
+// import { log } from '@/services/logger';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
     Animated,
@@ -26,6 +26,8 @@ export type BottomSheetProps = {
   backdropOpacity?: number;
   /** Close when tapping backdrop */
   enableBackdropPress?: boolean;
+  /** Enable drag-to-close and drag gestures on the sheet */
+  dragEnabled?: boolean;
   /** Optional header element rendered above content */
   header?: React.ReactNode;
   /** Optional footer element rendered below content */
@@ -59,8 +61,19 @@ export default function BottomSheet({
   accessibilityLabel,
   respectSafeAreaBottom = true,
   shadowEnabled = true,
+  dragEnabled = true,
 }: BottomSheetProps) {
+  const OPEN_DUR = 280;
+  const CLOSE_DUR = 240;
+  const UNMOUNT_DUR = CLOSE_DUR + 40; // leave a small buffer after close
   const insets = useSafeAreaInsets();
+  // Track any pending close timers to avoid race conditions when quickly reopening after a close
+  const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guard: ignore backdrop presses for a short time after opening to avoid accidental immediate close
+  const allowBackdropAtRef = React.useRef<number>(0);
+  const [backdropInteractive, setBackdropInteractive] = React.useState(false);
+  // Keep rendering while animating out even if `visible` prop is false
+  const [renderVisible, setRenderVisible] = React.useState(visible);
   // Convert snap points into pixel heights; values <= 1 are treated as fractions, >1 as pixels
   const snapHeights = useMemo(() => {
     const px = snapPoints.map((v) => (v <= 1 ? screenH * v : v));
@@ -96,76 +109,99 @@ export default function BottomSheet({
 
   useEffect(() => {
     if (visible) {
-      const h = orderedHeights[snapIndex] ?? Math.min(screenH * 0.5, screenH - insets.top - 24);
-      log.debug('BottomSheet.open', { snapIndex, height: h });
-      // start closed at height, animate to 0 (fully open at current height)
-      translateY.setValue(h);
-      animateTo(0, { duration: 280 });
+      // Cancel any pending close from a previous interaction
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+      const openFrom = orderedHeights[snapIndex] ?? Math.min(screenH * 0.5, screenH - insets.top - 24);
+      // Initialize position before mounting to avoid first-frame flicker
+      translateY.setValue(openFrom);
+      // Ensure we are rendering while opening
+      if (!renderVisible) setRenderVisible(true);
+      // Animate to open
+      animateTo(0, { duration: OPEN_DUR });
+      // Delay enabling backdrop touches until after the open animation so first tap hits content
+      allowBackdropAtRef.current = Date.now() + OPEN_DUR;
+      setBackdropInteractive(false);
+      const id = setTimeout(() => setBackdropInteractive(true), OPEN_DUR + 10);
+      return () => clearTimeout(id);
     } else {
-      log.debug('BottomSheet.close');
       // close to current height (off-screen)
-      const h = orderedHeights[snapIndex] ?? Math.min(screenH * 0.5, screenH - insets.top - 24);
-      animateTo(h, { duration: 220 });
+      const closeTo = orderedHeights[snapIndex] ?? Math.min(screenH * 0.5, screenH - insets.top - 24);
+      animateTo(closeTo, { duration: CLOSE_DUR });
+      setBackdropInteractive(false);
+      // Unmount after the close animation completes to avoid abrupt disappear
+      const id = setTimeout(() => setRenderVisible(false), UNMOUNT_DUR);
+      return () => clearTimeout(id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
+  // Ensure any pending timers are cleared when unmounting
+  useEffect(() => () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
   // Update position when safe area or snap point height changes while open
   useEffect(() => {
     if (visible) {
-      const h = orderedHeights[snapIndex] ?? Math.min(screenH * 0.5, screenH - insets.top - 24);
-      log.debug('BottomSheet.resize', { snapIndex, height: h });
       // keep open (translateY=0) when height changes; content resizes
       translateY.setValue(0);
     }
   }, [sheetHeight, orderedHeights, snapIndex, visible, animateTo, insets.top, translateY]);
 
   const panResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > Math.abs(g.dx) && Math.abs(g.dy) > 6,
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, g) => dragEnabled && Math.abs(g.dy) > Math.abs(g.dx) && Math.abs(g.dy) > 12,
     onPanResponderGrant: () => {
+      if (!dragEnabled) return;
       translateY.stopAnimation((v) => { dragY.current = v; });
     },
     onPanResponderMove: (_, g) => {
+      if (!dragEnabled) return;
       // Allow dragging only downward (positive dy); permit slight upward (elastic) within -24px
       const next = Math.max(0, dragY.current + Math.max(g.dy, -24));
       translateY.setValue(next);
     },
     onPanResponderRelease: (_, g) => {
+      if (!dragEnabled) return;
       const current = (translateY as any)._value ?? 0;
-  // Make it easier to close from lower snap by using a smaller threshold
-  const threshold = Math.max(48, sheetHeight * 0.25);
-  if (g.vy > 1.2 || current > threshold) {
+      // Make it easier to close from lower snap by using a smaller threshold
+      const threshold = Math.max(48, sheetHeight * 0.25);
+      if (g.vy > 1.2 || current > threshold) {
         // close
-    animateTo(sheetHeight, { duration: 200 });
+        animateTo(sheetHeight, { duration: 200 });
         // let the close animation finish then call onClose
-        setTimeout(onClose, 200);
+        if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = setTimeout(() => {
+          onClose();
+          closeTimerRef.current = null;
+        }, 200);
       } else {
-    // reopen to current snap height
-    animateTo(0);
+        // reopen to current snap height
+        animateTo(0);
       }
     },
-  }), [animateTo, onClose, sheetHeight, translateY]);
+  }), [animateTo, onClose, sheetHeight, translateY, dragEnabled]);
 
   const backdropStyle = useMemo(() => ({ opacity: translateY.interpolate({ inputRange: [0, Math.max(1, sheetHeight)], outputRange: [backdropOpacity, 0] }) }), [translateY, backdropOpacity, sheetHeight]);
 
+  // Use Modal on all platforms for a reliable full-screen overlay
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
-  <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[StyleSheet.absoluteFill, { margin: 0, padding: 0 }]}>
+    <Modal visible={renderVisible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
+      <KeyboardAvoidingView behavior={Platform.select({ ios: 'padding', android: 'height', default: 'height' }) as any} style={[StyleSheet.absoluteFill, { margin: 0, padding: 0 }]}>
         {/* Backdrop */}
-  <Animated.View style={[styles.backdrop, { opacity: 1 }]}> 
+        <Animated.View style={[styles.backdrop, { opacity: 1 }]} pointerEvents={backdropInteractive ? 'auto' : 'none'}>
           <Animated.View pointerEvents="none" style={[styles.backdropFill, backdropStyle]} />
-      <Pressable
-            onPress={enableBackdropPress ? onClose : undefined}
-            onStartShouldSetResponder={() => true}
-            onResponderMove={(e) => {
-              // Dragging on the backdrop closes faster
-              const dy = e.nativeEvent.touches?.[0]?.pageY ?? 0;
-              // If pulled down quickly from near the sheet area, close
-              if (dy > screenH * 0.92) {
-        animateTo(sheetHeight, { duration: 180 });
-                setTimeout(onClose, 180);
-              }
-            }}
+          <Pressable
+            onPress={enableBackdropPress ? () => {
+              if (Date.now() < allowBackdropAtRef.current) return;
+              onClose();
+            } : undefined}
             style={[StyleSheet.absoluteFill, { margin: 0, padding: 0 }]}
             accessibilityLabel="Close backdrop"
             accessibilityRole="button"
@@ -182,7 +218,6 @@ export default function BottomSheet({
               paddingBottom: respectSafeAreaBottom ? insets.bottom : 0,
               height: sheetHeight,
               transform: [{ translateY }],
-              // Nudge down slightly on Android to avoid hairline at bottom edge
               marginBottom: Platform.OS === 'android' ? -1 : 0,
               shadowColor: '#000',
               shadowOpacity: shadowEnabled ? 0.15 : 0,
@@ -191,7 +226,7 @@ export default function BottomSheet({
               elevation: shadowEnabled ? 24 : 0,
             },
           ]}
-          {...panResponder.panHandlers}
+          {...(dragEnabled ? panResponder.panHandlers : {})}
         >
           <View style={styles.handleContainer}>
             <View style={styles.handleBar} />
@@ -213,6 +248,8 @@ export default function BottomSheet({
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+    backgroundColor: 'transparent',
   },
   backdropFill: {
     flex: 1,
@@ -224,6 +261,10 @@ const styles = StyleSheet.create({
   right: 0,
   bottom: 0,
   backgroundColor: '#fff',
+  zIndex: 2,
+  overflow: 'hidden',
+  // small trick: ensure GPU compositing to reduce flicker
+  transform: [{ translateZ: 0 } as any],
   },
   handleContainer: {
     alignItems: 'center',

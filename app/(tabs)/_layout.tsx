@@ -1,18 +1,21 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Tabs } from 'expo-router';
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import BottomSheet from '@/components/ArticleBottomSheet';
 import AutoHideTabBar from '@/components/AutoHideTabBar';
 import { HapticTab } from '@/components/HapticTab';
 import { Colors } from '@/constants/Colors';
 import { CategoryProvider, useCategory } from '@/context/CategoryContext';
+import { CategorySheetProvider, useCategorySheet } from '@/context/CategorySheetContext';
 import {
-  TabBarVisibilityProvider,
-  useTabBarVisibility,
+    TabBarVisibilityProvider,
+    useTabBarVisibility,
 } from '@/context/TabBarVisibilityContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { CategoriesIcon, HomeIcon, PostArticleIcon, ProfileIcon } from '@/icons';
+import { CategoriesIcon, DonationIcon, NewsIcon, ProfileIcon } from '@/icons';
+import { CategoryItem, getCategories } from '@/services/api';
 import { log } from '@/services/logger';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,22 +23,27 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 function InnerLayout() {
   const colorScheme = useColorScheme();
   useTabBarVisibility();
-  const { setTabBarVisible } = useTabBarVisibility();
   const theme = Colors[colorScheme ?? 'light'];
   useSafeAreaInsets();
 
-  const [categoryOpen, setCategoryOpen] = React.useState(false);
+  const { close, visible, currentOnSelect, _clearHandler } = useCategorySheet() as any;
   const { selectedCategory, setSelectedCategory } = useCategory();
 
-  const categories: { key: string; name: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }[] = [
-    { key: 'top', name: 'Top Stories', icon: 'newspaper-variant' },
-    { key: 'india', name: 'India', icon: 'flag' },
-    { key: 'world', name: 'World', icon: 'earth' },
-    { key: 'business', name: 'Business', icon: 'briefcase' },
-    { key: 'tech', name: 'Technology', icon: 'cpu-64-bit' },
-    { key: 'sports', name: 'Sports', icon: 'trophy' },
-    { key: 'ent', name: 'Entertainment', icon: 'movie-open' },
-  ];
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [pressLocked, setPressLocked] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        // Pull languageId from tokens or local storage inside getCategories()
+        const list = await getCategories();
+        setCategories(list);
+      } catch (e) {
+        console.warn('Failed to load categories', e);
+        setCategories([]);
+      }
+    })();
+  }, []);
 
   return (
     <>
@@ -45,6 +53,8 @@ function InnerLayout() {
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
         tabBarButton: HapticTab,
+        // Keep inactive screens mounted to prevent blank frames during gestures
+        freezeOnBlur: false,
         tabBarStyle: {
           backgroundColor: 'transparent',
           borderTopWidth: 0,
@@ -61,31 +71,25 @@ function InnerLayout() {
   {/* Hide auto-routes that shouldn't appear as tabs */}
   <Tabs.Screen name="index" options={{ href: null }} />
   <Tabs.Screen name="trending" options={{ href: null }} />
+  <Tabs.Screen name="media" options={{ href: null }} />
+  <Tabs.Screen name="explore" options={{ href: null }} />
 
       <Tabs.Screen
         name="news"
         options={{
-          title: 'Home',
+          title: 'News',
           tabBarIcon: ({ color, focused }) => (
-            <HomeIcon size={focused ? 28 : 24} color={color} active={focused} />
+            <NewsIcon size={focused ? 28 : 24} color={color} active={focused} />
           ),
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="donations"
         options={{
-          title: 'Post',
-           tabBarIcon: ({ color, focused }) => (
-             <PostArticleIcon size={focused ? 28 : 24} color={color} active={focused} />
-           ),
-        }}
-      />
-      <Tabs.Screen
-        name="media"
-        options={{
-          title: 'Donate',
-          // Icon is shown via the floating FAB; hide the default tab icon but keep the label
-          tabBarIcon: () => null,
+          title: 'Donations',
+          tabBarIcon: ({ color, focused }) => (
+            <DonationIcon size={focused ? 28 : 24} color={color} />
+          ),
           tabBarLabelStyle: { fontSize: 11 },
         }}
       />
@@ -95,19 +99,6 @@ function InnerLayout() {
           title: 'Category',
           tabBarIcon: ({ color, focused }) => (
             <CategoriesIcon size={focused ? 28 : 24} color={color} active={focused} />
-          ),
-          // Intercept tab press to open the bottom sheet instead of navigating
-      tabBarButton: (props) => (
-            <HapticTab
-              {...props}
-              onPress={(e) => {
-                e.preventDefault();
-        log.event('tab.category.press');
-        setCategoryOpen(true);
-        // Hide the tab bar while sheet is open (best practice for modal overlays)
-        setTabBarVisible(false);
-              }}
-            />
           ),
         }}
       />
@@ -124,11 +115,9 @@ function InnerLayout() {
 
     {/* Category Bottom Sheet overlay */}
   <BottomSheet
-      visible={categoryOpen}
+      visible={visible}
       onClose={() => {
-        log.event('category.sheet.close');
-        setCategoryOpen(false);
-        setTabBarVisible(true);
+        close();
       }}
       // Pixel-perfect first snap based on one row height + header + handle + paddings
       snapPoints={[
@@ -149,18 +138,36 @@ function InnerLayout() {
         contentContainerStyle={styles.rowScroll}
       >
         {categories.map((c) => {
-          const active = selectedCategory === c.key;
+          const active = selectedCategory === c.id;
           return (
             <Pressable
-              key={c.key}
+              key={c.id}
               style={({ pressed }) => [
                 styles.tileH,
                 pressed && styles.tilePressed,
               ]}
-              onPress={async () => {
-                log.event('category.select', { key: c.key });
-                setSelectedCategory(c.key);
-        // Keep sheet open; user can manually close by drag or tapping backdrop
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                onPress={async () => {
+                if (pressLocked) return;
+                setPressLocked(true);
+                log.event('category.select', { id: c.id, slug: c.slug });
+                if (currentOnSelect) {
+                  // Local selection mode (e.g., Create Article) -> don't change global filter
+                  try {
+                    const payload = { id: c.id, name: c.name, slug: c.slug, iconUrl: c.iconUrl };
+                    if ((payload as any).id) currentOnSelect(payload as any);
+                  } catch {}
+                  try { _clearHandler?.(); } catch {}
+                  close();
+                  // release lock after close animation window
+                  setTimeout(() => setPressLocked(false), 360);
+                  return;
+                }
+                // Global selection (News filter)
+                setSelectedCategory(c.id);
+                try { await AsyncStorage.setItem('selectedCategoryName', c.name); } catch {}
+                close();
+                setTimeout(() => setPressLocked(false), 360);
               }}
               accessibilityRole="button"
               accessibilityLabel={`Category ${c.name}`}
@@ -170,7 +177,11 @@ function InnerLayout() {
                 styles.iconCircle,
                 active && { backgroundColor: theme.primary },
               ]}>
-                <MaterialCommunityIcons name={c.icon} size={22} color={active ? '#fff' : theme.primary} />
+                {c.iconUrl ? (
+                  <Image source={{ uri: c.iconUrl }} style={{ width: 22, height: 22, borderRadius: 4 }} />
+                ) : (
+                  <MaterialCommunityIcons name="shape" size={22} color={active ? '#fff' : theme.primary} />
+                )}
               </View>
               <Text style={[styles.tileText, active && styles.tileTextActive]} numberOfLines={1}>
                 {c.name}
@@ -188,7 +199,9 @@ export default function TabLayout() {
   return (
     <TabBarVisibilityProvider>
       <CategoryProvider>
-        <InnerLayout />
+        <CategorySheetProvider>
+          <InnerLayout />
+        </CategorySheetProvider>
       </CategoryProvider>
     </TabBarVisibilityProvider>
   );

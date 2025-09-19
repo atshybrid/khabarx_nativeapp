@@ -52,7 +52,7 @@ interface ArticleDetailCardProps {
   onAuthorPress: (authorId: string) => void;
 }
 
-const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>((
+const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>(function ArticleDetailCard(
   {
     title,
     body,
@@ -63,7 +63,7 @@ const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>((
     onAuthorPress,
   },
   ref
-) => {
+) {
   const [isLiked, setIsLiked] = useState(false);
   const [isDisliked, setIsDisliked] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
@@ -117,19 +117,19 @@ const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>((
 
       <View style={styles.footer}>
         <TouchableOpacity onPress={() => handleAction(() => { if (isDisliked) setIsDisliked(false); }, isLiked, setIsLiked)} style={styles.actionButton}>
-          <AntDesign name={isLiked ? "like1" : "like2"} size={SIZES.icon} color={isLiked ? COLORS.primary : COLORS.mediumGray} />
+          <AntDesign name={isLiked ? "like" : "like"} size={SIZES.icon} color={isLiked ? COLORS.primary : COLORS.mediumGray} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => handleAction(() => { if (isLiked) setIsLiked(false); }, isDisliked, setIsDisliked)} style={styles.actionButton}>
-          <AntDesign name={isDisliked ? "dislike1" : "dislike2"} size={SIZES.icon} color={isDisliked ? COLORS.danger : COLORS.mediumGray} />
+          <AntDesign name={isDisliked ? "dislike" : "dislike"} size={SIZES.icon} color={isDisliked ? COLORS.danger : COLORS.mediumGray} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setIsFavorite(!isFavorite)} style={styles.actionButton}>
-          <AntDesign name={isFavorite ? "star" : "staro"} size={SIZES.icon} color={isFavorite ? '#FFD700' : COLORS.mediumGray} />
+          <AntDesign name={isFavorite ? "star" : "star"} size={SIZES.icon} color={isFavorite ? '#FFD700' : COLORS.mediumGray} />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => {}} style={styles.actionButton}>
-          <AntDesign name="message1" size={SIZES.icon} color={COLORS.mediumGray} />
+          <AntDesign name="message" size={SIZES.icon} color={COLORS.mediumGray} />
         </TouchableOpacity>
         <TouchableOpacity onPress={shareAsImage} style={styles.actionButton}>
-          <AntDesign name="sharealt" size={SIZES.icon} color={COLORS.mediumGray} />
+          <AntDesign name="share-alt" size={SIZES.icon} color={COLORS.mediumGray} />
         </TouchableOpacity>
       </View>
     </View>

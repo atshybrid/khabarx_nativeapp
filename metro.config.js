@@ -1,7 +1,28 @@
 
 const { getDefaultConfig } = require('expo/metro-config');
 
+// Note: no custom exclusion list required. We keep Metro defaults.
+
 const config = getDefaultConfig(__dirname);
+
+// Work around Windows ENOENT when Metro tries to symbolicate Hermes InternalBytecode.js frames.
+// We collapse or remove those frames to avoid Metro reading a non-existent file path.
+config.symbolicator = {
+  customizeFrame: (frame) => {
+    const file = frame?.file || '';
+    if (file.includes('InternalBytecode.js')) {
+      return { collapse: true };
+    }
+    return {};
+  },
+  customizeStack: (stack) => {
+    try {
+      return stack.filter((f) => !(f?.file || '').includes('InternalBytecode.js'));
+    } catch {
+      return stack;
+    }
+  },
+};
 
 // Remove the default reporter which causes `require.context` issues.
 config.reporter = {
@@ -18,6 +39,11 @@ config.server = {
       return middleware(req, res, next);
     };
   },
+};
+
+// Allow expo-image-picker to be bundled (required in development build with native module present).
+config.resolver = {
+  ...(config.resolver || {}),
 };
 
 module.exports = config;

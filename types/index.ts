@@ -4,11 +4,17 @@ export interface Article {
   summary: string;
   body: string;
   image: string;
+  // Optional rich media
+  images?: string[];
+  videoUrl?: string;
   author: {
     id?: string; // optional; not required in sample data
     name: string;
     avatar: string;
   };
+  // Publisher/brand (optional)
+  publisherName?: string;
+  publisherLogo?: string;
   category: string;
   createdAt: string;
   isRead: boolean;

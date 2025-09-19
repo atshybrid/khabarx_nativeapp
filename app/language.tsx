@@ -1,4 +1,3 @@
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -13,53 +12,82 @@ import {
 // import * as Notifications from 'expo-notifications';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { LANGUAGES, Language } from '../constants/languages';
-import { registerGuestUser } from '../services/api';
+import { LanguageSkeleton } from '@/components/ui/LanguageSkeleton';
+import { saveTokens } from '@/services/auth';
+import { getDeviceIdentity } from '@/services/device';
+import { requestAppPermissions } from '@/services/permissions';
+import { Language } from '../constants/languages';
+import { getLanguages, registerGuestUser } from '../services/api';
 
 const LanguageSelectionScreen = () => {
   // use expo-router to navigate to the News tab after selection
-  const [selectedLanguage, setSelectedLanguage] = useState<Language | null>(
-    LANGUAGES.find((l) => l.code === 'te') || null
-  );
+  const [selectedLanguage, setSelectedLanguage] = useState<Language | null>(null);
+  const [languages, setLanguages] = useState<Language[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const list = await getLanguages();
+        setLanguages(list);
+        // Show the first API item as top full-width card; preserve backend order
+        if (list?.length) setSelectedLanguage(list[0]);
+        setLoadError(null);
+      } catch {
+        setLoadError('Failed to load languages');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
   const handleLanguageSelect = async (language: Language) => {
+    if (submitting || loading) return;
     setSelectedLanguage(language);
     await AsyncStorage.setItem('selectedLanguage', JSON.stringify(language));
 
-    const deviceDetails = {
-      deviceId: 'mock-device-id', // Replace with actual device ID
-      deviceModel: 'mock-device-model', // Replace with actual device model
-    };
+    const deviceDetails = await getDeviceIdentity();
 
     try {
+      setSubmitting(true);
+      setSubmitError(null);
       // If we already have tokens, skip re-registering
       const existingJwt = await AsyncStorage.getItem('jwt');
       const existingRefresh = await AsyncStorage.getItem('refreshToken');
       if (existingJwt && existingRefresh) {
-  router.replace('/news');
+        router.replace('/news');
         return;
       }
 
+      const perms = await requestAppPermissions();
       const authResponse = await registerGuestUser({
+        // Backend expects string IDs like "cmfdwhqk80009ugtof37yt8vv"
         languageId: language.id,
         deviceDetails,
+        location: perms.coords ? { latitude: perms.coords.latitude, longitude: perms.coords.longitude } : undefined,
+        pushToken: perms.pushToken,
       });
 
       console.log('Guest user registered:', authResponse);
-      await AsyncStorage.setItem('jwt', authResponse.jwt);
-      await AsyncStorage.setItem('refreshToken', authResponse.refreshToken);
+      await saveTokens({
+        jwt: authResponse.jwt,
+        refreshToken: authResponse.refreshToken,
+        expiresAt: authResponse.expiresAt || (Date.now() + 24 * 3600 * 1000),
+        languageId: authResponse.languageId || language.id,
+        user: authResponse.user,
+      });
 
-  // await requestPermissions();
-  router.replace('/news');
+      // await requestPermissions();
+      router.replace('/news');
     } catch (error) {
-      console.error('Failed to register guest user:', error);
-      // If network fails but user selected a language, allow proceeding with app
-      const existingJwt2 = await AsyncStorage.getItem('jwt');
-      if (!existingJwt2) {
-        await AsyncStorage.setItem('jwt', 'mock-jwt-token');
-        await AsyncStorage.setItem('refreshToken', 'mock-refresh-token');
-      }
-  router.replace('/news');
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error('Failed to register guest user:', msg);
+      setSubmitError(msg || 'Failed to register. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -73,7 +101,7 @@ const LanguageSelectionScreen = () => {
   //   let location = await Location.getCurrentPositionAsync({});
   //   await AsyncStorage.setItem('userLocation', JSON.stringify(location));
 
-    // const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    // const { status: existingStatus } = await Notifications.getPermissionsAsync();        
     // let finalStatus = existingStatus;
     // if (existingStatus !== 'granted') {
     //   const { status } = await Notifications.requestPermissionsAsync();
@@ -107,23 +135,69 @@ const LanguageSelectionScreen = () => {
         </View>
         <View style={styles.checkmarkContainer}>
             {isSelected && (
-              <MaterialCommunityIcons name="check-circle" size={24} color="green" />
+              <MaterialCommunityIcons name="check-circle" size={24} color="green" />        
             )}
         </View>
       </View>
     </TouchableOpacity>
   );
 
-  const otherLanguages = LANGUAGES.filter(l => l.id !== selectedLanguage?.id);
+  // Show only the first language as the top card; remaining languages follow as grid, in the same API order
+  const otherLanguages = (languages || []).slice(1);
 
   return (
     <View style={styles.container}>
+      {loading && <LanguageSkeleton />}
+      {!loading && loadError && (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>Unable to load languages.</Text>
+          <TouchableOpacity
+            onPress={async () => {
+              setLoading(true);
+              setLoadError(null);
+              try {
+                const list = await getLanguages();
+                setLanguages(list);
+              } catch {
+                setLoadError('Retry failed');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            style={styles.retryBtn}
+          >
+            <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {!loading && !loadError && (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContainer}>
-            {selectedLanguage && renderLanguageItem(selectedLanguage, true)}
-            <View style={styles.gridContainer}>
-                {otherLanguages.map((item) => renderLanguageItem(item, false))}
+          {selectedLanguage && renderLanguageItem(selectedLanguage, true)}
+          <View style={styles.gridContainer}>
+            {otherLanguages.map((item) => renderLanguageItem(item, false))}
+          </View>
+          {submitError && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{submitError}</Text>
+              <TouchableOpacity
+                onPress={() => selectedLanguage && handleLanguageSelect(selectedLanguage)}
+                style={styles.retryBtn}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Retry Register</Text>
+              </TouchableOpacity>
             </View>
+          )}
         </ScrollView>
+      )}
+
+      {submitting && (
+        <View style={styles.overlay} pointerEvents="auto">
+          <View style={styles.overlayCard}>
+            <MaterialCommunityIcons name="loading" size={22} color="#444" />
+            <Text style={styles.overlayText}>Setting up your experience…</Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
@@ -188,6 +262,58 @@ const styles = StyleSheet.create({
       height: 24, // same as the icon size
       alignItems: 'center',
       justifyContent: 'center',
+  },
+  // Error and retry UI
+  errorBox: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#fdecea',
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#f5c6cb',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorText: {
+    color: '#b00020',
+    fontSize: 14,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  retryBtn: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 6,
+  },
+  // Submitting overlay
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  overlayCard: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.41,
+  },
+  overlayText: {
+    marginLeft: 10,
+    color: '#333',
+    fontWeight: '600',
   },
 });
 

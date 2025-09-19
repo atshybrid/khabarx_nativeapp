@@ -1,5 +1,6 @@
-import { Redirect } from 'expo-router';
+// import { Redirect } from 'expo-router';
 
 export default function TabsIndexRedirect() {
-  return <Redirect href="/news" />;
+  // Redirect temporarily disabled for onboarding flow debug
+  return null;
 }

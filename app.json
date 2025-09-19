@@ -17,7 +17,12 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.amoghnya.khabarx"
+      "package": "com.amoghnya.khabarx",
+      "googleServicesFile": "./google-services.json",
+      "softwareKeyboardLayoutMode": "pan",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -34,8 +39,33 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow khabarx to access your photos to attach media to your posts.",
+          "cameraPermission": "Allow khabarx to use your camera to capture photos and videos.",
+          "microphonePermission": "Allow khabarx to record audio with videos."
+        }
+      ],
+      "@react-native-google-signin/google-signin"
     ],
+    "extra": {
+      "google": {
+        "androidClientId": "827657659496-p80ardflep2rb907bbdmel1o4fgopbtv.apps.googleusercontent.com",
+        "iosClientId": "YOUR_IOS_CLIENT_ID.apps.googleusercontent.com",
+        "webClientId": "827657659496-7k1qr8f36k8j5gu7nrgjs060lbbviruo.apps.googleusercontent.com",
+        "mode": "native"
+      },
+      "firebase": {
+        "webApiKey": "AIzaSyAIwciUGr4JgSo7keO0TiSPzS3E70SeUyw"
+      },
+      "router": {},
+      "eas": {
+        "projectId": "6f9f8ff8-f44f-4164-b5eb-591e984e732a"
+      }
+    },
     "experiments": {
       "typedRoutes": true
     }

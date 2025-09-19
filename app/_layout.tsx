@@ -1,15 +1,17 @@
-
+import Toast from '@/components/Toast';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { SplashScreen, Stack } from 'expo-router';
+import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { AuthProvider } from '../context/AuthContext';
 import { useColorScheme } from '../hooks/useColorScheme';
+
+// Keep native splash visible while we boot in app/splash.tsx
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // Custom Header Component
 const CustomHeader = () => {
@@ -26,27 +28,24 @@ const CustomHeader = () => {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const [loaded] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
-
-  useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded]);
-
-  if (!loaded) {
-    // Async font loading only occurs in development.
-    return null;
-  }
+  // Font loading temporarily disabled for debugging blank screen
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <BottomSheetModalProvider>
         <AuthProvider>
           <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-            <Stack initialRouteName="splash">
+            <Stack
+              initialRouteName="splash"
+              screenOptions={{
+                // Avoid freezing previous screen during gestures to prevent blank screen
+                freezeOnBlur: false,
+                // Ensure a solid background during transitions
+                contentStyle: { backgroundColor: '#fff' },
+                gestureEnabled: true,
+                animationTypeForReplace: 'push',
+              }}
+            >
               <Stack.Screen name="splash" options={{ headerShown: false }} />
               <Stack.Screen
                 name="language"
@@ -55,6 +54,16 @@ export default function RootLayout() {
                   headerStyle: {
                     backgroundColor: '#fcfcff',
                   },
+                }}
+              />
+              {/* Keep previous screen attached to avoid blank screen when swiping back from article */}
+              <Stack.Screen
+                name="article/[id]"
+                options={{
+                  headerShown: false,
+                  freezeOnBlur: false,
+                  animation: 'slide_from_right',
+                  contentStyle: { backgroundColor: '#fff' },
                 }}
               />
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -71,6 +80,7 @@ export default function RootLayout() {
               <Stack.Screen name="+not-found" />
             </Stack>
             <StatusBar style="auto" />
+            <Toast />
           </ThemeProvider>
         </AuthProvider>
       </BottomSheetModalProvider>
