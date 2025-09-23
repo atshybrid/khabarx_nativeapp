@@ -131,6 +131,9 @@ export async function updatePreferences(input: PreferenceUpdateInput): Promise<P
 
   const base: PreferenceRecord = { deviceId, deviceModel, userId };
   const payload = buildPayload(base, input);
+  if (input.intent === 'language') {
+    console.log('[PREF][LANG] updatePreferences intent=language payload', { deviceId, userId, languageId: (payload as any).languageId });
+  }
 
   // POST (or PATCH) - spec said /preferences/update; assuming POST
   const res = await request<any>('/preferences/update', { method: 'POST', body: payload });

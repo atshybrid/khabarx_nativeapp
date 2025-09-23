@@ -1,6 +1,6 @@
+import type { Language } from '@/constants/languages';
 import { usePreferences } from '@/hooks/usePreferences';
 import { getLanguages } from '@/services/api';
-import type { Language } from '@/constants/languages';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -82,13 +82,16 @@ export default function AccountScreen() {
     }
     setLangUpdating(true); setInlineMsg(null);
     try {
+      console.log('[LANG][ACCOUNT] user selecting language', { selectedId: lang.id, name: lang.name, nativeName: lang.nativeName, previous: prefs?.languageId });
       const res = await updateLanguage(lang.id);
+      console.log('[LANG][ACCOUNT] updateLanguage response prefs.languageId now =', res?.languageId);
       if (res) {
         setInlineMsg({ type: 'success', text: `Language set to ${lang.nativeName || lang.name}.` });
         setLangSheetOpen(false);
       }
     } catch (e: any) {
       setInlineMsg({ type: 'error', text: e?.message || 'Failed to update language.' });
+      console.warn('[LANG][ACCOUNT] language update failed', e);
     } finally {
       setLangUpdating(false);
     }
