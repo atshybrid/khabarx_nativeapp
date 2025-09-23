@@ -1,6 +1,8 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { Platform } from 'react-native';
+import { getCachedPreferences, updatePushToken as prefUpdatePushToken } from './preferences';
 
 // Configure how notifications are handled when the app is in the foreground
 Notifications.setNotificationHandler({
@@ -31,6 +33,9 @@ export interface NotificationResponse {
 class NotificationService {
   private notificationListener?: Notifications.Subscription;
   private responseListener?: Notifications.Subscription;
+  private syncingToken = false;
+
+  private static LAST_PUSH_TOKEN_KEY = 'last_push_token_v1';
 
   /**
    * Initialize notification service
@@ -44,6 +49,9 @@ class NotificationService {
     
     // Configure Android notification channel
     this.configureAndroidChannel();
+    
+    // Attempt push token sync (fire and forget)
+    this.syncPushToken().catch(e => console.warn('[NOTIFICATIONS] initial token sync failed', e?.message));
     
     console.log('[NOTIFICATIONS] Service initialized');
   }
@@ -228,6 +236,38 @@ class NotificationService {
     } catch (error) {
       console.error('[NOTIFICATIONS] Token error:', error);
       return null;
+    }
+  }
+
+  /**
+   * Ensure current push token is registered with backend preferences.
+   * Avoids redundant network calls if unchanged.
+   */
+  private async syncPushToken() {
+    if (this.syncingToken) return;
+    this.syncingToken = true;
+    try {
+      const token = await this.getNotificationToken();
+      if (!token) return;
+      const cachedPref = await getCachedPreferences();
+      const storedLocal = await AsyncStorage.getItem(NotificationService.LAST_PUSH_TOKEN_KEY);
+      const existing = cachedPref?.pushToken || storedLocal;
+      if (existing === token) {
+        if (__DEV__) console.log('[NOTIFICATIONS] Push token unchanged, skip update');
+        return;
+      }
+      // Persist locally first to avoid duplicate attempts if app closes mid-request
+      await AsyncStorage.setItem(NotificationService.LAST_PUSH_TOKEN_KEY, token);
+      try {
+        await prefUpdatePushToken(token);
+        console.log('[NOTIFICATIONS] Push token updated on backend');
+      } catch (e: any) {
+        console.warn('[NOTIFICATIONS] Failed to update push token remotely', e?.message);
+      }
+    } catch (e: any) {
+      console.warn('[NOTIFICATIONS] Token sync error', e?.message);
+    } finally {
+      this.syncingToken = false;
     }
   }
 
