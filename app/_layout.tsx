@@ -1,5 +1,6 @@
 import Toast from '@/components/Toast';
 import { ensureFirebaseAuthAsync, isFirebaseConfigComplete, logFirebaseGoogleAlignment } from '@/services/firebaseClient';
+import { notificationService } from '@/services/notifications';
 import { Feather } from '@expo/vector-icons';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -35,8 +36,12 @@ export default function RootLayout() {
   const router = useRouter();
   // Font loading temporarily disabled for debugging blank screen
 
-  // Defer preload to allow Firebase modules to register (RN 0.81 timing)
+  // Initialize notification service and Firebase
   React.useEffect(() => {
+    // Initialize notification service
+    notificationService.initialize();
+    
+    // Initialize Firebase auth
     (async () => {
       try {
         if (isFirebaseConfigComplete()) {
@@ -48,6 +53,11 @@ export default function RootLayout() {
         console.log('[AUTH_INIT] Layout init skipped', e?.message);
       }
     })();
+
+    // Cleanup function
+    return () => {
+      notificationService.cleanup();
+    };
   }, []);
 
   // Deep link & initial URL handling for khabarx://article/<id>
