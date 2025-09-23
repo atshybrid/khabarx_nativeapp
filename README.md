@@ -118,3 +118,49 @@ Use the provided PowerShell helper: `scripts/use-jdk17.ps1` to ensure a single c
 
 ---
 Keeping builds reproducible: ensure teammates share the same major JDK and Gradle wrapper (checked into version control). Avoid installing multiple vendor JDKs with different major versions unless needed.
+
+## Preferences: Language & Location Management
+
+The app maintains user/device preferences via the backend `/preferences` endpoints and a local cache. Two primary user-editable preferences now surface in the Account screen:
+
+### Location Preference
+1. Current value shown (human readable place name if available; otherwise coordinates).
+2. Change workflow:
+	- Tap "Change" → opens map picker (`/settings/location`).
+	- Select via map click, drag marker, search, or Use Current Location (GPS).
+	- Press Save in picker → stores a draft locally (AsyncStorage key: `profile_location_obj`) and returns to Account.
+	- Account screen shows an "Unsaved selection" banner; user taps Save to push to backend.
+3. GPS Refresh (no draft present): directly fetches device coords + reverse geocode and updates backend.
+4. Redundant Updates Avoided: If draft or GPS result matches backend (lat, lng, placeName), the update is skipped with a friendly inline message.
+5. Last Updated label reflects `prefs.updatedAt` (Server timestamp or fallback to client set time stored after update).
+
+### Language Preference
+1. Language card shows current language (native name prioritized).
+2. Change workflow:
+	- Tap "Change" → lazy-loads languages (cached or `/languages` endpoint) into a bottom sheet selector.
+	- Tap a language → calls `updateLanguage` (from `usePreferences` hook) which:
+	  - Sends selective intent payload to `/preferences/update`.
+	  - Refreshes first page of news/articles for the new language.
+	  - Persists selection (`selectedLanguage` AsyncStorage helper) for startup.
+3. Selecting the already active language short-circuits with a success inline message and **no** network call.
+4. Inline success/error messages appear in the Account screen (shared messaging area with location updates) and can be extended later to auto-dismiss.
+
+### Technical Notes
+| Concern | Implementation |
+|---------|----------------|
+| Selective updates | Intent-based payload builder only includes fields being changed (pushToken, languageId, or location). |
+| Local cache | Cached record saved under `preferences_cache_v1`; loaded first for fast UI hydration. |
+| Draft vs backend comparison | Epsilon comparison (1e-6) on lat/lng plus placeName/name equality to suppress redundant saves. |
+| News refresh on language change | Triggered automatically inside `usePreferences.updateLanguage` after successful update. |
+| AsyncStorage keys | `preferences_cache_v1`, `profile_location_obj`, `selectedLanguage`, push token & auth tokens separately. |
+| Error handling | Inline message area + console warnings; map picker has retry UI for WebView load failures. |
+
+### Extending Further (Future Ideas)
+* Add notification preference toggle (enable/disable push channel) using same intent model.
+* Auto-dismiss inline success messages after ~3 seconds.
+* Provide permission status badges (Location / Notifications) in Account screen.
+* Batch multi-field updates (language + location) via `updateMultiple` for fewer network round trips.
+* Track and display distance change when updating location (use haversine formula) for user context.
+
+---
+For questions about the preference system, see `services/preferences.ts` and `hooks/usePreferences.ts` for the authoritative logic.
