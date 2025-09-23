@@ -2,13 +2,13 @@ import { usePreferences } from '@/hooks/usePreferences';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function AccountScreen() {
   const router = useRouter();
   const { prefs, updateLocation, loading } = usePreferences();
-  const [localDraft, setLocalDraft] = React.useState<{ name: string; lat: number; lng: number } | null>(null);
+  const [rawDraft, setRawDraft] = React.useState<{ name: string; lat: number; lng: number } | null>(null);
   const [syncing, setSyncing] = React.useState(false);
   const [inlineMsg, setInlineMsg] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [gpsBusy, setGpsBusy] = React.useState(false);
@@ -19,34 +19,52 @@ export default function AccountScreen() {
       try {
         const raw = await AsyncStorage.getItem('profile_location_obj');
         if (!active) return;
-        if (raw) {
-          setLocalDraft(JSON.parse(raw));
-        }
+        if (raw) setRawDraft(JSON.parse(raw));
       } catch {}
     })();
     return () => { active = false; };
   }, []));
 
-  const currentDisplay = () => {
-    const loc: any = localDraft || prefs?.location;
+  // Determine if draft differs from stored backend value; if identical treat as no draft.
+  const backendLoc = prefs?.location || null;
+  const effectiveDraft = useMemo(() => {
+    if (!rawDraft) return null;
+    if (!backendLoc) return rawDraft;
+    const same = Math.abs((backendLoc.latitude) - rawDraft.lat) < 1e-6 &&
+                Math.abs((backendLoc.longitude) - rawDraft.lng) < 1e-6;
+    if (same && (backendLoc.placeName) === rawDraft.name) return null;
+    return rawDraft;
+  }, [rawDraft, backendLoc]);
+
+  const currentDisplay = useCallback(() => {
+    const loc: any = effectiveDraft || backendLoc;
     if (!loc) return 'Not set';
+    const lat = loc.latitude;
+    const lng = loc.longitude;
     const meta: string[] = [];
-    if (loc.latitude != null && loc.longitude != null) meta.push(`${Number(loc.latitude).toFixed(3)}, ${Number(loc.longitude).toFixed(3)}`);
-    else if (loc.lat != null && loc.lng != null) meta.push(`${Number(loc.lat).toFixed(3)}, ${Number(loc.lng).toFixed(3)}`);
+    if (lat != null && lng != null) meta.push(`${Number(lat).toFixed(3)}, ${Number(lng).toFixed(3)}`);
     return loc.placeName || loc.name || meta.join(' ');
-  };
+  }, [effectiveDraft, backendLoc]);
 
   const saveDraftToPreferences = async () => {
-    if (!localDraft) return;
+    if (!effectiveDraft) return;
+    const currentLat = backendLoc?.latitude;
+    const currentLng = backendLoc?.longitude;
+    const same = backendLoc && currentLat != null && currentLng != null && Math.abs(currentLat - effectiveDraft.lat) < 1e-6 && Math.abs(currentLng - effectiveDraft.lng) < 1e-6 && (backendLoc.placeName) === effectiveDraft.name;
+    if (same) {
+      setInlineMsg({ type: 'success', text: 'No change – already up to date.' });
+      return;
+    }
     setSyncing(true);
     try {
       await updateLocation({
-        latitude: localDraft.lat,
-        longitude: localDraft.lng,
-        placeName: localDraft.name,
+        latitude: effectiveDraft.lat,
+        longitude: effectiveDraft.lng,
+        placeName: effectiveDraft.name,
         source: 'manual-map',
       });
-      setLocalDraft(null);
+      setRawDraft(null);
+      await AsyncStorage.removeItem('profile_location_obj');
       setInlineMsg({ type: 'success', text: 'Location updated.' });
     } catch (e: any) {
       setInlineMsg({ type: 'error', text: e?.message || 'Failed to update location.' });
@@ -72,6 +90,13 @@ export default function AccountScreen() {
         const first = rev[0];
         if (first) placeName = [first.name, first.subregion, first.region].filter(Boolean).join(', ');
       } catch {}
+      // Skip if identical to backend to avoid redundant write
+      const currentLat = backendLoc?.latitude;
+      const currentLng = backendLoc?.longitude;
+      if (backendLoc && currentLat != null && currentLng != null && Math.abs(currentLat - latitude) < 1e-6 && Math.abs(currentLng - longitude) < 1e-6) {
+        setInlineMsg({ type: 'success', text: 'Location already current.' });
+        return;
+      }
       await updateLocation({ latitude, longitude, placeName, source: 'gps-refresh' });
       setInlineMsg({ type: 'success', text: 'Location refreshed from GPS.' });
     } catch (e: any) {
@@ -92,7 +117,7 @@ export default function AccountScreen() {
         <Text style={styles.value}>{currentDisplay()}</Text>
         <Text style={styles.metaLabel}>{lastUpdatedLabel}</Text>
         {loading && <ActivityIndicator style={{ marginTop: 8 }} />}
-        {localDraft && (<Text style={styles.draftNote}>Unsaved selection. Press Save to apply.</Text>)}
+  {effectiveDraft && (<Text style={styles.draftNote}>Unsaved selection. Press Save to apply.</Text>)}
         {inlineMsg && (
           <View style={[styles.inlineMsg, inlineMsg.type === 'error' ? styles.inlineErr : styles.inlineOk]}>
             <Text style={styles.inlineMsgTxt}>{inlineMsg.text}</Text>
@@ -102,12 +127,12 @@ export default function AccountScreen() {
           <TouchableOpacity style={styles.smallBtn} onPress={() => router.push('/settings/location')}>
             <Text style={styles.smallBtnTxt}>Change</Text>
           </TouchableOpacity>
-          {localDraft && (
+          {effectiveDraft && (
             <TouchableOpacity style={[styles.smallBtn, styles.saveEmph]} onPress={saveDraftToPreferences} disabled={syncing}>
               <Text style={styles.smallBtnTxt}>{syncing ? 'Saving…' : 'Save'}</Text>
             </TouchableOpacity>
           )}
-          {!localDraft && (
+          {!effectiveDraft && (
             <TouchableOpacity style={[styles.smallBtn, styles.gpsBtn]} onPress={refreshViaGPS} disabled={gpsBusy}>
               <Text style={styles.smallBtnTxt}>{gpsBusy ? 'GPS…' : 'Refresh GPS'}</Text>
             </TouchableOpacity>
