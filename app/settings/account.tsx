@@ -1,4 +1,6 @@
 import { usePreferences } from '@/hooks/usePreferences';
+import { getLanguages } from '@/services/api';
+import type { Language } from '@/constants/languages';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -7,11 +9,17 @@ import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'rea
 
 export default function AccountScreen() {
   const router = useRouter();
-  const { prefs, updateLocation, loading } = usePreferences();
+  const { prefs, updateLocation, updateLanguage, loading } = usePreferences();
   const [rawDraft, setRawDraft] = React.useState<{ name: string; lat: number; lng: number } | null>(null);
   const [syncing, setSyncing] = React.useState(false);
   const [inlineMsg, setInlineMsg] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [gpsBusy, setGpsBusy] = React.useState(false);
+  // Language picker state
+  const [langSheetOpen, setLangSheetOpen] = React.useState(false);
+  const [languageList, setLanguageList] = React.useState<Language[] | null>(null);
+  const [langLoading, setLangLoading] = React.useState(false);
+  const [langError, setLangError] = React.useState<string | null>(null);
+  const [langUpdating, setLangUpdating] = React.useState(false);
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -45,6 +53,46 @@ export default function AccountScreen() {
     if (lat != null && lng != null) meta.push(`${Number(lat).toFixed(3)}, ${Number(lng).toFixed(3)}`);
     return loc.placeName || loc.name || meta.join(' ');
   }, [effectiveDraft, backendLoc]);
+
+  // Load languages when sheet first opened
+  const ensureLanguages = async () => {
+    if (languageList || langLoading) { setLangSheetOpen(true); return; }
+    setLangLoading(true); setLangError(null); setLangSheetOpen(true);
+    try {
+      const list = await getLanguages();
+      setLanguageList(list);
+    } catch (e: any) {
+      setLangError(e?.message || 'Failed to load languages');
+    } finally {
+      setLangLoading(false);
+    }
+  };
+
+  const currentLanguage = React.useMemo(() => {
+    if (!prefs?.languageId || !languageList) return languageList?.find(l => l.id === prefs?.languageId) || null;
+    return languageList.find(l => l.id === prefs.languageId) || null;
+  }, [prefs?.languageId, languageList]);
+
+  const onSelectLanguage = async (lang: Language) => {
+    if (langUpdating) return;
+    if (prefs?.languageId === lang.id) {
+      setInlineMsg({ type: 'success', text: 'Language already selected.' });
+      setLangSheetOpen(false);
+      return;
+    }
+    setLangUpdating(true); setInlineMsg(null);
+    try {
+      const res = await updateLanguage(lang.id);
+      if (res) {
+        setInlineMsg({ type: 'success', text: `Language set to ${lang.nativeName || lang.name}.` });
+        setLangSheetOpen(false);
+      }
+    } catch (e: any) {
+      setInlineMsg({ type: 'error', text: e?.message || 'Failed to update language.' });
+    } finally {
+      setLangUpdating(false);
+    }
+  };
 
   const saveDraftToPreferences = async () => {
     if (!effectiveDraft) return;
@@ -139,6 +187,45 @@ export default function AccountScreen() {
           )}
         </View>
       </View>
+      {/* Language Preference Card */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Language</Text>
+        <Text style={styles.value}>{currentLanguage?.nativeName || currentLanguage?.name || prefs?.languageId || 'Not set'}</Text>
+        <View style={styles.row}>
+          <TouchableOpacity style={styles.smallBtn} onPress={ensureLanguages}>
+            <Text style={styles.smallBtnTxt}>Change</Text>
+          </TouchableOpacity>
+          {langUpdating && <ActivityIndicator />}
+        </View>
+      </View>
+      {langSheetOpen && (
+        <View style={styles.sheetOverlay}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>Select Language</Text>
+              <TouchableOpacity onPress={() => setLangSheetOpen(false)}><Text style={styles.closeBtnTxt}>Close</Text></TouchableOpacity>
+            </View>
+            {langLoading && <ActivityIndicator style={{ marginVertical: 12 }} />}
+            {langError && (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{langError}</Text>
+                <TouchableOpacity onPress={() => { setLanguageList(null); ensureLanguages(); }} style={styles.retryBtn}><Text style={styles.retryTxt}>Retry</Text></TouchableOpacity>
+              </View>
+            )}
+            {!langLoading && !langError && (
+              <View style={styles.langList}>
+                {languageList?.map(l => (
+                  <TouchableOpacity key={l.id} style={styles.langItem} disabled={langUpdating} onPress={() => onSelectLanguage(l)}>
+                    <View style={[styles.langColorDot, { backgroundColor: l.color }]} />
+                    <Text style={styles.langName}>{l.nativeName} <Text style={styles.langSub}>{l.name}</Text></Text>
+                    {prefs?.languageId === l.id && <Text style={styles.currentBadge}>Current</Text>}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
+      )}
       <TouchableOpacity style={styles.button} onPress={() => router.push('/settings/account-debug')}>
         <Text style={styles.buttonText}>Test: Clear ALL App Storage</Text>
       </TouchableOpacity>
@@ -189,4 +276,20 @@ const styles = StyleSheet.create({
   },
   buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16, textAlign: 'center' },
   inlineMsgTxt: { fontSize: 12, color: '#111827' },
+  /* Language sheet styles */
+  sheetOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#fff', paddingTop: 12, paddingHorizontal: 16, paddingBottom: 28, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: '70%' },
+  sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  sheetTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  closeBtnTxt: { color: '#2563eb', fontWeight: '600' },
+  errorBox: { backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', padding: 12, borderRadius: 8, marginVertical: 8 },
+  errorText: { color: '#b91c1c', fontSize: 13, marginBottom: 6 },
+  retryBtn: { backgroundColor: '#2563eb', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, alignSelf: 'flex-start' },
+  retryTxt: { color: '#fff', fontWeight: '600' },
+  langList: { marginTop: 4 },
+  langItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#e5e7eb' },
+  langColorDot: { width: 14, height: 14, borderRadius: 7, marginRight: 10 },
+  langName: { flex: 1, fontSize: 14, color: '#111827', fontWeight: '500' },
+  langSub: { fontSize: 12, color: '#6b7280' },
+  currentBadge: { fontSize: 11, color: '#059669', fontWeight: '700' },
 });
