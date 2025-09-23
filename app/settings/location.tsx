@@ -2,7 +2,7 @@ import { Colors } from '@/constants/Colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
-import React, { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 
@@ -12,6 +12,8 @@ export default function LocationPickerScreen() {
   const webRef = useRef<WebView>(null);
   const [selected, setSelected] = useState<PickedLocation>(null);
   const [loadingGPS, setLoadingGPS] = useState(false);
+  const [webLoading, setWebLoading] = useState(true);
+  const [webError, setWebError] = useState<string | null>(null);
 
   const html = useMemo(() => `<!DOCTYPE html>
   <html>
@@ -120,6 +122,22 @@ export default function LocationPickerScreen() {
     } catch {}
   };
 
+  const handleWebLoad = () => {
+    setWebLoading(false);
+  };
+
+  const handleWebError = () => {
+    setWebLoading(false);
+    setWebError('Failed to load map. Check your connection and retry.');
+  };
+
+  const retryWeb = () => {
+    setWebError(null);
+    setWebLoading(true);
+    // Force reload by changing key (simpler than injecting script)
+    webRef.current?.reload();
+  };
+
   const sendCenterToWeb = (lat: number, lng: number) => {
     const script = `try{ if (window.map && window.marker) { window.map.setView([${lat}, ${lng}], 14); window.marker.setLatLng([${lat}, ${lng}]); } }catch(e){}`;
     webRef.current?.injectJavaScript(script);
@@ -172,7 +190,31 @@ export default function LocationPickerScreen() {
         </View>
       </View>
       <View style={{ flex: 1 }}>
-        <WebView ref={webRef} source={{ html }} onMessage={onMessage} originWhitelist={["*"]} javaScriptEnabled domStorageEnabled />
+        {webError ? (
+          <View style={styles.errorWrap}>
+            <Text style={styles.errorText}>{webError}</Text>
+            <Pressable onPress={retryWeb} style={styles.retryBtn}><Text style={styles.retryTxt}>Retry</Text></Pressable>
+          </View>
+        ) : (
+          <>
+            <WebView
+              ref={webRef}
+              source={{ html }}
+              onMessage={onMessage}
+              originWhitelist={["*"]}
+              javaScriptEnabled
+              domStorageEnabled
+              onLoadEnd={handleWebLoad}
+              onError={handleWebError}
+            />
+            {webLoading && (
+              <View style={styles.loadingOverlay}>
+                <ActivityIndicator size="large" color={Colors.light.secondary} />
+                <Text style={styles.loadingTxt}>Loading map…</Text>
+              </View>
+            )}
+          </>
+        )}
         <View style={styles.floatingBar}>
           <Pressable onPress={useCurrentLocation} style={styles.gpsBtn}>
             {loadingGPS ? <ActivityIndicator color="#fff" /> : <Text style={styles.gpsTxt}>Use current location</Text>}
@@ -199,4 +241,10 @@ const styles = StyleSheet.create({
   gpsTxt: { color: '#fff', fontWeight: '700' },
   selWrap: { flex: 1, backgroundColor: '#fff', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12, borderWidth: 1, borderColor: '#e5e7eb' },
   selTxt: { color: '#333' },
+  loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.85)', justifyContent: 'center', alignItems: 'center' },
+  loadingTxt: { marginTop: 12, color: '#555', fontWeight: '600' },
+  errorWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  errorText: { color: '#b91c1c', fontSize: 14, textAlign: 'center', marginBottom: 16 },
+  retryBtn: { backgroundColor: Colors.light.secondary, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  retryTxt: { color: '#fff', fontWeight: '700' },
 });
