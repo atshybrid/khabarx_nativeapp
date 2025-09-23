@@ -2,15 +2,19 @@ import AnimatedArticle from '@/components/AnimatedArticle';
 import { ArticleSkeleton } from '@/components/ui/ArticleSkeleton';
 import { useCategory } from '@/context/CategoryContext';
 // import { sampleArticles } from '@/data/sample-articles';
+import { usePreferences } from '@/hooks/usePreferences';
 import { getNews } from '@/services/api';
 import type { Article } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import LottieView from 'lottie-react-native';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { useSharedValue, withSpring } from 'react-native-reanimated';
 
 const NewsScreen = () => {
+  const { prefs } = usePreferences();
+  const currentLanguageId = prefs?.languageId; // triggers refetch when language changes
+
   useEffect(() => {
     console.log('[NAV] ArticleScreen (news) mounted');
   }, []);
@@ -47,9 +51,19 @@ const NewsScreen = () => {
       setLoading(true);
       setError(null);
       try {
-        const stored = await AsyncStorage.getItem('selectedLanguage');
-        const lang = stored ? JSON.parse(stored)?.code ?? 'en' : 'en';
-        const list = await getNews(lang, filterKey || undefined);
+        // Resolve language: prefer prefs.languageId -> map to code via stored object if available
+        let langCode = 'en';
+        try {
+          const stored = await AsyncStorage.getItem('selectedLanguage');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            // When updating language we store only { id }, so fallback: if no code present but prefs.languageId exists
+            if (parsed?.code) langCode = parsed.code; else if (prefs?.languageId) langCode = prefs.languageId; // assume backend uses code as id for now
+          } else if (prefs?.languageId) {
+            langCode = prefs.languageId;
+          }
+        } catch {}
+        const list = await getNews(langCode, filterKey || undefined);
         const safe = Array.isArray(list) ? list : [];
         // If API doesn't filter by category, filter client-side as a fallback
         let filtered = filterKey
@@ -71,7 +85,9 @@ const NewsScreen = () => {
         setLoading(false);
       }
     })();
-  }, [selectedCategory]);
+  // currentLanguageId already derived from prefs; adding prefs directly unnecessary.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory, currentLanguageId]);
 
   const handleSwipeUp = () => {
   if (activeIndex < articles.length - 1) {
