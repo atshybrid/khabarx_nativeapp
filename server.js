@@ -3,6 +3,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const admin = require('firebase-admin');
 
 const app = express();
 app.use(bodyParser.json());
@@ -11,6 +12,8 @@ const JWT_SECRET = 'very-secret-key-change-me';
 const REFRESH_STORE = {}; // in-memory map refreshToken -> { deviceId, expiresAt }
 const DEV_STORE = {}; // deviceId -> { languageId }
 const COMMENTS = {}; // articleId -> [ { id, user, text, createdAt, likes, replies: [] } ]
+const USERS = {}; // userId -> { id, name, email, phoneNumber, userType, createdAt }
+const MPIN_STORE = {}; // phoneNumber -> { mpin, attempts, lockedUntil, userId }
 
 app.get('/languages', (req, res) => {
   res.json([{ id: 'te', name: 'Telugu' }, { id: 'en', name: 'English' }, { id: 'hi', name: 'Hindi' }]);

@@ -1,8 +1,17 @@
-
+// Metro configuration: start from Expo's defaults and add minimal overrides.
 const { getDefaultConfig } = require('expo/metro-config');
-
-// Note: no custom exclusion list required. We keep Metro defaults.
-
+let exclusionList;
+try {
+  // Preferred modern helper
+  exclusionList = require('metro-config/src/defaults/exclusionList');
+} catch {
+  try {
+    // Legacy name
+    exclusionList = require('metro-config/src/defaults/blacklist');
+  } catch {
+    exclusionList = null; // If still unavailable, we proceed without blockList.
+  }
+}
 const config = getDefaultConfig(__dirname);
 
 // Work around Windows ENOENT when Metro tries to symbolicate Hermes InternalBytecode.js frames.
@@ -41,9 +50,16 @@ config.server = {
   },
 };
 
-// Allow expo-image-picker to be bundled (required in development build with native module present).
-config.resolver = {
-  ...(config.resolver || {}),
-};
+// Exclude backup / stale dependency trees if exclusionList helper resolved.
+if (exclusionList) {
+  config.resolver = {
+    ...(config.resolver || {}),
+    blockList: exclusionList([
+      /node_modules\.old\/.*/,
+      /\.cache\/duplicate-modules\/.*/,
+      /\/__trash__\//,
+    ]),
+  };
+}
 
 module.exports = config;

@@ -4,7 +4,7 @@ import { clearTokens, isExpired, loadTokens, refreshTokens, Tokens } from '@/ser
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import * as ExpoSplashScreen from 'expo-splash-screen';
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { Alert, View } from 'react-native';
 
 export default function SplashScreen() {
@@ -55,6 +55,13 @@ export default function SplashScreen() {
         };
 
         if (tokens) {
+          // If tokens exist, ensure guest flag reflects actual role
+          try {
+            const role = tokens.user?.role || (await AsyncStorage.getItem('profile_role'));
+            if (role && role !== 'Guest') {
+              // legacy guest flag removal: no-op
+            }
+          } catch {}
           // Authenticated: ensure the API is reachable for shortnews BEFORE hiding splash
           console.log('[BOOT] Authenticated → probing /shortnews before navigating');
           try {
@@ -64,7 +71,7 @@ export default function SplashScreen() {
             console.log('[BOOT] Shortnews reachable');
             await ensureMinSplash();
             try { await ExpoSplashScreen.hideAsync(); } catch {}
-            router.replace('/news');
+            router.replace('/(tabs)/news');
             return;
           } catch (e: any) {
             console.warn('[BOOT] Shortnews probe failed, keeping splash', e?.message || e);
@@ -73,10 +80,28 @@ export default function SplashScreen() {
             return;
           }
         }
+        // No tokens case: check if language already chosen
+        let storedLanguage: any = null;
+        try {
+          const langRaw = await AsyncStorage.getItem('selectedLanguage');
+          if (langRaw) storedLanguage = JSON.parse(langRaw);
+        } catch {}
+        if (storedLanguage?.id || storedLanguage?.code) {
+          // Language chosen but no auth tokens: allow anonymous reading (no guest token).
+          console.log('[BOOT] Language selected, no auth tokens → proceed anonymous to news');
+          try {
+            const code = storedLanguage.code || 'en';
+            // Best-effort warmup (non-fatal)
+            getNews(code).catch(()=>{});
+          } catch {}
+          await ensureMinSplash();
+            try { await ExpoSplashScreen.hideAsync(); } catch {}
+            router.replace('/(tabs)/news');
+            return;
+        }
 
-        // No tokens: go to Language. It will fetch languages and show skeleton.
-        // Optionally warm up languages in background but do not block navigation.
-        console.log('[BOOT] No tokens → navigating to /language');
+        // No language stored: go to language selection first
+        console.log('[BOOT] No tokens & no language → /language');
         getLanguages().catch((e) => console.log('[BOOT] Warmup getLanguages failed (ignored)', e?.message || e));
         await ensureMinSplash();
         try { await ExpoSplashScreen.hideAsync(); } catch {}

@@ -1,7 +1,17 @@
 {
-  "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowJs": false,
+    "noEmit": true,
+    "jsx": "react-jsx",
     "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": "./",
     "paths": {
       "@/*": [
         "./*"
@@ -9,9 +19,30 @@
     }
   },
   "include": [
-    "**/*.ts",
-    "**/*.tsx",
+    "app",
+    "components",
+    "services",
+    "context",
+    "hooks",
+    "config",
+    "constants",
+    "icons",
+    "data",
+    "types",
+    "scripts/**/*.ts",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
-  ]
+  ],
+  "exclude": [
+    "node_modules",
+    "node_modules.old",
+    "node_modules_broken*",
+    "build",
+    "android",
+    "ios",
+    "*.config.js",
+    "babel.config.js",
+    "metro.config.js"
+  ],
+  "extends": "expo/tsconfig.base"
 }

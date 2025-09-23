@@ -2,6 +2,8 @@ import BottomSheet from '@/components/ui/BottomSheet';
 import { Colors } from '@/constants/Colors';
 import { LANGUAGES, type Language } from '@/constants/languages';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
+import { logout } from '@/services/api';
+import { softLogout } from '@/services/auth';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -14,7 +16,7 @@ export default function AccountScreen() {
   const { setTabBarVisible } = useTabBarVisibility();
   const [loggedIn, setLoggedIn] = useState(false);
   const [name, setName] = useState('');
-  const [role, setRole] = useState('Guest');
+  const [role, setRole] = useState('');
   const [location, setLocation] = useState('');
   const [language, setLanguage] = useState<Language | null>(null);
   const [notify, setNotify] = useState(true);
@@ -34,7 +36,6 @@ export default function AccountScreen() {
       if (savedLang) {
         try {
           const parsed = JSON.parse(savedLang);
-          // Support legacy string storage like "en"
           if (parsed && typeof parsed === 'object' && parsed.code) setLanguage(parsed as Language);
           else if (typeof parsed === 'string') setLanguage(LANGUAGES.find(l => l.code === parsed) || LANGUAGES[0]);
         } catch {
@@ -45,18 +46,16 @@ export default function AccountScreen() {
       }
       setNotify((await AsyncStorage.getItem('notify')) !== '0');
       setAutoplay((await AsyncStorage.getItem('autoplay')) === '1');
-  const savedName = await AsyncStorage.getItem('profile_name');
-  if (savedName) setName(savedName);
-  const savedRole = await AsyncStorage.getItem('profile_role');
-  if (savedRole) setRole(savedRole);
-      // Prefer structured object if present
+      const savedName = await AsyncStorage.getItem('profile_name');
+      if (savedName) setName(savedName);
+      const savedRole = await AsyncStorage.getItem('profile_role');
+      if (savedRole) setRole(savedRole);
       const savedLocObj = await AsyncStorage.getItem('profile_location_obj');
       if (savedLocObj) {
         try {
           const obj = JSON.parse(savedLocObj);
           setLocation(obj?.name || '');
         } catch {
-          // fall back to simple string
           const savedLoc = await AsyncStorage.getItem('profile_location');
           if (savedLoc) setLocation(savedLoc);
         }
@@ -90,8 +89,17 @@ export default function AccountScreen() {
 
   const gotoLogin = () => router.push('/auth/login');
   const doLogout = async () => {
-    await AsyncStorage.removeItem('jwt');
-    setLoggedIn(false);
+    try {
+      const jwt = await AsyncStorage.getItem('jwt');
+      const mobile = await AsyncStorage.getItem('profile_mobile') || await AsyncStorage.getItem('last_login_mobile') || '';
+        if (jwt) { try { await logout(); } catch (e:any) { console.warn('[UI] remote logout failed (continuing)', e?.message); } }
+  // legacy is_guest_session flag no longer in use
+      await softLogout([], mobile || undefined);
+      setLoggedIn(false);
+      // Keep role if present but tokens gone; ensures fast MPIN flow next time
+    } catch (e) {
+      try { console.warn('[UI] logout failed locally', (e as any)?.message); } catch {}
+    }
   };
 
   const changeLocation = () => router.push({ pathname: '/settings/location' as any });
@@ -113,7 +121,7 @@ export default function AccountScreen() {
             <Text style={styles.avatarText}>{(name || 'G').charAt(0).toUpperCase()}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.displayName}>{loggedIn ? name || 'User' : 'Guest User'}</Text>
+            <Text style={styles.displayName}>{loggedIn ? name || 'User' : 'Reader'}</Text>
             <Text style={styles.subtleText}>{loggedIn ? (role || 'Member') : 'Not signed in'}</Text>
           </View>
           {loggedIn ? (
@@ -122,16 +130,16 @@ export default function AccountScreen() {
             </Pressable>
           ) : (
             <Pressable onPress={gotoLogin} style={[styles.button, styles.primary, { width: 100 }]}>
-              <Text style={[styles.buttonText, { color: '#fff' }]}>Login</Text>
+              <Text style={[styles.buttonText, { color: '#fff' }]}>Sign In</Text>
             </Pressable>
           )}
         </View>
         {!loggedIn && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Welcome</Text>
-            <Text style={styles.helper}>Login to manage your profile and preferences</Text>
+            <Text style={styles.helper}>Sign in or register as a Citizen Reporter to manage your profile and post.</Text>
             <Pressable onPress={gotoLogin} style={[styles.button, styles.primary, { marginTop: 12 }]}>
-              <Text style={[styles.buttonText, { color: '#fff' }]}>Login / Register</Text>
+              <Text style={[styles.buttonText, { color: '#fff' }]}>Sign In / Register</Text>
             </Pressable>
           </View>
         )}

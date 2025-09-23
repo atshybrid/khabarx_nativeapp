@@ -1,17 +1,39 @@
 
-import { useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, ScrollView } from 'react-native';
-import ArticleDetailCard from '@/components/ui/ArticleDetailCard';
-import { Article } from '@/types';
+import ArticlePage from '@/components/ArticlePage';
 import { getArticleById } from '@/services/api';
+import { Article } from '@/types';
+import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, BackHandler, Platform, StyleSheet, Text, View } from 'react-native';
 
 
 export default function ArticleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Handle Android hardware back button
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => {
+        // Navigate back to news tab safely
+        if (router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace('/(tabs)/news');
+        }
+        return true; // Prevent default behavior
+      };
+
+      if (Platform.OS === 'android') {
+        const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+        return () => subscription.remove();
+      }
+    }, [router])
+  );
 
   useEffect(() => {
     if (id) {
@@ -52,22 +74,7 @@ export default function ArticleDetailScreen() {
     );
   }
 
-  return (
-    <ScrollView style={styles.container}>
-      <ArticleDetailCard
-        title={article.title}
-        body={article.body}
-        imageUrl={article.image}
-        authorName={article.author.name}
-        authorAvatar={article.author.avatar}
-        date={new Date(article.createdAt).toLocaleDateString()}
-        onAuthorPress={() => {
-          // Implement author press navigation if needed
-          console.log(`Navigate to author screen for ID: ${article.author.id}`);
-        }}
-      />
-    </ScrollView>
-  );
+  return <ArticlePage article={article} index={0} totalArticles={1} />;
 }
 
 const styles = StyleSheet.create({

@@ -2,10 +2,11 @@ import { Colors } from '@/constants/Colors';
 import { useCategorySheet } from '@/context/CategorySheetContext';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { PostArticleIcon } from '@/icons';
+import { checkPostArticleAccess } from '@/services/auth';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { usePathname, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AutoHideTabBar(props: BottomTabBarProps) {
@@ -71,9 +72,43 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
   }, [pillLeft, onExplore]);
 
   const onContainerLayout = (e: any) => setContainerWidth(e.nativeEvent.layout.width);
-  const goToPostArticle = () => {
-    // Prefer path-based navigation to avoid name mismatches when the route is hidden from tabs
-    router.push('/explore');
+  const goToPostArticle = async () => {
+    // Comprehensive auth check before allowing post article access
+    try {
+      const authCheck = await checkPostArticleAccess();
+      
+      if (!authCheck.canAccess) {
+        // For guest users or expired tokens, direct navigate to login
+        if (authCheck.isGuest || !authCheck.hasToken) {
+          router.push('/auth/login?from=post');
+          return;
+        }
+        
+        // For authenticated users without proper role, show alert with options
+        Alert.alert(
+          'Access Denied',
+          authCheck.reason || 'You need to be a Citizen Reporter to create posts.',
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel'
+            },
+            {
+              text: 'Go to Login',
+              onPress: () => router.push('/auth/login?from=post')
+            }
+          ]
+        );
+        return;
+      }
+      
+      // All checks passed - navigate to post article screen
+      router.push('/explore');
+    } catch (error) {
+      console.warn('[FAB] goToPostArticle auth check failed:', error);
+      // On error, default to login
+      router.push('/auth/login');
+    }
   };
 
   // Debounce map for tab presses

@@ -3,7 +3,17 @@ module.exports = function (api) {
   return {
     presets: ['babel-preset-expo'],
     plugins: [
-      // Reanimated plugin moved; use react-native-worklets/plugin and keep it last
+      // Expo Router auto import / file-based routing
+      'expo-router/babel',
+      [
+        'module-resolver',
+        {
+          root: ['.'],
+          alias: { '@': './' },
+          extensions: ['.ts', '.tsx', '.js', '.jsx', '.json'],
+        },
+      ],
+      // Keep worklets plugin last
       'react-native-worklets/plugin',
     ],
   };

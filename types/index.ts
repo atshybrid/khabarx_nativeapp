@@ -25,4 +25,8 @@ export interface Article {
   // Optional metadata used by sample data
   language?: string;
   tags?: string[];
+  // SEO / canonical metadata
+  canonicalUrl?: string;
+  metaTitle?: string;
+  metaDescription?: string;
 }

@@ -1,7 +1,10 @@
 
 import { LANGUAGES, Language } from '@/constants/languages';
+// Session semantics simplified: no more automatic guest bootstrap. Reading news is anonymous.
+// Authenticated actions require a real jwt issued via MPIN / registration flows.
 import { Article } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { loadTokens } from './auth';
 import { HttpError, getBaseUrl, request } from './http';
@@ -222,8 +225,14 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
       const publisherName = jsonLd?.publisher?.name || a.publisher?.name;
       const firstImage = imagesArr?.[0] || 'https://picsum.photos/800/1200';
       const videoUrl: string | undefined = primaryVideo;
-      const authorName = a.author?.name || a.authorName || jsonLd?.author?.name || '';
-      const authorAvatar = a.author?.avatar || a.authorAvatar || publisherLogo || 'https://i.pravatar.cc/100';
+  // Extended author fields (backend may send either nested author.* or flat fields)
+  const rawAuthor = (a as any).author || {};
+  const authorFullName = (a as any).authorFullName || rawAuthor.fullName || (a as any).fullName;
+  const authorProfilePhoto = (a as any).authorProfilePhotoUrl || rawAuthor.profilePhotoUrl || (a as any).profilePhotoUrl;
+  const authorRoleName = (a as any).authorRoleName || rawAuthor.roleName || (a as any).roleName;
+  const authorPlaceName = (a as any).authorPlaceName || rawAuthor.placeName || (a as any).placeName;
+  const authorName = authorFullName || rawAuthor.name || (a as any).authorName || jsonLd?.author?.name || '';
+  const authorAvatar = authorProfilePhoto || rawAuthor.avatar || (a as any).authorAvatar || publisherLogo || 'https://i.pravatar.cc/100';
       const articleObj: Article = {
         id: String(a.id ?? a._id ?? Date.now()),
         title: a.title ?? jsonLd?.headline ?? 'Untitled',
@@ -233,10 +242,14 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
         images: imagesArr,
         videoUrl,
         author: {
-          id: a.authorId || a.author?.id,
+          id: a.authorId || rawAuthor.id,
           name: authorName || '',
           avatar: authorAvatar,
-        },
+          fullName: authorFullName || authorName || '',
+          profilePhotoUrl: authorProfilePhoto || authorAvatar,
+          roleName: authorRoleName || null,
+          placeName: authorPlaceName || null,
+        } as any,
         publisherName,
         publisherLogo,
         category: a.category?.name || a.categoryName || a.category || 'General',
@@ -247,6 +260,9 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
         comments: a.comments ?? 0,
         language: a.languageCode || a.inLanguage || a.language,
         tags: a.tags ?? [],
+        canonicalUrl: (a as any).canonicalUrl || (a.seo?.canonical) || jsonLd?.mainEntityOfPage?.['@id'] || jsonLd?.url || undefined,
+        metaTitle: (a as any).metaTitle || a.seo?.metaTitle || jsonLd?.headline || undefined,
+        metaDescription: (a as any).metaDescription || a.seo?.metaDescription || jsonLd?.description || undefined,
       } as Article;
       if (DEBUG_API) {
         (articleObj as any)._mediaDebug = {
@@ -422,6 +438,38 @@ export async function transliterateText(content: string, targetLangCode: string)
   return { detected: detected === 'roman' ? 'roman' : 'other', result, candidates: [result] };
 }
 
+// ---------------- Reactions (Like / Dislike) ----------------
+// Backend contract:
+// GET /reactions/shortnews/:id -> { success, data: { contentType, contentId, reaction, counts: { likes, dislikes } } }
+// PUT /reactions  body: { articleId, reaction } reaction in [ 'LIKE','DISLIKE','NONE' ]
+// NOTE: For removal we send reaction:'NONE'. We expose small helpers plus a toggle.
+export interface ReactionGetResponse {
+  success?: boolean;
+  data: {
+    contentType: string;
+    contentId: string;
+    reaction: 'LIKE' | 'DISLIKE' | 'NONE';
+    counts: { likes: number; dislikes: number };
+  };
+}
+
+
+export async function getArticleReaction(articleId: string): Promise<ReactionGetResponse['data']> {
+  const json = await request<ReactionGetResponse>(`/reactions/shortnews/${articleId}`, { method: 'GET' });
+  return (json as any).data;
+}
+
+export async function updateArticleReaction(articleId: string, reaction: 'LIKE' | 'DISLIKE' | 'NONE'): Promise<ReactionGetResponse['data']> {
+  const json = await request<ReactionGetResponse>(`/reactions`, { method: 'PUT', body: { articleId, reaction } });
+  return (json as any).data;
+}
+
+// Convenience: given current reaction + desired (LIKE/DISLIKE) returns new reaction respecting toggle-to-none.
+export function computeNextReaction(current: 'LIKE' | 'DISLIKE' | 'NONE', wanted: 'LIKE' | 'DISLIKE'): 'LIKE' | 'DISLIKE' | 'NONE' {
+  if (current === wanted) return 'NONE';
+  return wanted;
+}
+
 // Languages API with caching (prefer live, flexible shapes)
 const LANG_CACHE_KEY = 'cached_languages';
 function pickColor(code: string): string {
@@ -483,6 +531,19 @@ export type GuestAuthResponse = {
   raw?: any;
 };
 
+// Central user normalization to guarantee downstream fields (id, role, languageId)
+export function extractUser(payload: any, fallbackLanguageId?: string): { id: string; role: string; languageId?: string; [k: string]: any } {
+  let user = payload?.user || payload?.profile || null;
+  if (!user) {
+    const fallbackId = payload?.userId || payload?.id || payload?.uid || 'guest';
+    user = { id: fallbackId };
+  }
+  if (!user.id) user.id = user.userId || payload?.userId || payload?.id || 'guest';
+  user.role = user.role || payload?.role || 'Guest';
+  user.languageId = user.languageId || payload?.languageId || payload?.langId || fallbackLanguageId;
+  return user;
+}
+
 // -------------------
 // Auth endpoints (MPIN / Google / Create Citizen Reporter)
 // -------------------
@@ -518,14 +579,93 @@ export async function getMpinStatus(mobileNumber: string): Promise<MpinStatus> {
   return res;
 }
 
-export async function loginWithMpin(payload: { mobileNumber: string; mpin: string }): Promise<AuthResponse['data']> {
-  const res = await request<AuthResponse>('/auth/login', { method: 'POST', body: payload, noAuth: true });
-  return res.data;
+// --- MPIN Reset Flow (request OTP -> verify OTP -> set new MPIN) ---
+// Backend sample cURL provided:
+// POST /api/v1/auth/request-otp  { mobileNumber }
+// POST /api/v1/auth/verify-otp { id, otp }
+// POST /api/v1/auth/set-mpin { id, mobileNumber, mpin }
+
+export interface RequestOtpForMpinResetResponse {
+  success: boolean;
+  id: string; // correlation id for subsequent verify & set-mpin
+  isRegistered?: boolean;
+  notification?: { successCount: number; failureCount: number };
+}
+export async function requestOtpForMpinReset(mobileNumber: string): Promise<RequestOtpForMpinResetResponse> {
+  return await request<RequestOtpForMpinResetResponse>(`/auth/request-otp`, { method: 'POST', body: { mobileNumber } });
 }
 
-export async function loginWithGoogle(payload: { googleIdToken: string; deviceId: string }): Promise<AuthResponse['data']> {
-  const res = await request<AuthResponse>('/auth/login-google', { method: 'POST', body: payload, noAuth: true });
-  return res.data;
+export interface VerifyOtpForMpinResetPayload { id: string; otp: string; }
+export interface VerifyOtpForMpinResetResponse { success: boolean; }
+export async function verifyOtpForMpinReset(payload: VerifyOtpForMpinResetPayload): Promise<VerifyOtpForMpinResetResponse> {
+  return await request<VerifyOtpForMpinResetResponse>(`/auth/verify-otp`, { method: 'POST', body: payload });
+}
+
+export interface SetNewMpinPayload { id: string; mobileNumber: string; mpin: string; }
+export interface SetNewMpinResponse { success: boolean; }
+export async function setNewMpin(payload: SetNewMpinPayload): Promise<SetNewMpinResponse> {
+  return await request<SetNewMpinResponse>(`/auth/set-mpin`, { method: 'POST', body: payload });
+}
+
+// ---- Logout ----
+export interface LogoutResponse { ok?: boolean; success?: boolean }
+export async function logout(): Promise<boolean> {
+  try {
+    const res = await request<LogoutResponse>('/auth/logout', { method: 'POST', body: {} });
+    const ok = (res as any)?.ok || (res as any)?.success;
+    if (DEBUG_API) try { console.log('[API] logout', { ok }); } catch {}
+    return !!ok;
+  } catch (e:any) {
+    if (DEBUG_API) try { console.warn('[API] logout fail', e?.message); } catch {}
+    // Even if network fails we still clear locally
+    return false;
+  }
+}
+
+export async function loginWithMpin(payload: { mobileNumber: string; mpin: string }): Promise<AuthResponse['data']> {
+  const t0 = Date.now();
+  try {
+    const res = await request<AuthResponse>('/auth/login', { method: 'POST', body: payload, noAuth: true });
+    const dt = Date.now() - t0;
+    try { console.log('[API] loginWithMpin success', { mobileMasked: payload.mobileNumber.replace(/^(\d{3})\d+(\d{2})$/, '$1***$2'), ms: dt }); } catch {}
+    return res.data;
+  } catch (err: any) {
+    const dt = Date.now() - t0;
+    try { console.warn('[API] loginWithMpin fail', { mobileMasked: payload.mobileNumber.replace(/^(\d{3})\d+(\d{2})$/, '$1***$2'), ms: dt, err: err?.message }); } catch {}
+    throw err;
+  }
+}
+
+export async function loginWithGoogle(payload: { 
+  firebaseIdToken?: string; 
+  googleIdToken?: string; 
+  deviceId?: string 
+}): Promise<AuthResponse['data']> {
+  const t0 = Date.now();
+  try {
+    const res = await request<AuthResponse>('/auth/login-google', { method: 'POST', body: payload, noAuth: true });
+    const dt = Date.now() - t0;
+    const tokenType = payload.firebaseIdToken ? 'firebase' : 'google';
+    try { console.log('[API] loginWithGoogle success', { ms: dt, tokenType }); } catch {}
+    return res.data;
+  } catch (err: any) {
+    const dt = Date.now() - t0;
+    const tokenType = payload.firebaseIdToken ? 'firebase' : 'google';
+    try {
+      if (err && typeof err === 'object' && 'status' in err) {
+        console.warn('[API] loginWithGoogle fail', { ms: dt, tokenType, status: (err as any).status, body: (err as any).body, message: err?.message });
+      } else {
+        console.warn('[API] loginWithGoogle fail', { ms: dt, tokenType, err: err?.message });
+      }
+    } catch {}
+    // Re-throw a clearer error for UI
+    if (err && typeof err === 'object' && 'status' in err) {
+      const status = (err as any).status;
+      const serverMsg = (err as any).body?.message || (err as any).message || `HTTP ${status}`;
+      throw new Error(`Google login failed (${status}): ${serverMsg}`);
+    }
+    throw err;
+  }
 }
 
 export async function createCitizenReporterMobile(payload: {
@@ -547,15 +687,27 @@ export async function createCitizenReporterMobile(payload: {
     source?: string;
   };
 }): Promise<AuthResponse['data']> {
-  const res = await request<AuthResponse>('/auth/create-citizen-reporter', { method: 'POST', body: payload, noAuth: true });
-  return res.data;
+  // Primary (correct) endpoint for mobile registration
+  try {
+    const res = await request<AuthResponse>('/auth/create-citizen-reporter/mobile', { method: 'POST', body: payload, noAuth: true });
+    return res.data;
+  } catch (err: any) {
+    // Fallback to legacy path if server not yet updated (404 only)
+    if (err && err.status === 404) {
+      try { console.warn('[API] mobile citizen endpoint 404, falling back to legacy path'); } catch {}
+      const legacy = await request<AuthResponse>('/auth/create-citizen-reporter', { method: 'POST', body: payload, noAuth: true });
+      return legacy.data;
+    }
+    throw err;
+  }
 }
 
 export async function createCitizenReporterGoogle(payload: {
-  googleIdToken: string;
+  firebaseIdToken?: string;
+  googleIdToken?: string;
+  email?: string;
   languageId: string;
   pushToken?: string;
-  email?: string;
   location?: {
     latitude: number;
     longitude: number;
@@ -568,121 +720,245 @@ export async function createCitizenReporterGoogle(payload: {
     source?: string;
   };
 }): Promise<AuthResponse['data']> {
-  const res = await request<AuthResponse>('/auth/create-citizen-reporter/google', { method: 'POST', body: payload, noAuth: true });
-  return res.data;
+  const t0 = Date.now();
+  try {
+    const res = await request<AuthResponse>('/auth/create-citizen-reporter/google', { method: 'POST', body: payload, noAuth: true });
+    const dt = Date.now() - t0;
+    const tokenType = payload.firebaseIdToken ? 'firebase' : 'google';
+    try { console.log('[API] createCitizenReporterGoogle success', { ms: dt, tokenType }); } catch {}
+    return res.data;
+  } catch (err: any) {
+    const dt = Date.now() - t0;
+    const tokenType = payload.firebaseIdToken ? 'firebase' : 'google';
+    try {
+      if (err && typeof err === 'object' && 'status' in err) {
+        console.warn('[API] createCitizenReporterGoogle fail', { ms: dt, tokenType, status: (err as any).status, body: (err as any).body, message: err?.message });
+      } else {
+        console.warn('[API] createCitizenReporterGoogle fail', { ms: dt, tokenType, err: err?.message });
+      }
+    } catch {}
+    if (err && typeof err === 'object' && 'status' in err) {
+      const status = (err as any).status;
+      const serverMsg = (err as any).body?.message || (err as any).message || `HTTP ${status}`;
+      throw new Error(`Citizen Reporter signup failed (${status}): ${serverMsg}`);
+    }
+    throw err;
+  }
 }
 
 export const registerGuestUser = async (data: { languageId: string; deviceDetails: any; location?: { latitude: number; longitude: number }; pushToken?: string }): Promise<GuestAuthResponse> => {
-  try {
-    if (await getMockMode()) {
-      return { jwt: 'mock-jwt-token', refreshToken: 'mock-refresh-token', expiresAt: Date.now() + 24 * 3600 * 1000, expiresIn: 24 * 3600, languageId: data.languageId, user: { id: 'guest', role: 'Guest' }, raw: { mock: true } };
-    }
-    console.log('Registering guest user with data:', data);
-    const json = await request<{ success?: boolean; data?: any }>(`/auth/guest`, {
-      method: 'POST',
+  // Build a set of progressively more permissive payload variants. Many backends evolve their schema; this adaptive approach
+  // lets us succeed without shipping multiple client updates.
+  const languageId = String(data.languageId);
+  const deviceId = data.deviceDetails?.deviceId;
+  const deviceModel = data.deviceDetails?.deviceModel;
+  const pushToken = data.pushToken;
+  const platform = Platform.OS;
+  const appVersion = (Constants.manifest2 as any)?.extra?.version || (Constants.manifest as any)?.version || Constants.expoConfig?.version || undefined;
+  const buildNumber = (Constants.manifest2 as any)?.extra?.buildNumber || (Constants.expoConfig as any)?.ios?.buildNumber || (Constants.expoConfig as any)?.android?.versionCode || undefined;
+
+  const variants: { label: string; body: any }[] = [
+    {
+      label: 'v1-deviceDetails',
       body: {
-        languageId: data.languageId,
+        languageId,
         deviceDetails: {
-          deviceId: data.deviceDetails?.deviceId,
-          deviceModel: data.deviceDetails?.deviceModel,
-          pushToken: data.pushToken,
+          deviceId,
+          deviceModel,
+          platform,
+          appVersion,
+          buildNumber,
+          pushToken,
         },
         location: data.location,
-        platform: Platform.OS,
       },
-    });
-    const payload = json?.data ?? (json as any);
-    const expiresIn: number | undefined = payload?.expiresInSec ?? payload?.expiresIn;
-    const expiresAt = payload?.expiresAt ?? (expiresIn ? Date.now() + expiresIn * 1000 : undefined);
-    const languageId = payload?.languageId ?? payload?.langId ?? payload?.user?.languageId ?? data.languageId;
-    const user = payload?.user ?? payload?.profile;
-    return { jwt: payload.jwt, refreshToken: payload.refreshToken, expiresAt, expiresIn, languageId, user, raw: payload };
-  } catch (err) {
-    // Only allow mock fallback if mockMode is truly enabled; otherwise propagate the error
-    if (await getMockMode()) {
-      console.warn('registerGuestUser failed; returning mock tokens due to mock mode', err);
-      return { jwt: 'mock-jwt-token', refreshToken: 'mock-refresh-token', expiresAt: Date.now() + 24 * 3600 * 1000, expiresIn: 24 * 3600, languageId: data.languageId, user: { id: 'guest', role: 'Guest' }, raw: { fallback: true } };
-    }
-    console.warn('registerGuestUser failed', err);
-    throw (err instanceof Error ? err : new Error('registerGuestUser failed'));
+    },
+    {
+      label: 'v2-device',
+      body: {
+        languageId,
+        device: {
+          id: deviceId,
+          model: deviceModel,
+          platform,
+          appVersion,
+          buildNumber,
+          pushToken,
+        },
+        location: data.location,
+      },
+    },
+    {
+      label: 'v3-flat',
+      body: {
+        languageId,
+        deviceId,
+        deviceModel,
+        platform,
+        appVersion,
+        buildNumber,
+        pushToken,
+        location: data.location,
+      },
+    },
+  ];
+
+  const mock = await getMockMode();
+  if (mock) {
+    return { jwt: 'mock-jwt-token', refreshToken: 'mock-refresh-token', expiresAt: Date.now() + 24 * 3600 * 1000, expiresIn: 24 * 3600, languageId, user: { id: 'guest', role: 'Guest' }, raw: { mock: true } };
   }
+
+  let lastErr: any = null;
+  for (let i = 0; i < variants.length; i++) {
+    const { label, body } = variants[i];
+    try {
+      const logBody = JSON.parse(JSON.stringify(body));
+      try {
+        if (logBody?.deviceDetails?.pushToken) logBody.deviceDetails.pushToken = '[redacted]';
+        if (logBody?.device?.pushToken) logBody.device.pushToken = '[redacted]';
+        if ('pushToken' in logBody) logBody.pushToken = logBody.pushToken ? '[redacted]' : undefined;
+      } catch {}
+      console.log(`Registering guest (attempt ${i + 1}/${variants.length} ${label}) → POST`, getBaseUrl() + '/auth/guest', logBody);
+      const json = await request<{ success?: boolean; data?: any }>(`/auth/guest`, {
+        method: 'POST',
+        body,
+      });
+      const payload = json?.data ?? (json as any);
+      const expiresIn: number | undefined = payload?.expiresInSec ?? payload?.expiresIn;
+      const expiresAt = payload?.expiresAt ?? (expiresIn ? Date.now() + expiresIn * 1000 : undefined);
+      const resolvedLanguageId = payload?.languageId ?? payload?.langId ?? payload?.user?.languageId ?? languageId;
+      const user = extractUser(payload, resolvedLanguageId);
+      if (!payload?.jwt || !payload?.refreshToken) {
+        throw new Error('Guest registration response missing tokens');
+      }
+  // Legacy guest session flag removed
+      console.log('Guest registration success', { attempt: label, jwtPresent: true, userId: user.id, role: user.role });
+      return { jwt: payload.jwt, refreshToken: payload.refreshToken, expiresAt, expiresIn, languageId: resolvedLanguageId, user, raw: payload };
+    } catch (err: any) {
+      lastErr = err;
+      const status = (err as any)?.status;
+      const body = (err as any)?.body;
+      const serverMsg = body?.message || body?.error || err?.message;
+      console.warn('Guest registration attempt failed', { attempt: label, status, message: serverMsg });
+      // Only retry on validation-ish 400 errors; otherwise break early
+      if (!(status === 400 || status === 422)) break;
+      // If this was the last attempt we'll surface below
+    }
+  }
+
+  // All variants failed
+  if (mock) {
+    console.warn('All guest registration attempts failed; returning mock due to mock mode');
+    return { jwt: 'mock-jwt-token', refreshToken: 'mock-refresh-token', expiresAt: Date.now() + 24 * 3600 * 1000, expiresIn: 24 * 3600, languageId, user: { id: 'guest', role: 'Guest' }, raw: { fallback: true } };
+  }
+
+  if (lastErr && typeof lastErr === 'object' && 'status' in lastErr) {
+    const status = (lastErr as any).status;
+    const serverBody = (lastErr as any).body;
+    const serverMsg = serverBody?.message || serverBody?.error || (lastErr as any).message || `HTTP ${status}`;
+    throw new Error(`Guest registration failed (${status}) after ${variants.length} attempts: ${serverMsg}`);
+  }
+  throw (lastErr instanceof Error ? lastErr : new Error('Guest registration failed (unknown)'));
 };
 
-// Comments API
+// Comments API - updated to match actual backend response structure
 export type CommentDTO = {
   id: string;
-  user: { id: string; name: string; avatar: string };
-  text: string;
+  userId: string;
+  articleId: string | null;
+  shortNewsId: string;
+  content: string;
+  parentId: string | null;
   createdAt: string;
-  likes: number;
-  replies?: CommentDTO[];
+  updatedAt: string;
+  user: {
+    id: string;
+    profile: {
+      fullName: string;
+      profilePhotoUrl: string | null;
+    };
+  };
+  replies: CommentDTO[];
 };
 
 const COMMENTS_KEY = 'LOCAL_COMMENTS_STORE';
 
 // getBaseUrl provided by services/http
 
-export async function getComments(articleId: string): Promise<CommentDTO[]> {
+// Unified comments fetch: supports legacy article-based endpoint and new public shortNewsId query param
+export async function getComments(id: string, opts?: { type?: 'article' | 'shortnews' }): Promise<CommentDTO[]> {
+  const kind = opts?.type || 'shortnews';
   try {
     if (await getMockMode()) {
-      // Always use local storage in mock mode
       const raw = (await AsyncStorage.getItem(COMMENTS_KEY)) || '{}';
       const all = JSON.parse(raw);
-      return (all[articleId] || []) as CommentDTO[];
+      return (all[id] || []) as CommentDTO[];
     }
-    const json = await request<{ success?: boolean; data: CommentDTO[] }>(`/comments/article/${encodeURIComponent(articleId)}`);
-    return (json.data || []) as CommentDTO[];
+    let json: { success?: boolean; data?: CommentDTO[] } | undefined;
+    if (kind === 'shortnews') {
+      // Public API: /comments?shortNewsId=ID
+      json = await request<{ success?: boolean; data: CommentDTO[] }>(`/comments?shortNewsId=${encodeURIComponent(id)}`);
+    } else {
+      json = await request<{ success?: boolean; data: CommentDTO[] }>(`/comments/article/${encodeURIComponent(id)}`);
+    }
+    return (json?.data || []) as CommentDTO[];
   } catch {
-    // Fallback to local storage
     const raw = (await AsyncStorage.getItem(COMMENTS_KEY)) || '{}';
     const all = JSON.parse(raw);
-    return (all[articleId] || []) as CommentDTO[];
+    return (all[id] || []) as CommentDTO[];
   }
 }
 
-export async function postComment(articleId: string, text: string, parentId?: string, user?: { id: string; name: string; avatar: string }): Promise<CommentDTO> {
+// Post comment with proper payload structure matching backend expectations
+export async function postComment(shortNewsId: string, content: string, userId: string, parentId?: string): Promise<CommentDTO> {
   try {
-    if (await getMockMode()) {
-      // Short-circuit to local store in mock mode
-      throw new Error('mock-mode');
-    }
-    const json = await request<{ success?: boolean; data: CommentDTO }>(`/comments`, {
+    if (await getMockMode()) throw new Error('mock-mode');
+    const body = {
+      content,
+      userId,
+      articleId: null,
+      shortNewsId,
+      parentId: parentId || null,
+    };
+    
+    // Debug logging to show the exact payload being sent
+    console.log('[API] POST /comments payload:', JSON.stringify(body, null, 2));
+    console.log('[API] Request details:', {
+      endpoint: '/comments',
       method: 'POST',
-      body: { articleId, text, parentId, user },
+      shortNewsId,
+      content: content.substring(0, 50) + (content.length > 50 ? '...' : ''),
+      userId,
+      parentId: parentId || 'null (direct comment)'
     });
+    
+    const json = await request<{ success?: boolean; data: CommentDTO }>(`/comments`, { method: 'POST', body });
+    
+    // Debug logging to show the response
+    console.log('[API] POST /comments response:', JSON.stringify(json, null, 2));
+    
     return json.data as CommentDTO;
   } catch {
-    // Fallback to local storage
-    const raw = (await AsyncStorage.getItem(COMMENTS_KEY)) || '{}';
-    const all = JSON.parse(raw);
-    const newNode: CommentDTO = {
-      id: `${Date.now()}`,
-      user: user || { id: 'guest', name: 'Guest', avatar: 'https://i.pravatar.cc/100' },
-      text,
+    // Create mock response for local fallback
+    const mockResponse: CommentDTO = {
+      id: `mock_${Date.now()}`,
+      userId,
+      articleId: null,
+      shortNewsId,
+      content,
+      parentId: parentId || null,
       createdAt: new Date().toISOString(),
-      likes: 0,
+      updatedAt: new Date().toISOString(),
+      user: {
+        id: userId,
+        profile: {
+          fullName: 'Mock User',
+          profilePhotoUrl: 'https://i.pravatar.cc/100',
+        },
+      },
       replies: [],
     };
-    all[articleId] = all[articleId] || [];
-    const insert = (list: CommentDTO[], pid?: string): boolean => {
-      if (!pid) return false;
-      for (const item of list) {
-        if (item.id === pid) {
-          item.replies = item.replies || [];
-          item.replies.push(newNode);
-          return true;
-        }
-        if (item.replies && insert(item.replies, pid)) return true;
-      }
-      return false;
-    };
-    if (!parentId) {
-      all[articleId].unshift(newNode);
-    } else {
-      insert(all[articleId], parentId);
-    }
-    await AsyncStorage.setItem(COMMENTS_KEY, JSON.stringify(all));
-    return newNode;
+    return mockResponse;
   }
 }
 
@@ -711,11 +987,8 @@ async function resolveLanguageId(): Promise<string | undefined> {
 
 export async function getCategories(languageId?: string): Promise<CategoryItem[]> {
   const langId = languageId || (await resolveLanguageId());
-  // If we don't have a language yet, return empty (or cached fallback from any lang if needed)
-  if (!langId) return [];
-
-  // Mock mode short-circuit to cached data (if any)
-  const cacheKey = CATEGORIES_CACHE_KEY(langId);
+  const safeLangId = langId || 'en';
+  const cacheKey = CATEGORIES_CACHE_KEY(safeLangId);
   const cachedRaw = await AsyncStorage.getItem(cacheKey);
   const cached: CategoryItem[] | null = cachedRaw ? (() => { try { return JSON.parse(cachedRaw) as CategoryItem[]; } catch { return null; } })() : null;
 
@@ -724,14 +997,14 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
   }
 
   try {
-    const params = new URLSearchParams({ languageId: langId });
-    const res = await request<any>(`/categories?${params.toString()}`, { noAuth: true });
+  const params = new URLSearchParams({ languageId: safeLangId });
+  const res = await request<any>(`/categories?${params.toString()}`, { noAuth: true });
     const arr = Array.isArray(res)
       ? res
-      : Array.isArray(res?.data)
-      ? res.data
       : Array.isArray(res?.items)
       ? res.items
+      : Array.isArray(res?.data)
+      ? res.data
       : Array.isArray(res?.categories)
       ? res.categories
       : Array.isArray(res?.data?.items)
@@ -1089,6 +1362,7 @@ export type CreateShortNewsInput = {
 };
 export type CreateShortNewsResponse = { id: string; url?: string; raw?: any };
 export async function createShortNews(input: CreateShortNewsInput): Promise<CreateShortNewsResponse> {
+  const t0 = Date.now();
   try {
     if (await getMockMode()) {
       return { id: `sn_${Date.now()}`, url: undefined, raw: { mock: true, input } };
@@ -1122,6 +1396,8 @@ export async function createShortNews(input: CreateShortNewsInput): Promise<Crea
     const data = (json as any)?.data ?? json;
     const id: string = data?.id || data?._id || `${Date.now()}`;
     const url: string | undefined = data?.url || data?.shareUrl || data?.permalink;
+    const dt = Date.now() - t0;
+    try { console.log('[API] createShortNews success', { id, ms: dt, mediaCount: Array.isArray(input.mediaUrls) ? input.mediaUrls.length : 0 }); } catch {}
     return { id: String(id), url, raw: data };
   } catch (err) {
     if (await getMockMode()) {
@@ -1129,7 +1405,8 @@ export async function createShortNews(input: CreateShortNewsInput): Promise<Crea
     }
     if (err instanceof HttpError) {
       try {
-        console.warn('[createShortNews] server error', err.status, err.body || err.message, { payload: input });
+        const dt = Date.now() - t0;
+        console.warn('[API] createShortNews fail', { status: err.status, ms: dt, msg: err.body?.message || err.message });
       } catch {}
       const msg = (err.body?.message) || (err.body?.error) || err.message || 'Failed to create shortnews';
       throw new Error(msg);

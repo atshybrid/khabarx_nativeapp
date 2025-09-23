@@ -33,12 +33,11 @@ export default function PostCreateScreen() {
   const [languageName, setLanguageName] = useState<string>('');
   const titleTx = useTransliteration({ languageCode: languageId, enabled: true, mode: 'on-boundary', debounceMs: 140 });
   const contentTx = useTransliteration({ languageCode: languageId, enabled: true, mode: 'on-boundary', debounceMs: 140 });
-  const [showLogin, setShowLogin] = useState(false);
-  const [showUpgrade, setShowUpgrade] = useState(false);
+  // showLogin state removed - now uses direct navigation to /auth/login
+  // showUpgrade state removed - now uses direct navigation to /auth/login
   const [showLottie, setShowLottie] = useState<string | boolean>(false);
   const [submitting, setSubmitting] = useState(false);
-  const loginPromptedRef = useRef<boolean>(false);
-  const publishRequestedRef = useRef<boolean>(false);
+  // Removed loginPromptedRef - now check auth on each publish attempt instead
   // Login mobile (reserved for future login modal implementation)
   // Removed loginMobile state and related MPIN flow to reduce unused code noise
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -242,14 +241,34 @@ export default function PostCreateScreen() {
 
   // Avoid proactively importing expo-image-picker on mount to prevent early native module evaluation.
 
-  // Show login modal upfront if not a citizen reporter
-  useEffect(() => {
-    if (!authLoaded) return;
-    if (role !== 'CITIZEN_REPORTER' && !loginPromptedRef.current) {
-      loginPromptedRef.current = true;
-      setShowLogin(true);
+  // Check authentication when user attempts to publish
+  const checkAuthBeforePublish = () => {
+    if (!authLoaded) {
+      Alert.alert('Please wait', 'Loading authentication status...');
+      return false;
     }
-  }, [role, authLoaded]);
+    
+    if (role !== 'CITIZEN_REPORTER') {
+      Alert.alert(
+        'Authentication Required',
+        'You need to be a Citizen Reporter to create posts. Please login or register.',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            // Don't navigate away, let user stay on post creation screen
+          },
+          {
+            text: 'Login',
+            onPress: () => router.push('/auth/login?from=post')
+          }
+        ]
+      );
+      return false;
+    }
+    
+    return true;
+  };
 
   const titleRemaining = 35 - titleTx.value.length;
   const contentWords = useMemo(() => (contentTx.value.trim() ? contentTx.value.trim().split(/\s+/).length : 0), [contentTx.value]);
@@ -292,15 +311,30 @@ export default function PostCreateScreen() {
 
   // onSubmit handler for publish button and programmatic triggers
   const onSubmit = async () => {
-  // Define canPublish: basic publish eligibility check
-  const canPublish = titleTx.value.trim().length > 0 && contentTx.value.trim().length > 0 && localCategoryId && media.length > 0 && !submitting;
-  if (!canPublish) return;
-    // Role gate to CITIZEN_REPORTER
-    if (role !== 'CITIZEN_REPORTER') {
-      publishRequestedRef.current = true;
-      setShowUpgrade(true);
+    // Check authentication before any processing
+    if (!checkAuthBeforePublish()) {
       return;
     }
+
+    // Basic validation checks
+    if (!titleTx.value.trim()) {
+      Alert.alert('Title Required', 'Please enter a title for your article.');
+      return;
+    }
+    if (!contentTx.value.trim()) {
+      Alert.alert('Content Required', 'Please enter content for your article.');
+      return;
+    }
+    if (!localCategoryId) {
+      Alert.alert('Category Required', 'Please select a category for your article.');
+      return;
+    }
+    if (media.length === 0) {
+      Alert.alert('Media Required', 'Please add at least one image or video.');
+      return;
+    }
+    if (submitting) return;
+
     setSubmitting(true);
     setShowLottie('news');
     try {
@@ -449,7 +483,12 @@ export default function PostCreateScreen() {
           onPress={() => {
             setTabBarVisible(true);
             setLocalCategoryId(null);
-            router.replace('/news');
+            // Smart back navigation - go back if possible, otherwise to news
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/news');
+            }
           }}
           style={styles.headerLeft}
           accessibilityRole="button"
@@ -629,20 +668,8 @@ export default function PostCreateScreen() {
 
       {/* Modals and overlays */}
       <>
-        <Modal visible={showLogin} animationType="slide" transparent onRequestClose={() => setShowLogin(false)}>
-          <View style={styles.modalBackdrop}>
-            <View style={styles.modalCard}>
-              {/* ...existing code for login modal... */}
-            </View>
-          </View>
-        </Modal>
-        <Modal visible={showUpgrade} animationType="slide" transparent onRequestClose={() => setShowUpgrade(false)}>
-          <View style={styles.modalBackdrop}>
-            <View style={styles.modalCard}>
-              {/* ...existing code for upgrade modal... */}
-            </View>
-          </View>
-        </Modal>
+        {/* Login modal replaced with direct navigation to /auth/login screen */}
+        {/* Upgrade modal replaced with direct navigation to /auth/login screen */}
         <CitizenReporterArticlesSheet
           visible={showArticlesSheet}
           onClose={() => setShowArticlesSheet(false)}

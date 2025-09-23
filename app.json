@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "khabarx",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+  "newArchEnabled": false,
     "ios": {
       "supportsTablet": true
     },
@@ -53,13 +53,17 @@
     ],
     "extra": {
       "google": {
-        "androidClientId": "827657659496-p80ardflep2rb907bbdmel1o4fgopbtv.apps.googleusercontent.com",
+        "androidClientId": "__AUTO_FROM_GOOGLE_SERVICES_JSON__",
         "iosClientId": "YOUR_IOS_CLIENT_ID.apps.googleusercontent.com",
-        "webClientId": "827657659496-7k1qr8f36k8j5gu7nrgjs060lbbviruo.apps.googleusercontent.com",
+        "webClientId": "572758255210-gubenuc6g6p9j5tudgaqo5m6lc8irtn4.apps.googleusercontent.com",
         "mode": "native"
       },
       "firebase": {
-        "webApiKey": "AIzaSyAIwciUGr4JgSo7keO0TiSPzS3E70SeUyw"
+        "webApiKey": "AIzaSyAIwciUGr4JgSo7keO0TiSPzS3E70SeUyw",
+        "projectId": "khabarx-f0365",
+  "appId": "1:572758255210:android:4ee81e7bc477d728f44c13",
+        "messagingSenderId": "572758255210",
+        "storageBucket": "khabarx-f0365.firebasestorage.app"
       },
       "router": {},
       "eas": {

@@ -1,10 +1,14 @@
 import Toast from '@/components/Toast';
+import { ensureFirebaseAuthAsync, isFirebaseConfigComplete, logFirebaseGoogleAlignment } from '@/services/firebaseClient';
+import { Feather } from '@expo/vector-icons';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import * as Linking from 'expo-linking';
+import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { AuthProvider } from '../context/AuthContext';
@@ -28,7 +32,46 @@ const CustomHeader = () => {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const router = useRouter();
   // Font loading temporarily disabled for debugging blank screen
+
+  // Defer preload to allow Firebase modules to register (RN 0.81 timing)
+  React.useEffect(() => {
+    (async () => {
+      try {
+        if (isFirebaseConfigComplete()) {
+          const auth = await ensureFirebaseAuthAsync();
+          console.log('[AUTH_INIT] Layout ensured auth (async)', { appId: auth.app.options.appId, hasUser: !!auth.currentUser });
+          logFirebaseGoogleAlignment();
+        }
+      } catch (e:any) {
+        console.log('[AUTH_INIT] Layout init skipped', e?.message);
+      }
+    })();
+  }, []);
+
+  // Deep link & initial URL handling for khabarx://article/<id>
+  React.useEffect(() => {
+    const handleUrl = (url?: string | null) => {
+      if (!url) return;
+      try {
+        const parsed = Linking.parse(url);
+        const segments = parsed?.path ? parsed.path.split('/') : [];
+        if (segments[0] === 'article' && segments[1]) {
+          const articleId = segments[1];
+          // Navigate only if not already on that screen
+          router.push({ pathname: '/article/[id]', params: { id: articleId } });
+        }
+      } catch (e) {
+        console.log('[DEEP_LINK] failed to parse', url, e);
+      }
+    };
+    // Initial
+    Linking.getInitialURL().then(handleUrl).catch(()=>{});
+    // Listener
+    const sub = Linking.addEventListener('url', (e) => handleUrl(e.url));
+    return () => { try { sub.remove(); } catch {} };
+  }, [router]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -59,12 +102,33 @@ export default function RootLayout() {
               {/* Keep previous screen attached to avoid blank screen when swiping back from article */}
               <Stack.Screen
                 name="article/[id]"
-                options={{
-                  headerShown: false,
+                options={({ navigation }) => ({
+                  headerShown: true,
+                  headerTitle: 'Article',
+                  headerTitleStyle: { fontWeight: '600' },
+                  headerStyle: { backgroundColor: '#fff' },
                   freezeOnBlur: false,
                   animation: 'slide_from_right',
                   contentStyle: { backgroundColor: '#fff' },
-                }}
+                  gestureEnabled: true,
+                  // Custom back behavior
+                  headerLeft: () => (
+                    <TouchableOpacity
+                      onPress={() => {
+                        // Navigate back safely - first try going back, fallback to news tab
+                        if (navigation.canGoBack()) {
+                          navigation.goBack();
+                        } else {
+                          navigation.navigate('(tabs)', { screen: 'news' });
+                        }
+                      }}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      style={{ marginLeft: 16 }}
+                    >
+                      <Feather name="arrow-left" size={24} color="#007AFF" />
+                    </TouchableOpacity>
+                  ),
+                })}
               />
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen
