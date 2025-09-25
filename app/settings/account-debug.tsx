@@ -1,8 +1,9 @@
 import { getMockMode, setMockMode } from '@/services/api';
 import { clearTokens } from '@/services/auth';
+import { logAllStorage, logStorageKey, storageHealthCheck } from '@/services/debugStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 
 export default function AccountDebugScreen() {
@@ -49,6 +50,30 @@ export default function AccountDebugScreen() {
       <TouchableOpacity onPress={handleClearMockAuth} style={[styles.button, styles.buttonSecondary]}>
         <Text style={styles.buttonText}>Clear Mock Auth (Disable Mock)</Text>
       </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => logAllStorage({ includeValues: true, maxValueLength: 600 })}
+        style={[styles.button, styles.buttonInfo]}
+      >
+        <Text style={styles.buttonText}>Dump All Storage to Log</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => logAllStorage({ includeValues: true, filterPrefix: 'news_cache:' })}
+        style={[styles.button, styles.buttonInfo]}
+      >
+        <Text style={styles.buttonText}>Dump News Cache Keys</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => logStorageKey('preferences_cache_v1')}
+        style={[styles.button, styles.buttonInfo]}
+      >
+        <Text style={styles.buttonText}>Show Preferences Cache</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => storageHealthCheck()}
+        style={[styles.button, styles.buttonInfo]}
+      >
+        <Text style={styles.buttonText}>Storage Health Check</Text>
+      </TouchableOpacity>
       <View style={styles.row}>
         <Text style={styles.rowText}>Mock Mode</Text>
         <Switch value={mockMode} onValueChange={toggleMock} />
@@ -85,6 +110,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 18,
     textAlign: 'center',
+  },
+  buttonInfo: {
+    backgroundColor: '#2563eb',
   },
   row: {
     marginTop: 16,

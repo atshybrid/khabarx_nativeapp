@@ -62,7 +62,6 @@ export type PreferenceUpdateResponse = PreferenceRecord;
 
 function buildPayload(base: PreferenceRecord, input: PreferenceUpdateInput): any {
   const payload: any = {
-    deviceId: base.deviceId,
     deviceModel: base.deviceModel,
     userId: base.userId ?? null,
     forceUpdate: true,
@@ -78,9 +77,9 @@ function buildPayload(base: PreferenceRecord, input: PreferenceUpdateInput): any
       if (input.location) payload.location = input.location; else payload.location = null;
       break;
     case 'all':
-      payload.pushToken = input.pushToken ?? null;
-      payload.languageId = input.languageId ?? null;
-      if (input.location !== undefined) payload.location = input.location;
+      if (typeof input.pushToken !== 'undefined') payload.pushToken = input.pushToken;
+      if (typeof input.languageId !== 'undefined') payload.languageId = input.languageId;
+      if (typeof input.location !== 'undefined') payload.location = input.location;
       break;
   }
   return payload;
@@ -131,8 +130,20 @@ export async function updatePreferences(input: PreferenceUpdateInput): Promise<P
 
   const base: PreferenceRecord = { deviceId, deviceModel, userId };
   const payload = buildPayload(base, input);
-  if (input.intent === 'language') {
-    console.log('[PREF][LANG] updatePreferences intent=language payload', { deviceId, userId, languageId: (payload as any).languageId });
+  
+  // Log all update attempts with full payload (console + main logger)
+  console.log(`[PREF][${input.intent.toUpperCase()}] updatePreferences`, { 
+    intent: input.intent,
+    deviceId, 
+    userId, 
+    payload: JSON.stringify(payload),
+    payloadKeys: Object.keys(payload)
+  });
+  try {
+    const { log } = require('./logger');
+    log.info('preferences.updatePayload', { intent: input.intent, deviceId, userId, payload });
+  } catch (e) {
+    // ignore logger errors
   }
 
   // POST (or PATCH) - spec said /preferences/update; assuming POST

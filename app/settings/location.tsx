@@ -169,11 +169,47 @@ export default function LocationPickerScreen() {
     }
   };
 
+  const [saving, setSaving] = useState(false);
   const saveAndGoBack = async () => {
-    if (!selected) return;
-    await AsyncStorage.setItem('profile_location_obj', JSON.stringify(selected));
-    await AsyncStorage.setItem('profile_location', selected.name);
-    router.back();
+    if (!selected || saving) return;
+    setSaving(true);
+    try {
+      // Determine if user is logged in (jwt present)
+      const jwt = await AsyncStorage.getItem('jwt');
+      // Prepare location object for API
+      const locationObj = {
+        latitude: selected.lat,
+        longitude: selected.lng,
+        name: selected.name,
+      };
+      if (jwt) {
+        // Logged in: update user profile
+        const { updateUserProfile } = await import('@/services/api');
+        await updateUserProfile({ address: { location: locationObj } });
+      } else {
+        // Guest: update guest registration (location only)
+        const { registerGuestUser } = await import('@/services/api');
+        // Get languageId and deviceDetails for guest
+        let languageId = 'en';
+        try {
+          const raw = await AsyncStorage.getItem('selectedLanguage');
+          if (raw) languageId = JSON.parse(raw)?.id || 'en';
+        } catch {}
+        let deviceDetails = {};
+        try {
+          const raw = await AsyncStorage.getItem('deviceDetails');
+          if (raw) deviceDetails = JSON.parse(raw);
+        } catch {}
+  await registerGuestUser({ languageId, deviceDetails, location: { latitude: selected.lat, longitude: selected.lng } });
+      }
+      await AsyncStorage.setItem('profile_location_obj', JSON.stringify(selected));
+      await AsyncStorage.setItem('profile_location', selected.name);
+      router.back();
+    } catch {
+      alert('Failed to update location. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -184,8 +220,8 @@ export default function LocationPickerScreen() {
         </Pressable>
         <Text style={styles.title}>Select location</Text>
         <View style={{ width: 64, alignItems: 'flex-end' }}>
-          <Pressable onPress={saveAndGoBack} disabled={!selected} style={[styles.saveBtn, !selected && { opacity: 0.5 }]}> 
-            <Text style={styles.saveTxt}>Save</Text>
+          <Pressable onPress={saveAndGoBack} disabled={!selected || saving} style={[styles.saveBtn, (!selected || saving) && { opacity: 0.5 }]}> 
+            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveTxt}>Save</Text>}
           </Pressable>
         </View>
       </View>

@@ -109,6 +109,26 @@ export default function LoginScreen() {
   if (user?.role) await AsyncStorage.setItem('profile_role', user.role);
   // Persist authenticated session flag (replaces legacy is_guest_session logic)
   try { await AsyncStorage.setItem('is_authenticated', '1'); } catch {}
+      
+      // Sync preferences if this is a CITIZEN_REPORTER login with full data
+      if (user?.role === 'CITIZEN_REPORTER' && user?.userId && jwt && refreshToken) {
+        try {
+          const { syncPreferencesAfterLogin } = await import('@/services/loginSync');
+          await syncPreferencesAfterLogin({
+            jwt,
+            refreshToken,
+            expiresIn,
+            user: {
+              userId: user.userId || user.id,
+              role: user.role,
+              languageId: user.languageId || languageId
+            },
+            location: data.location
+          });
+        } catch (syncError: any) {
+          console.warn('[AUTH] Login sync failed (non-critical)', syncError?.message);
+        }
+      }
     } catch (e:any) {
       console.warn('persistAuthResponse failed', e.message);
     }
@@ -145,41 +165,44 @@ export default function LoginScreen() {
     const delays = [30, 140, 260, 420]; // progressive delays to wait for keyboard animation
     const delay = delays[attempt] ?? 420;
     setTimeout(() => {
-      (ref.current as any).measureInWindow?.((x: number, y: number, width: number, height: number) => {
-        if (typeof y !== 'number' || typeof height !== 'number') return;
-        const winH = Dimensions.get('window').height;
-        const kb = keyboardHeight || 0;
-        const bottomSpace = winH - (y + height);
-        const neededPadding = 28; // a bit more breathing room
-        if (bottomSpace < kb + neededPadding) {
-          const delta = (kb + neededPadding) - bottomSpace;
-          // Adjust for dynamic collapsing header: reduce scroll if header already collapsed
-          let headerCurrentHeight = headerMaxHeight; // fallback
-          try {
-            // Extract current animated value (not always synchronous but good heuristic)
-            // @ts-ignore private access
-            headerCurrentHeight = headerHeight?._value ?? headerMaxHeight;
-          } catch {}
-          const headerReduction = headerMaxHeight - headerCurrentHeight;
-          // Slightly increase scroll delta per attempt to push further if earlier tries under-shoot
-          const target = Math.max(0, scrollYRef.current + delta + attempt * 8 - headerReduction * 0.4);
-          scrollViewRef.current?.scrollTo({ y: target, animated: true });
-        }
-        if (attempt < 3) {
-          ensureVisible(ref, attempt + 1);
-        } else {
-          // Final verification + fallback
-          setTimeout(() => {
-            (ref.current as any).measureInWindow?.((x2: number, y2: number, w2: number, h2: number) => {
-              const bottomSpace2 = winH - (y2 + h2);
-              if (bottomSpace2 < kb + neededPadding) {
-                // Last resort: scroll to end (we add dynamic bottom padding so this lifts the field)
-                scrollViewRef.current?.scrollToEnd({ animated: true });
-              }
-            });
-          }, 140);
-        }
-      });
+      // Fix for measureInWindow null error
+      if (ref.current && typeof ref.current.measureInWindow === 'function') {
+        ref.current.measureInWindow((x: number, y: number, width: number, height: number) => {
+          if (typeof y !== 'number' || typeof height !== 'number') return;
+          const winH = Dimensions.get('window').height;
+          const kb = keyboardHeight || 0;
+          const bottomSpace = winH - (y + height);
+          const neededPadding = 28; // a bit more breathing room
+          if (bottomSpace < kb + neededPadding) {
+            const delta = (kb + neededPadding) - bottomSpace;
+            // Adjust for dynamic collapsing header: reduce scroll if header already collapsed
+            let headerCurrentHeight = headerMaxHeight; // fallback
+            try {
+              // Extract current animated value (not always synchronous but good heuristic)
+              // @ts-ignore private access
+              headerCurrentHeight = headerHeight?._value ?? headerMaxHeight;
+            } catch {}
+            const headerReduction = headerMaxHeight - headerCurrentHeight;
+            // Slightly increase scroll delta per attempt to push further if earlier tries under-shoot
+            const target = Math.max(0, scrollYRef.current + delta + attempt * 8 - headerReduction * 0.4);
+            scrollViewRef.current?.scrollTo({ y: target, animated: true });
+          }
+          if (attempt < 3) {
+            ensureVisible(ref, attempt + 1);
+          } else {
+            // Final verification + fallback
+            setTimeout(() => {
+              (ref.current as any).measureInWindow?.((x2: number, y2: number, w2: number, h2: number) => {
+                const bottomSpace2 = winH - (y2 + h2);
+                if (bottomSpace2 < kb + neededPadding) {
+                  // Last resort: scroll to end (we add dynamic bottom padding so this lifts the field)
+                  scrollViewRef.current?.scrollToEnd({ animated: true });
+                }
+              });
+            }, 140);
+          }
+        });
+      }
     }, delay);
   // Note: headerHeight is an Animated interpolation; accessing _value is heuristic and not stable.
   // We intentionally exclude it from deps to avoid re-creating callback every frame.
@@ -770,13 +793,21 @@ export default function LoginScreen() {
                       caretHidden={false}
                       contextMenuHidden={true}
                       autoFocus={false}
-                      onFocus={() => { setFocusedField('mpin'); setFocusedMpinIndex(i); ensureVisible(ref); }}
-                      onSubmitEditing={() => {
-                        if (i < 3) {
-                          mpinRefs[i + 1].current?.focus();
+                      editable={mpinDigits.join('').length < 4} // Disable if 4 digits entered
+                      onFocus={() => {
+                        if (mpinDigits.join('').length >= 4) {
+                          ref.current?.blur(); // Prevent focus if already 4 digits
+                        } else {
+                          setFocusedField('mpin');
+                          setFocusedMpinIndex(i);
+                          ensureVisible(ref);
                         }
                       }}
-                      style={[styles.mpinBox, mpinDigits[i] && styles.mpinBoxFilled, focusedField === 'mpin' && focusedMpinIndex === i && styles.focusedMpinBox]}
+                      style={[
+                        styles.mpinBox,
+                        mpinDigits[i] && styles.mpinBoxFilled,
+                        focusedField === 'mpin' && focusedMpinIndex === i && styles.focusedMpinBox
+                      ]}
                     />
                   </View>
                 ))}
@@ -798,9 +829,13 @@ export default function LoginScreen() {
                 </Pressable>
               )}
               
-              <Pressable 
-                style={[styles.primaryButton, (checking || !mpin || mpin.length !== 4 || attemptsLeft <= 0) && styles.disabledButton]} 
-                onPress={handleLoginPress} 
+              <Pressable
+                style={[
+                  styles.primaryButton,
+                  (checking || !mpin || mpin.length !== 4 || attemptsLeft <= 0) && styles.disabledButton,
+                  checking && { backgroundColor: '#d1d5db' } // ash/gray when checking
+                ]}
+                onPress={handleLoginPress}
                 disabled={checking || !mpin || mpin.length !== 4 || attemptsLeft <= 0}
               >
                 <Text style={styles.primaryButtonText}>
@@ -869,13 +904,21 @@ export default function LoginScreen() {
                         caretHidden={false}
                         contextMenuHidden={true}
                         autoFocus={false}
-                        onFocus={() => { setFocusedField('mpin'); setFocusedMpinIndex(i); ensureVisible(ref); }}
-                        onSubmitEditing={() => {
-                          if (i < 3) {
-                            mpinRefs[i + 1].current?.focus();
+                        editable={mpinDigits.join('').length < 4} // Disable if 4 digits entered
+                        onFocus={() => {
+                          if (mpinDigits.join('').length >= 4) {
+                            ref.current?.blur(); // Prevent focus if already 4 digits
+                          } else {
+                            setFocusedField('mpin');
+                            setFocusedMpinIndex(i);
+                            ensureVisible(ref);
                           }
                         }}
-                        style={[styles.mpinBox, mpinDigits[i] && styles.mpinBoxFilled, focusedField === 'mpin' && focusedMpinIndex === i && styles.focusedMpinBox]}
+                        style={[
+                          styles.mpinBox,
+                          mpinDigits[i] && styles.mpinBoxFilled,
+                          focusedField === 'mpin' && focusedMpinIndex === i && styles.focusedMpinBox
+                        ]}
                       />
                     </View>
                   ))}
@@ -1004,7 +1047,6 @@ export default function LoginScreen() {
           </View>
         </View>
       </Modal>
-      </KeyboardAvoidingView>
       {/* Congrats Overlay */}
       {showCongrats && (
         <View style={styles.congratsOverlay} pointerEvents="none">
@@ -1014,6 +1056,7 @@ export default function LoginScreen() {
           </View>
         </View>
       )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

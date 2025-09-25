@@ -35,7 +35,9 @@ class NotificationService {
   private responseListener?: Notifications.Subscription;
   private syncingToken = false;
 
-  private static LAST_PUSH_TOKEN_KEY = 'last_push_token_v1';
+  static LAST_PUSH_TOKEN_KEY = 'last_push_token_v1';
+  static LAST_NOTIFICATION_KEY = 'debug_last_notification_v1';
+  static LAST_NOTIFICATION_RESPONSE_KEY = 'debug_last_notification_response_v1';
 
   /**
    * Initialize notification service
@@ -92,6 +94,17 @@ class NotificationService {
       body: notification.request.content.body,
       data: notification.request.content.data,
     });
+    // Persist for debug inspection
+    try {
+      const payload = {
+        at: new Date().toISOString(),
+        title: notification.request.content.title,
+        body: notification.request.content.body,
+        data: notification.request.content.data,
+        id: notification.request.identifier,
+      };
+      AsyncStorage.setItem(NotificationService.LAST_NOTIFICATION_KEY, JSON.stringify(payload)).catch(()=>{});
+    } catch {}
 
     // You can add custom logic here for in-app notifications
     // For example, show a toast, update badge, etc.
@@ -108,6 +121,17 @@ class NotificationService {
       title: notification.request.content.title,
       data,
     });
+    // Persist response for debug
+    try {
+      const stored = {
+        at: new Date().toISOString(),
+        title: notification.request.content.title,
+        data,
+        actionIdentifier: response.actionIdentifier,
+        id: notification.request.identifier,
+      };
+      AsyncStorage.setItem(NotificationService.LAST_NOTIFICATION_RESPONSE_KEY, JSON.stringify(stored)).catch(()=>{});
+    } catch {}
 
     // Navigate based on notification type
     this.navigateFromNotification(data);
@@ -320,3 +344,19 @@ class NotificationService {
 
 // Export singleton instance
 export const notificationService = new NotificationService();
+
+// Debug helper to fetch last stored notification + response
+export async function getLastNotificationDebug() {
+  try {
+    const [n, r] = await Promise.all([
+      AsyncStorage.getItem(NotificationService.LAST_NOTIFICATION_KEY),
+      AsyncStorage.getItem(NotificationService.LAST_NOTIFICATION_RESPONSE_KEY)
+    ]);
+    return {
+      lastReceived: n ? JSON.parse(n) : null,
+      lastResponse: r ? JSON.parse(r) : null,
+    };
+  } catch (e) {
+    return { error: (e as any)?.message || String(e) };
+  }
+}

@@ -1,3 +1,4 @@
+import { nav } from '@/services/navLogger';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
@@ -29,10 +30,12 @@ export default function PostCreateScreen() {
   const [media, setMedia] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [localCategoryId, setLocalCategoryId] = useState<string | null>(null);
+  // languageId: backend UUID, languageCode: ISO/script code (te, hi, ta, kn...)
   const [languageId, setLanguageId] = useState<string>('');
+  const [languageCode, setLanguageCode] = useState<string>('');
   const [languageName, setLanguageName] = useState<string>('');
-  const titleTx = useTransliteration({ languageCode: languageId, enabled: true, mode: 'on-boundary', debounceMs: 140 });
-  const contentTx = useTransliteration({ languageCode: languageId, enabled: true, mode: 'on-boundary', debounceMs: 140 });
+  const titleTx = useTransliteration({ languageCode, enabled: true, mode: 'on-boundary', debounceMs: 140 });
+  const contentTx = useTransliteration({ languageCode, enabled: true, mode: 'on-boundary', debounceMs: 140 });
   // showLogin state removed - now uses direct navigation to /auth/login
   // showUpgrade state removed - now uses direct navigation to /auth/login
   const [showLottie, setShowLottie] = useState<string | boolean>(false);
@@ -178,6 +181,7 @@ export default function PostCreateScreen() {
           const lang = JSON.parse(langJson);
           setLanguageName(lang?.nativeName || lang?.name || 'Language');
           setLanguageId(lang?.id);
+          if (lang?.code) setLanguageCode(lang.code);
           effLangId = lang?.id;
         } catch {}
       }
@@ -199,7 +203,7 @@ export default function PostCreateScreen() {
       } catch {}
       // fetch categories for dropdown (language resolved internally)
       try {
-        const list = await getCategories(effLangId);
+  const list = await getCategories(effLangId);
         setCategories(list);
       } catch {}
       // Configure native Google Sign-In if chosen
@@ -260,7 +264,7 @@ export default function PostCreateScreen() {
           },
           {
             text: 'Login',
-            onPress: () => router.push('/auth/login?from=post')
+            onPress: () => nav.push('/auth/login?from=post')
           }
         ]
       );
@@ -270,7 +274,7 @@ export default function PostCreateScreen() {
     return true;
   };
 
-  const titleRemaining = 35 - titleTx.value.length;
+  const TITLE_LIMIT = 50;
   const contentWords = useMemo(() => (contentTx.value.trim() ? contentTx.value.trim().split(/\s+/).length : 0), [contentTx.value]);
   // const contentRemaining = Math.max(0, 60 - contentWords); // not currently surfaced
 
@@ -483,12 +487,7 @@ export default function PostCreateScreen() {
           onPress={() => {
             setTabBarVisible(true);
             setLocalCategoryId(null);
-            // Smart back navigation - go back if possible, otherwise to news
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.replace('/news');
-            }
+            router.replace('/news'); // Always go to main news screen
           }}
           style={styles.headerLeft}
           accessibilityRole="button"
@@ -535,13 +534,13 @@ export default function PostCreateScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionLabel}>Title</Text>
-            <Text style={styles.counter}>{titleRemaining}</Text>
+            <Text style={styles.counter}>{titleTx.value.length}/{TITLE_LIMIT}</Text>
           </View>
           <TextInput
             style={styles.titleInput}
             placeholder="Short, factual headline"
             value={titleTx.value}
-            maxLength={35}
+            maxLength={TITLE_LIMIT}
             onChangeText={titleTx.onChangeText}
             placeholderTextColor="#9ca3af"
           />
@@ -550,7 +549,7 @@ export default function PostCreateScreen() {
         {/* Content Input */}
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionLabel}>Summary</Text>
+            <Text style={styles.sectionLabel}>Short News</Text>
             <Text style={styles.counter}>{contentWords}/60w</Text>
           </View>
           <TextInput
@@ -650,12 +649,16 @@ export default function PostCreateScreen() {
 
       {/* Fixed bottom action bar */}
       <View style={styles.bottomBar}>
-        <View style={styles.validationRow}>
-          {!titleTx.value.trim() && <Text style={styles.validationText}>Title required</Text>}
-          {!contentTx.value.trim() && <Text style={styles.validationText}>Summary required</Text>}
-          {!localCategoryId && <Text style={styles.validationText}>Category</Text>}
-          {media.length === 0 && <Text style={styles.validationText}>Media</Text>}
-        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.validationRow}
+        >
+          {!titleTx.value.trim() && <Text style={styles.validationChip}>Title required</Text>}
+          {!contentTx.value.trim() && <Text style={styles.validationChip}>Short News required</Text>}
+          {!localCategoryId && <Text style={styles.validationChip}>Category</Text>}
+          {media.length === 0 && <Text style={styles.validationChip}>Media</Text>}
+        </ScrollView>
         <TouchableOpacity
           style={[styles.publishBtn, !canPublish && styles.publishBtnDisabled]}
           onPress={onSubmit}
@@ -729,8 +732,9 @@ const styles = StyleSheet.create({
   uploadBadgeText: { fontSize: 11, fontWeight: '600', color: '#fff' },
   uploadError: { backgroundColor: '#dc2626' },
   bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 24, backgroundColor: '#ffffffee', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e2e8f0' },
-  validationRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
+  validationRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 8, marginBottom: 10 },
   validationText: { fontSize: 11, color: '#dc2626', backgroundColor: '#fee2e2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  validationChip: { fontSize: 11, color: '#b91c1c', backgroundColor: '#ffe4e6', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, fontWeight: '600', marginRight: 6 },
   publishBtn: { backgroundColor: Colors.light.primary, borderRadius: 16, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
   publishBtnDisabled: { backgroundColor: '#94a3b8' },
   publishBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },

@@ -2,13 +2,13 @@ import BottomSheet from '@/components/ui/BottomSheet';
 import { Colors } from '@/constants/Colors';
 import { LANGUAGES, type Language } from '@/constants/languages';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
-import { logout } from '@/services/api';
-import { softLogout } from '@/services/auth';
+// ...existing code...
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// ...existing code...
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AccountScreen() {
@@ -18,65 +18,75 @@ export default function AccountScreen() {
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [location, setLocation] = useState('');
+  const [placeName, setPlaceName] = useState('');
   const [language, setLanguage] = useState<Language | null>(null);
   const [notify, setNotify] = useState(true);
   const [autoplay, setAutoplay] = useState(false);
   const [langSheetOpen, setLangSheetOpen] = useState(false);
+  // No accordion/expand state needed
+
+  // Refactored: load all user/profile state
+  const loadProfileState = useCallback(async () => {
+    const jwt = await AsyncStorage.getItem('jwt');
+    setLoggedIn(Boolean(jwt));
+    const savedLang = await AsyncStorage.getItem('selectedLanguage');
+    if (savedLang) {
+      try {
+        const parsed = JSON.parse(savedLang);
+        if (parsed && typeof parsed === 'object' && parsed.code) setLanguage(parsed as Language);
+        else if (typeof parsed === 'string') setLanguage(LANGUAGES.find(l => l.code === parsed) || LANGUAGES[0]);
+      } catch {
+        setLanguage(LANGUAGES[0]);
+      }
+    } else {
+      setLanguage(LANGUAGES[0]);
+    }
+    setNotify((await AsyncStorage.getItem('notify')) !== '0');
+    setAutoplay((await AsyncStorage.getItem('autoplay')) === '1');
+    const savedName = await AsyncStorage.getItem('profile_name');
+    if (savedName) setName(savedName); else setName('');
+    const savedRole = await AsyncStorage.getItem('profile_role');
+    if (savedRole) setRole(savedRole); else setRole('');
+    const savedLocObj = await AsyncStorage.getItem('profile_location_obj');
+    if (savedLocObj) {
+      try {
+        const obj = JSON.parse(savedLocObj);
+        setLocation(obj?.name || '');
+        setPlaceName(obj?.placeName || obj?.fullName || '');
+      } catch {
+        const savedLoc = await AsyncStorage.getItem('profile_location');
+        if (savedLoc) setLocation(savedLoc); else setLocation('');
+        setPlaceName('');
+      }
+    } else {
+      const savedLoc = await AsyncStorage.getItem('profile_location');
+      if (savedLoc) setLocation(savedLoc); else setLocation('');
+      setPlaceName('');
+    }
+  }, []);
 
   useEffect(() => {
     setTabBarVisible(false);
     return () => setTabBarVisible(true);
   }, [setTabBarVisible]);
 
-  useEffect(() => {
-    (async () => {
-      const jwt = await AsyncStorage.getItem('jwt');
-      setLoggedIn(Boolean(jwt));
-      const savedLang = await AsyncStorage.getItem('selectedLanguage');
-      if (savedLang) {
-        try {
-          const parsed = JSON.parse(savedLang);
-          if (parsed && typeof parsed === 'object' && parsed.code) setLanguage(parsed as Language);
-          else if (typeof parsed === 'string') setLanguage(LANGUAGES.find(l => l.code === parsed) || LANGUAGES[0]);
-        } catch {
-          setLanguage(LANGUAGES[0]);
-        }
-      } else {
-        setLanguage(LANGUAGES[0]);
-      }
-      setNotify((await AsyncStorage.getItem('notify')) !== '0');
-      setAutoplay((await AsyncStorage.getItem('autoplay')) === '1');
-      const savedName = await AsyncStorage.getItem('profile_name');
-      if (savedName) setName(savedName);
-      const savedRole = await AsyncStorage.getItem('profile_role');
-      if (savedRole) setRole(savedRole);
-      const savedLocObj = await AsyncStorage.getItem('profile_location_obj');
-      if (savedLocObj) {
-        try {
-          const obj = JSON.parse(savedLocObj);
-          setLocation(obj?.name || '');
-        } catch {
-          const savedLoc = await AsyncStorage.getItem('profile_location');
-          if (savedLoc) setLocation(savedLoc);
-        }
-      } else {
-        const savedLoc = await AsyncStorage.getItem('profile_location');
-        if (savedLoc) setLocation(savedLoc);
-      }
-    })();
-  }, []);
-
-  // Refresh location when coming back from picker
+  // Always refresh state on focus (fixes stale UI after login/logout)
   useFocusEffect(
     React.useCallback(() => {
+      loadProfileState();
+      // Also refresh location if changed
       (async () => {
         const savedLocObj = await AsyncStorage.getItem('profile_location_obj');
         if (savedLocObj) {
-          try { const obj = JSON.parse(savedLocObj); setLocation(obj?.name || ''); } catch {}
+          try {
+            const obj = JSON.parse(savedLocObj);
+            setLocation(obj?.name || '');
+            setPlaceName(obj?.placeName || obj?.fullName || '');
+          } catch {}
         }
       })();
       return () => {};
-    }, [])
+    }, [loadProfileState])
   );
 
   // Persist toggles immediately (remove Save button)
@@ -87,147 +97,182 @@ export default function AccountScreen() {
     await AsyncStorage.setItem('selectedLanguage', JSON.stringify(lang));
   }, []);
 
-  const gotoLogin = () => router.push('/auth/login');
-  const doLogout = async () => {
-    try {
-      const jwt = await AsyncStorage.getItem('jwt');
-      const mobile = await AsyncStorage.getItem('profile_mobile') || await AsyncStorage.getItem('last_login_mobile') || '';
-        if (jwt) { try { await logout(); } catch (e:any) { console.warn('[UI] remote logout failed (continuing)', e?.message); } }
-  // legacy is_guest_session flag no longer in use
-      await softLogout([], mobile || undefined);
-      setLoggedIn(false);
-      // Keep role if present but tokens gone; ensures fast MPIN flow next time
-    } catch (e) {
-      try { console.warn('[UI] logout failed locally', (e as any)?.message); } catch {}
-    }
-  };
+  // ...existing code...
 
   const changeLocation = () => router.push({ pathname: '/settings/location' as any });
   const languageDisplay = useMemo(() => language?.name ?? 'English', [language]);
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.appBar}>
-        <Pressable onPress={() => router.replace('/news')} style={styles.backRow}>
-          <Feather name="arrow-left" size={22} color={Colors.light.primary} />
-          <Text style={styles.backText}>Home</Text>
-        </Pressable>
-        <Text style={styles.appBarTitle}>Account</Text>
-        <View style={{ width: 60 }} />
-      </View>
-        <View style={styles.profileHeader}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{(name || 'G').charAt(0).toUpperCase()}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.displayName}>{loggedIn ? name || 'User' : 'Reader'}</Text>
-            <Text style={styles.subtleText}>{loggedIn ? (role || 'Member') : 'Not signed in'}</Text>
-          </View>
-          {loggedIn ? (
-            <Pressable onPress={doLogout} style={[styles.button, styles.secondary, { width: 100 }]}>
-              <Text style={[styles.buttonText, { color: Colors.light.primary }]}>Logout</Text>
-            </Pressable>
-          ) : (
-            <Pressable onPress={gotoLogin} style={[styles.button, styles.primary, { width: 100 }]}>
-              <Text style={[styles.buttonText, { color: '#fff' }]}>Sign In</Text>
-            </Pressable>
-          )}
-        </View>
-        {!loggedIn && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Welcome</Text>
-            <Text style={styles.helper}>Sign in or register as a Citizen Reporter to manage your profile and post.</Text>
-            <Pressable onPress={gotoLogin} style={[styles.button, styles.primary, { marginTop: 12 }]}>
-              <Text style={[styles.buttonText, { color: '#fff' }]}>Sign In / Register</Text>
-            </Pressable>
-          </View>
-        )}
 
-        {/* Location Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Location</Text>
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.label}>{location ? location : 'Not set'}</Text>
-              <Text style={styles.helper}>Used to personalize local news</Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f6f7fb' }}>
+      {/* AppBar with Back Button */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: 8, paddingHorizontal: 8, marginBottom: 2 }}>
+        <Pressable
+          onPress={() => router.replace('/news')} // Always go to news tab
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 6 }}
+          accessibilityLabel="Back"
+        >
+          <Feather name="arrow-left" size={22} color={Colors.light.primary} />
+          <Text style={{ color: Colors.light.primary, fontWeight: '600', fontSize: 16 }}>Back</Text>
+        </Pressable>
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 12, gap: 18, paddingBottom: 32 }} showsVerticalScrollIndicator={true}>
+        {/* User Profile Card */}
+        <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 22, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 }}>
+          <View style={{ position: 'relative', marginBottom: 8 }}>
+            <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 6, elevation: 2 }}>
+              <Text style={{ fontSize: 36, fontWeight: '900', color: Colors.light.primary }}>{(name || 'G').charAt(0).toUpperCase()}</Text>
             </View>
-            <Pressable onPress={changeLocation} style={[styles.button, styles.secondary, { paddingHorizontal: 14 }]}>
-              <Text style={[styles.buttonText, { color: Colors.light.primary, fontSize: 14 }]}>Change location</Text>
-            </Pressable>
           </View>
+          <Text style={{ color: Colors.light.primary, fontSize: 20, fontWeight: '800', marginTop: 2 }}>{loggedIn ? name || 'User' : 'Reader'}</Text>
+          <Text style={{ color: '#6b7280', fontSize: 14, marginTop: 1 }}>{loggedIn ? (role || 'Member') : 'Not signed in'}</Text>
         </View>
+
+        {/* News Reporter Login Card */}
+        <Pressable
+          onPress={() => router.push('/auth/login?from=reporter')}
+          style={{ backgroundColor: '#fff', borderRadius: 18, padding: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <Feather name="user-check" size={22} color={Colors.light.secondary} />
+            <Text style={{ color: Colors.light.secondary, fontWeight: '700', fontSize: 16 }}>News Reporter Login</Text>
+          </View>
+          <Feather name="chevron-right" size={22} color={Colors.light.secondary} />
+        </Pressable>
 
         {/* Language Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Language</Text>
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.label}>{languageDisplay}</Text>
-              <Text style={styles.helper}>App language for headlines and UI</Text>
+        <Pressable
+          onPress={() => setLangSheetOpen(true)}
+          style={{ backgroundColor: '#fff', borderRadius: 18, padding: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <Feather name="globe" size={22} color={Colors.light.primary} />
+            <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.light.primary }}>Language</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ color: Colors.light.secondary, fontWeight: '700', fontSize: 15 }}>{languageDisplay}</Text>
+            <Feather name="chevron-right" size={22} color={Colors.light.secondary} />
+          </View>
+        </Pressable>
+
+        {/* Location Card */}
+        <Pressable
+          onPress={changeLocation}
+          style={{ backgroundColor: '#fff', borderRadius: 18, padding: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <Feather name="map-pin" size={22} color={Colors.light.primary} />
+            <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.light.primary }}>Location</Text>
+          </View>
+          <View style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 0, maxWidth: 180 }}>
+            {placeName ? (
+              <Text style={{ color: Colors.light.secondary, fontWeight: '700', fontSize: 15 }} numberOfLines={2} ellipsizeMode="tail">{placeName}</Text>
+            ) : (
+              <Text style={{ color: '#bbb', fontWeight: '700', fontSize: 15 }}>Not set</Text>
+            )}
+            <Feather name="chevron-right" size={22} color={Colors.light.secondary} style={{ marginTop: 2 }} />
+          </View>
+        </Pressable>
+
+        {/* Preferences Card */}
+        <View style={{ backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 18, padding: 20, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <Feather name="settings" size={20} color={Colors.light.primary} />
+            <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.light.primary }}>Preferences</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Feather name="bell" size={20} color={Colors.light.primary} />
+              <Text style={{ fontSize: 15, color: Colors.light.primary }}>Notifications</Text>
             </View>
-            <Pressable onPress={() => setLangSheetOpen(true)} style={[styles.button, styles.secondary, { paddingHorizontal: 14 }]}>
-              <Text style={[styles.buttonText, { color: Colors.light.primary, fontSize: 14 }]}>Change</Text>
+            <Pressable onPress={() => setNotify(!notify)} style={{ backgroundColor: notify ? Colors.light.secondary : '#e5e7eb', borderRadius: 999, paddingHorizontal: 18, paddingVertical: 7, minWidth: 60, alignItems: 'center' }}>
+              <Text style={{ color: notify ? '#fff' : '#333', fontWeight: '700' }}>{notify ? 'On' : 'Off'}</Text>
+            </Pressable>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Feather name="play-circle" size={20} color={Colors.light.primary} />
+              <Text style={{ fontSize: 15, color: Colors.light.primary }}>Video autoplay</Text>
+            </View>
+            <Pressable onPress={() => setAutoplay(!autoplay)} style={{ backgroundColor: autoplay ? Colors.light.secondary : '#e5e7eb', borderRadius: 999, paddingHorizontal: 18, paddingVertical: 7, minWidth: 60, alignItems: 'center' }}>
+              <Text style={{ color: autoplay ? '#fff' : '#333', fontWeight: '700' }}>{autoplay ? 'On' : 'Off'}</Text>
             </Pressable>
           </View>
         </View>
 
-        {/* Other Preferences */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Preferences</Text>
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.label}>Notifications</Text>
-              <Text style={styles.helper}>Breaking news and daily digests</Text>
-            </View>
-            <Switch value={notify} onValueChange={setNotify} />
+        {/* App Info & Legal Card */}
+        <View style={{ backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 18, padding: 20, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <Feather name="info" size={20} color={Colors.light.primary} />
+            <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.light.primary }}>App Info</Text>
           </View>
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.label}>Video autoplay</Text>
-              <Text style={styles.helper}>Play videos automatically on Wi‑Fi</Text>
-            </View>
-            <Switch value={autoplay} onValueChange={setAutoplay} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Text style={{ color: Colors.light.primary, fontWeight: '600' }}>Version</Text>
+            <Text style={{ color: '#666' }}>{'1.0.0' /* TODO: dynamic version */}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Pressable onPress={() => router.push('/settings/terms')}>
+              <Text style={{ color: Colors.light.primary, fontWeight: '600' }}>Terms & Conditions</Text>
+            </Pressable>
+            <Pressable onPress={() => router.push('/settings/privacy')}>
+              <Text style={{ color: Colors.light.primary, fontWeight: '600' }}>Privacy Policy</Text>
+            </Pressable>
           </View>
         </View>
 
-        {/* Language Picker Bottom Sheet */}
-        <BottomSheet
-          visible={langSheetOpen}
-          onClose={() => setLangSheetOpen(false)}
-          snapPoints={[400]}
-          initialSnapIndex={0}
-          respectSafeAreaBottom={false}
-          shadowEnabled={false}
-          header={
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.light.primary }}>Select language</Text>
-              <Pressable onPress={() => setLangSheetOpen(false)} accessibilityLabel="Close language picker">
-                <MaterialIcons name="close" size={22} color={Colors.light.primary} />
-              </Pressable>
-            </View>
-          }
+        {/* Login/Logout Card */}
+        <Pressable
+          onPress={async () => {
+            if (loggedIn) {
+              await AsyncStorage.removeItem('jwt');
+              setLoggedIn(false);
+              setName(''); setRole('');
+            } else {
+              router.push('/auth/login');
+            }
+          }}
+          style={{ backgroundColor: Colors.light.primary, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 8, marginBottom: 24 }}
         >
-          <View style={{ paddingBottom: 50 }}>
-            {LANGUAGES.map((l) => {
-              const active = language?.code === l.code;
-              return (
-                <Pressable
-                  key={l.code}
-                  onPress={async () => { await persistLanguage(l); setLangSheetOpen(false); }}
-                  style={({ pressed }) => [styles.langRow, active && styles.langRowActive, pressed && { opacity: 0.9 }]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.langNative, { color: l.color }]}>{l.nativeName}</Text>
-                    <Text style={styles.langEnglish}>{l.name}</Text>
-                  </View>
-                  {active ? <MaterialIcons name="check-circle" size={22} color={Colors.light.secondary} /> : <View style={{ width: 22, height: 22 }} />}
-                </Pressable>
-              );
-            })}
-          </View>
-        </BottomSheet>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>{loggedIn ? 'Logout' : 'Login'}</Text>
+        </Pressable>
       </ScrollView>
+
+      {/* Language Picker Bottom Sheet */}
+      <BottomSheet
+        visible={langSheetOpen}
+        onClose={() => setLangSheetOpen(false)}
+        snapPoints={[400]}
+        initialSnapIndex={0}
+        respectSafeAreaBottom={false}
+        shadowEnabled={false}
+        header={
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.light.primary }}>Select language</Text>
+            <Pressable onPress={() => setLangSheetOpen(false)} accessibilityLabel="Close language picker">
+              <MaterialIcons name="close" size={22} color={Colors.light.primary} />
+            </Pressable>
+          </View>
+        }
+      >
+        <View style={{ paddingBottom: 50 }}>
+          {LANGUAGES.map((l) => {
+            const active = language?.code === l.code;
+            return (
+              <Pressable
+                key={l.code}
+                onPress={async () => { await persistLanguage(l); setLangSheetOpen(false); }}
+                style={({ pressed }) => [styles.langRow, active && styles.langRowActive, pressed && { opacity: 0.9 }]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.langNative, { color: l.color }]}>{l.nativeName}</Text>
+                  <Text style={styles.langEnglish}>{l.name}</Text>
+                </View>
+                {active ? <MaterialIcons name="check-circle" size={22} color={Colors.light.secondary} /> : <View style={{ width: 22, height: 22 }} />}
+              </Pressable>
+            );
+          })}
+        </View>
+      </BottomSheet>
     </SafeAreaView>
   );
 }

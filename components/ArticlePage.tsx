@@ -1,3 +1,4 @@
+import { ResizeMode, VideoWrapper } from '@/components/VideoWrapper';
 import { WEB_BASE_URL } from '@/config/appConfig';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { useAutoHideBottomBar } from '@/hooks/useAutoHideBottomBar';
@@ -5,7 +6,6 @@ import { useReaction } from '@/hooks/useReaction';
 import { Article } from '@/types';
 import { Ramabhadra_400Regular, useFonts } from '@expo-google-fonts/ramabhadra';
 import { AntDesign, Feather } from '@expo/vector-icons';
-import { ResizeMode, Video } from 'expo-av';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
@@ -395,7 +395,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
                   {s.type === 'image' ? (
                     <Image source={{ uri: s.src }} style={styles.heroMedia} cachePolicy="memory-disk" />
                   ) : (
-                    <Video
+                    <VideoWrapper
                       source={{ uri: s.src }}
                       style={styles.heroMedia}
                       resizeMode={ResizeMode.COVER}

@@ -164,3 +164,68 @@ The app maintains user/device preferences via the backend `/preferences` endpoin
 
 ---
 For questions about the preference system, see `services/preferences.ts` and `hooks/usePreferences.ts` for the authoritative logic.
+
+## Profile Editing & Legal Screens
+
+The Account page now includes a Profile section with basic editable fields and links to Terms & Conditions and Privacy Policy screens.
+
+### Features
+* Avatar upload (image picker → `uploadMedia` → sets `profilePhotoUrl` & `profilePhotoMediaId`).
+* Editable Full Name & Bio fields (optimistic local state with dirty tracking).
+* Save button appears only when changes differ from last loaded snapshot.
+* Lightweight `useProfile` hook manages:
+	- Initial load via `getUserProfile` (gracefully handles first-time users with no profile yet).
+	- Local modifications (`updateLocal`).
+	- Avatar selection + upload (`pickAndUploadAvatar`).
+	- Save operation merges and persists via `updateUserProfile` (PATCH with fallback logic inside API layer).
+* Inline error surfacing (profile load/save/upload) using hook `error` state.
+* Legal pages (`/settings/terms` and `/settings/privacy`) are simple scrollable static placeholder documents—replace with real content from counsel.
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `hooks/useProfile.ts` | Encapsulates profile load/save, dirty detection, avatar upload helper. |
+| `components/AvatarPicker.tsx` | Reusable avatar component with edit overlay and upload progress indicator. |
+| `app/settings/account.tsx` | Integrates Profile section alongside Location & Language preferences. |
+| `app/settings/terms.tsx` | Placeholder Terms & Conditions screen. |
+| `app/settings/privacy.tsx` | Placeholder Privacy Policy screen. |
+
+### Data Flow
+1. Account screen mounts → `useProfile` loads current profile (GET `/profiles/me`).
+2. User edits name/bio or updates avatar → local state updated & dirty flag recalculated.
+3. Save → `updateUserProfile` performs GET merge + PATCH (or POST if profile absent) ensuring backward compatible server semantics.
+4. On success snapshot resets → Save button disappears.
+
+### Avatar Upload Strategy
+`uploadMedia` attempts multiple form field strategies (`file`, `image`, `media`, `files[]`) to maximize backend compatibility. Successful uploads are cached by local URI to avoid duplicate uploads during the same session.
+
+### Extending Profile
+Add more fields to the `fields` array in `useProfile.save` and corresponding UI inputs (e.g., gender, dob, occupation). All unmodified fields remain untouched server-side due to merge logic.
+
+### Future Enhancements (Ideas)
+* Field-level validation (DOB format, max bio length, restricted characters).
+* Optimistic save to show immediate success toast while network completes.
+* Graceful retry queue for offline edits (persist patch diff until connectivity returns).
+* Central toast system integration for consistent messaging (see existing Toast component patterns if/when added).
+* Add a dedicated Account / Legal section in navigation for store review compliance.
+
+---
+
+## Debug: Inspecting Local Storage
+
+Use the Account Debug screen (`/settings/account-debug`) to introspect AsyncStorage during development:
+
+Buttons added:
+* "Dump All Storage to Log" – prints every key (and truncated values) with size metrics.
+* "Dump News Cache Keys" – filters to keys beginning with `news_cache:`.
+* "Show Preferences Cache" – logs the raw `preferences_cache_v1` value.
+* "Storage Health Check" – summary of total keys and those matching cache/token/pref/news patterns.
+
+Underlying helpers live in `services/debugStorage.ts`:
+* `logAllStorage({ includeValues, maxValueLength, filterPrefix })`
+* `logStorageKey(key)`
+* `removeStorageKey(key)`
+* `storageHealthCheck()`
+
+These are safe in production (no build-time stripping currently) but should not surface in user-facing navigation for release builds.
+

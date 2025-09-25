@@ -88,6 +88,20 @@ export async function updateUserProfile(partial: UserProfileUpdateInput): Promis
   }
 }
 
+// Fetch current user profile; if not found (404) return an empty object so UI can treat as new profile.
+export async function getUserProfile(): Promise<UserProfileResponse | null> {
+  const endpoint = '/profiles/me';
+  try {
+    const profile = await request<UserProfileResponse>(endpoint, { method: 'GET' });
+    return profile || null;
+  } catch (e: any) {
+    if (e instanceof HttpError && (e.status === 404 || e.status === 401)) {
+      return null; // no profile yet or unauthorized (caller can handle auth)
+    }
+    return null; // swallow other errors for now; caller may refetch explicitly
+  }
+}
+
 const mockArticles: Article[] = [
   {
     id: '1',
@@ -986,7 +1000,32 @@ async function resolveLanguageId(): Promise<string | undefined> {
 }
 
 export async function getCategories(languageId?: string): Promise<CategoryItem[]> {
-  const langId = languageId || (await resolveLanguageId());
+  let langId = languageId || (await resolveLanguageId());
+  // Prevent legacy numeric id usage: remap if numeric and we can find a matching code in stored JSON
+  try {
+    if (langId && /^\d+$/.test(langId)) {
+      const raw = await AsyncStorage.getItem('selectedLanguage');
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          const storedCode = parsed?.code;
+          if (storedCode) {
+            // fetch live languages list (best-effort)
+            try {
+              const list = await getLanguages();
+              const match = list.find((l: any) => l.code === storedCode);
+              if (match && match.id && match.id !== langId) {
+                console.log('[CATEGORIES][LANG_MIGRATE] Remapping legacy numeric languageId', langId, '→', match.id, 'code', storedCode);
+                langId = match.id;
+              }
+            } catch (e) {
+              console.log('[CATEGORIES][LANG_MIGRATE] getLanguages failed, keeping legacy id', (e as any)?.message || e);
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
   const safeLangId = langId || 'en';
   const cacheKey = CATEGORIES_CACHE_KEY(safeLangId);
   const cachedRaw = await AsyncStorage.getItem(cacheKey);
@@ -997,8 +1036,63 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
   }
 
   try {
-  const params = new URLSearchParams({ languageId: safeLangId });
-  const res = await request<any>(`/categories?${params.toString()}`, { noAuth: true });
+    console.log('[CATEGORIES][REQ] primary fetch with languageId', safeLangId);
+    const params = new URLSearchParams({ languageId: safeLangId });
+    let res: any;
+    let primaryFailed400 = false;
+    try {
+      res = await request<any>(`/categories?${params.toString()}`, { noAuth: true });
+    } catch (e: any) {
+      // Detect 400 likely due to invalid languageId
+      const msg = e?.message || String(e);
+      if (/400/.test(msg) || /Bad Request/i.test(msg)) {
+        primaryFailed400 = true;
+        console.warn('[CATEGORIES][REQ] primary 400 for languageId', safeLangId, '→ will attempt remap & retry');
+      } else {
+        throw e;
+      }
+    }
+    if (primaryFailed400) {
+      // Attempt retry WITHOUT param first
+      try {
+        const retryNoParam = await request<any>('/categories', { noAuth: true });
+        const arrNP = Array.isArray(retryNoParam)
+          ? retryNoParam
+          : Array.isArray(retryNoParam?.data) ? retryNoParam.data
+          : Array.isArray(retryNoParam?.items) ? retryNoParam.items
+          : Array.isArray(retryNoParam?.categories) ? retryNoParam.categories
+          : null;
+        if (Array.isArray(arrNP) && arrNP.length) {
+          console.log('[CATEGORIES][RETRY] succeeded without languageId after 400 primary', { count: arrNP.length });
+          return normalizeAndCacheCategoryList(arrNP, cacheKey);
+        }
+      } catch (e) {
+        console.warn('[CATEGORIES][RETRY] no-param after 400 failed', e instanceof Error ? e.message : e);
+      }
+      // Attempt code-based remap if we still have legacy id (already tried earlier, but maybe list changed)
+      if (langId && /^\d+$/.test(langId)) {
+        try {
+          const raw = await AsyncStorage.getItem('selectedLanguage');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const code = parsed?.code;
+            if (code) {
+              try {
+                const list = await getLanguages();
+                const match = list.find((l: any) => l.code === code);
+                if (match && match.id && match.id !== langId) {
+                  console.log('[CATEGORIES][RETRY] remapped legacy id after 400', langId, '→', match.id);
+                  langId = match.id;
+                  const retryParams = new URLSearchParams({ languageId: langId });
+                  const resRemap = await request<any>(`/categories?${retryParams.toString()}`, { noAuth: true });
+                  res = resRemap; // proceed to normalization below
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+    }
     const arr = Array.isArray(res)
       ? res
       : Array.isArray(res?.items)
@@ -1012,7 +1106,44 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
       : Array.isArray(res?.data?.categories)
       ? res.data.categories
       : null;
-    if (!arr) throw new Error('Invalid categories response');
+    if (!arr || !Array.isArray(arr) || arr.length === 0) {
+      console.warn('[CATEGORIES][WARN] Empty or invalid response for languageId=', safeLangId, '→ trying fallback strategies');
+      // Strategy 2: no language param
+      try {
+        const res2 = await request<any>(`/categories`, { noAuth: true });
+        const arr2 = Array.isArray(res2)
+          ? res2
+          : Array.isArray(res2?.data) ? res2.data
+          : Array.isArray(res2?.items) ? res2.items
+          : Array.isArray(res2?.categories) ? res2.categories
+          : null;
+        if (Array.isArray(arr2) && arr2.length) {
+          console.log('[CATEGORIES][FALLBACK] succeeded without languageId param', { count: arr2.length });
+          return normalizeAndCacheCategoryList(arr2, cacheKey);
+        }
+      } catch (e) {
+        console.warn('[CATEGORIES][FALLBACK] no-param attempt failed', e instanceof Error ? e.message : e);
+      }
+      // Strategy 3: alt param name like lang / langId
+      for (const key of ['lang', 'langId']) {
+        try {
+          const res3 = await request<any>(`/categories?${key}=${encodeURIComponent(safeLangId)}`, { noAuth: true });
+          const arr3 = Array.isArray(res3)
+            ? res3
+            : Array.isArray(res3?.data) ? res3.data
+            : Array.isArray(res3?.items) ? res3.items
+            : Array.isArray(res3?.categories) ? res3.categories
+            : null;
+          if (Array.isArray(arr3) && arr3.length) {
+            console.log('[CATEGORIES][FALLBACK] succeeded with alt param', key, { count: arr3.length });
+            return normalizeAndCacheCategoryList(arr3, cacheKey);
+          }
+        } catch (e) {
+          console.warn('[CATEGORIES][FALLBACK] alt param', key, 'failed', e instanceof Error ? e.message : e);
+        }
+      }
+      throw new Error('Invalid categories response');
+    }
     const list: CategoryItem[] = (arr as any[]).map((x) => ({
       id: String(x?.id || x?._id || x?.value || x?.key || x?.slug || x?.name),
       name: String(x?.name || x?.title || x?.label || x?.slug || 'Category'),
@@ -1034,6 +1165,25 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
     console.warn('getCategories failed', err);
     return [];
   }
+}
+
+function normalizeAndCacheCategoryList(arr: any[], cacheKey: string): CategoryItem[] {
+  const list: CategoryItem[] = (arr as any[]).map((x) => ({
+    id: String(x?.id || x?._id || x?.value || x?.key || x?.slug || x?.name),
+    name: String(x?.name || x?.title || x?.label || x?.slug || 'Category'),
+    slug: x?.slug,
+    iconUrl: x?.iconUrl || x?.icon || x?.iconURL || x?.imageUrl || null,
+    children: Array.isArray(x?.children)
+      ? (x.children as any[]).map((c) => ({
+          id: String(c?.id || c?._id || c?.value || c?.key || c?.slug || c?.name),
+          name: String(c?.name || c?.title || c?.label || c?.slug || 'Category'),
+          slug: c?.slug,
+          iconUrl: c?.iconUrl || c?.icon || c?.iconURL || c?.imageUrl || null,
+        }))
+      : [],
+  }));
+  try { AsyncStorage.setItem(cacheKey, JSON.stringify(list)); } catch {}
+  return list;
 }
 
 // Auth APIs
@@ -1367,6 +1517,8 @@ export async function createShortNews(input: CreateShortNewsInput): Promise<Crea
     if (await getMockMode()) {
       return { id: `sn_${Date.now()}`, url: undefined, raw: { mock: true, input } };
     }
+    // Provide an idempotency key so backend (if it supports) can ignore duplicates
+    const clientRequestId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const payload: any = {
       title: input.title,
       content: input.content,
@@ -1386,13 +1538,23 @@ export async function createShortNews(input: CreateShortNewsInput): Promise<Crea
       lng: input.location?.longitude,
       accuracy: input.location?.accuracyMeters,
       role: input.role || 'CITIZEN_REPORTER',
+      clientRequestId,
     };
     if (DEBUG_API) {
       try {
         console.log('[API] createShortNews payload keys', Object.keys(payload));
       } catch {}
     }
-    const json = await request<any>('/shortnews', { method: 'POST', body: payload });
+    let json: any;
+    try {
+      json = await request<any>('/shortnews', { method: 'POST', body: payload, retry: 0, timeoutMs: 60000 });
+    } catch (e: any) {
+      if (e?.message === 'Request timed out') {
+        // Re-throw with clearer context for UI layer
+        throw new Error('Upload taking too long. Please check network and try again.');
+      }
+      throw e;
+    }
     const data = (json as any)?.data ?? json;
     const id: string = data?.id || data?._id || `${Date.now()}`;
     const url: string | undefined = data?.url || data?.shareUrl || data?.permalink;

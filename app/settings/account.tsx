@@ -1,15 +1,21 @@
+import { AvatarPicker } from '@/components/AvatarPicker';
+import { FieldRow } from '@/components/settings/FieldRow';
+import { InlineMessage } from '@/components/settings/InlineMessage';
+import { SectionCard } from '@/components/settings/SectionCard';
 import type { Language } from '@/constants/languages';
 import { usePreferences } from '@/hooks/usePreferences';
+import { useProfile } from '@/hooks/useProfile';
 import { getLanguages } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useMemo } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function AccountScreen() {
   const router = useRouter();
   const { prefs, updateLocation, updateLanguage, loading } = usePreferences();
+  const { profile, loading: profileLoading, saving: profileSaving, dirty: profileDirty, error: profileError, updateLocal: updateProfileLocal, save: saveProfile } = useProfile();
   const [rawDraft, setRawDraft] = React.useState<{ name: string; lat: number; lng: number } | null>(null);
   const [syncing, setSyncing] = React.useState(false);
   const [inlineMsg, setInlineMsg] = React.useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -158,49 +164,95 @@ export default function AccountScreen() {
   };
 
   const lastUpdated = prefs?.updatedAt ? new Date(prefs.updatedAt) : null;
-  const lastUpdatedLabel = lastUpdated ? `Updated ${lastUpdated.toLocaleDateString()} ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Never updated';
+  function timeAgo(d: Date) {
+    const diff = Date.now() - d.getTime();
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+    const days = Math.floor(h / 24); if (days < 7) return `${days}d ago`;
+    return d.toLocaleDateString();
+  }
+  const lastUpdatedLabel = lastUpdated ? `Updated ${timeAgo(lastUpdated)}` : 'Never updated';
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Account Page</Text>
-      <View style={styles.card}>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Account</Text>
+      {/* Profile Section */}
+      <SectionCard>
+        <Text style={styles.sectionTitle}>Profile</Text>
+        <View style={{ marginTop: 14, flexDirection: 'row', alignItems: 'flex-start' }}>
+          <AvatarPicker
+            url={profile?.profilePhotoUrl || undefined}
+            onPick={(r) => {
+              if (r) updateProfileLocal({ profilePhotoUrl: r.url, profilePhotoMediaId: r.mediaId });
+            }}
+          />
+          <View style={{ flex: 1, marginLeft: 18 }}>
+            {profileLoading ? (
+              <View>
+                <View style={styles.skelLineBig} />
+                <View style={styles.skelSpacer} />
+                <View style={styles.skelLineMulti} />
+              </View>
+            ) : (
+              <>
+                <FieldRow label="Full Name" value={(profile as any)?.fullName || ''} onChangeText={(t) => updateProfileLocal({ fullName: t })} placeholder="Enter full name" disabled={profileSaving} />
+                <FieldRow label="Bio" value={(profile as any)?.bio || ''} onChangeText={(t) => updateProfileLocal({ bio: t })} placeholder="Short bio" disabled={profileSaving} multiline />
+              </>
+            )}
+            {profileError && <InlineMessage type="error" text={profileError} />}
+            <View style={{ flexDirection: 'row', marginTop: 14, alignItems: 'center' }}>
+              {profileDirty && (
+                <TouchableOpacity style={[styles.actionBtn, styles.primaryAction]} disabled={profileSaving} onPress={() => saveProfile()}>
+                  <Text style={styles.actionBtnTxt}>{profileSaving ? 'Saving…' : 'Save Profile'}</Text>
+                </TouchableOpacity>
+              )}
+              {profileLoading && <ActivityIndicator style={{ marginLeft: 10 }} />}
+            </View>
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', marginTop: 12 }}>
+          <TouchableOpacity onPress={() => router.push('/settings/terms' as any)} style={styles.linkBtn}><Text style={styles.linkTxt}>Terms</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/settings/privacy' as any)} style={styles.linkBtn}><Text style={styles.linkTxt}>Privacy</Text></TouchableOpacity>
+        </View>
+      </SectionCard>
+      <SectionCard>
         <Text style={styles.sectionTitle}>Location Preference</Text>
         <Text style={styles.value}>{currentDisplay()}</Text>
         <Text style={styles.metaLabel}>{lastUpdatedLabel}</Text>
         {loading && <ActivityIndicator style={{ marginTop: 8 }} />}
   {effectiveDraft && (<Text style={styles.draftNote}>Unsaved selection. Press Save to apply.</Text>)}
         {inlineMsg && (
-          <View style={[styles.inlineMsg, inlineMsg.type === 'error' ? styles.inlineErr : styles.inlineOk]}>
-            <Text style={styles.inlineMsgTxt}>{inlineMsg.text}</Text>
-          </View>
+          <InlineMessage type={inlineMsg.type} text={inlineMsg.text} onHide={() => setInlineMsg(null)} />
         )}
         <View style={styles.row}>
-          <TouchableOpacity style={styles.smallBtn} onPress={() => router.push('/settings/location')}>
-            <Text style={styles.smallBtnTxt}>Change</Text>
+          <TouchableOpacity style={[styles.actionBtn, styles.secondaryAction]} onPress={() => router.push('/settings/location')}>
+            <Text style={styles.actionBtnTxt}>Change</Text>
           </TouchableOpacity>
           {effectiveDraft && (
-            <TouchableOpacity style={[styles.smallBtn, styles.saveEmph]} onPress={saveDraftToPreferences} disabled={syncing}>
-              <Text style={styles.smallBtnTxt}>{syncing ? 'Saving…' : 'Save'}</Text>
+            <TouchableOpacity style={[styles.actionBtn, styles.successAction]} onPress={saveDraftToPreferences} disabled={syncing}>
+              <Text style={styles.actionBtnTxt}>{syncing ? 'Saving…' : 'Save'}</Text>
             </TouchableOpacity>
           )}
           {!effectiveDraft && (
-            <TouchableOpacity style={[styles.smallBtn, styles.gpsBtn]} onPress={refreshViaGPS} disabled={gpsBusy}>
-              <Text style={styles.smallBtnTxt}>{gpsBusy ? 'GPS…' : 'Refresh GPS'}</Text>
+            <TouchableOpacity style={[styles.actionBtn, styles.altAction]} onPress={refreshViaGPS} disabled={gpsBusy}>
+              <Text style={styles.actionBtnTxt}>{gpsBusy ? 'GPS…' : 'Refresh GPS'}</Text>
             </TouchableOpacity>
           )}
         </View>
-      </View>
+      </SectionCard>
       {/* Language Preference Card */}
-      <View style={styles.card}>
+      <SectionCard>
         <Text style={styles.sectionTitle}>Language</Text>
         <Text style={styles.value}>{currentLanguage?.nativeName || currentLanguage?.name || prefs?.languageId || 'Not set'}</Text>
         <View style={styles.row}>
-          <TouchableOpacity style={styles.smallBtn} onPress={ensureLanguages}>
-            <Text style={styles.smallBtnTxt}>Change</Text>
+          <TouchableOpacity style={[styles.actionBtn, styles.secondaryAction]} onPress={ensureLanguages}>
+            <Text style={styles.actionBtnTxt}>Change</Text>
           </TouchableOpacity>
           {langUpdating && <ActivityIndicator />}
         </View>
-      </View>
+      </SectionCard>
       {langSheetOpen && (
         <View style={styles.sheetOverlay}>
           <View style={styles.sheet}>
@@ -217,31 +269,35 @@ export default function AccountScreen() {
             )}
             {!langLoading && !langError && (
               <View style={styles.langList}>
-                {languageList?.map(l => (
-                  <TouchableOpacity key={l.id} style={styles.langItem} disabled={langUpdating} onPress={() => onSelectLanguage(l)}>
-                    <View style={[styles.langColorDot, { backgroundColor: l.color }]} />
-                    <Text style={styles.langName}>{l.nativeName} <Text style={styles.langSub}>{l.name}</Text></Text>
-                    {prefs?.languageId === l.id && <Text style={styles.currentBadge}>Current</Text>}
-                  </TouchableOpacity>
-                ))}
+                {languageList?.map(l => {
+                  const selected = prefs?.languageId === l.id;
+                  return (
+                    <TouchableOpacity key={l.id} style={[styles.langItem, selected && styles.langItemSelected]} disabled={langUpdating} onPress={() => onSelectLanguage(l)}>
+                      <View style={[styles.langColorDot, { backgroundColor: l.color }]} />
+                      <Text style={styles.langName}>{l.nativeName} <Text style={styles.langSub}>{l.name}</Text></Text>
+                      {selected && <Text style={styles.currentBadge}>✓</Text>}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             )}
           </View>
         </View>
       )}
-      <TouchableOpacity style={styles.button} onPress={() => router.push('/settings/account-debug')}>
-        <Text style={styles.buttonText}>Test: Clear ALL App Storage</Text>
+      <TouchableOpacity style={[styles.footerBtn]} onPress={() => router.push('/settings/account-debug')}>
+        <Text style={styles.footerBtnTxt}>Developer: Clear ALL App Storage</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'flex-start',
     alignItems: 'center',
     paddingTop: 32,
+    paddingBottom: 32,
     backgroundColor: '#fff',
   },
   title: {
@@ -250,15 +306,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     color: '#111827',
   },
-  card: {
-    width: '90%',
-    backgroundColor: '#f9fafb',
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
+  card: { },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
   value: { marginTop: 6, fontSize: 14, color: '#374151' },
   metaLabel: { marginTop: 4, fontSize: 11, color: '#6b7280' },
@@ -267,18 +315,20 @@ const styles = StyleSheet.create({
   inlineErr: { backgroundColor: '#fee2e2' },
   inlineOk: { backgroundColor: '#dcfce7' },
   row: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  smallBtn: { backgroundColor: '#6366f1', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, marginRight: 8 },
-  saveEmph: { backgroundColor: '#16a34a' },
-  gpsBtn: { backgroundColor: '#0d9488' },
-  smallBtnTxt: { color: '#fff', fontWeight: '600', fontSize: 13 },
-  button: {
-    backgroundColor: '#2563eb',
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-    borderRadius: 12,
-  },
-  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16, textAlign: 'center' },
+  actionBtn: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 12, marginRight: 10 },
+  actionBtnTxt: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  primaryAction: { backgroundColor: '#032557' },
+  secondaryAction: { backgroundColor: '#6366f1' },
+  successAction: { backgroundColor: '#16a34a' },
+  altAction: { backgroundColor: '#0d9488' },
+  footerBtn: { backgroundColor: '#1e293b', paddingVertical: 14, paddingHorizontal: 24, borderRadius: 14, marginTop: 12, marginBottom: 40 },
+  footerBtnTxt: { color: '#fff', fontWeight: '600', fontSize: 14, textAlign: 'center' },
   inlineMsgTxt: { fontSize: 12, color: '#111827' },
+  fieldLabel: { fontSize: 12, color: '#374151', fontWeight: '600', marginTop: 6 },
+  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, backgroundColor: '#fff', marginTop: 4 },
+  errorSmall: { color: '#b91c1c', fontSize: 12, marginTop: 4 },
+  linkBtn: { backgroundColor: '#e0f2fe', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6, marginRight: 8 },
+  linkTxt: { color: '#0369a1', fontSize: 12, fontWeight: '600' },
   /* Language sheet styles */
   sheetOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#fff', paddingTop: 12, paddingHorizontal: 16, paddingBottom: 28, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: '70%' },
@@ -290,9 +340,13 @@ const styles = StyleSheet.create({
   retryBtn: { backgroundColor: '#2563eb', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, alignSelf: 'flex-start' },
   retryTxt: { color: '#fff', fontWeight: '600' },
   langList: { marginTop: 4 },
-  langItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#e5e7eb' },
+  langItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#e5e7eb' },
+  langItemSelected: { backgroundColor: '#f1f5f9' },
   langColorDot: { width: 14, height: 14, borderRadius: 7, marginRight: 10 },
   langName: { flex: 1, fontSize: 14, color: '#111827', fontWeight: '500' },
   langSub: { fontSize: 12, color: '#6b7280' },
   currentBadge: { fontSize: 11, color: '#059669', fontWeight: '700' },
+  skelLineBig: { height: 18, borderRadius: 6, backgroundColor: '#e2e8f0', width: '70%' },
+  skelSpacer: { height: 14 },
+  skelLineMulti: { height: 80, borderRadius: 10, backgroundColor: '#e2e8f0', width: '100%' },
 });
