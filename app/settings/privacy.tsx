@@ -1,6 +1,7 @@
 import { WEB_BASE_URL } from '@/config/appConfig';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
@@ -10,6 +11,7 @@ export default function PrivacyScreen() {
   const border = useThemeColor({}, 'border');
   const text = useThemeColor({}, 'text');
   const muted = useThemeColor({}, 'muted');
+  const router = useRouter();
 
   // Local UI state (could be wired to real preferences later)
   const [personalizedAds, setPersonalizedAds] = useState(true);
@@ -98,7 +100,7 @@ export default function PrivacyScreen() {
           icon: 'key',
           title: 'Permissions',
           subtitle: 'See permissions used by the app',
-          onPress: () => Alert.alert('Permissions', 'App permissions info coming soon'),
+          onPress: () => router.push('/settings/permissions'),
         },
         {
           icon: 'trash-2',
@@ -111,7 +113,7 @@ export default function PrivacyScreen() {
         },
       ],
     },
-  ]), [personalizedAds, analytics, crashReports, appLock, biometrics]);
+  ]), [personalizedAds, analytics, crashReports, appLock, biometrics, router]);
 
   return (
     <View style={[styles.safe, { backgroundColor: bg }]}>
