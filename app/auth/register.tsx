@@ -1,11 +1,14 @@
 import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { registerUser } from '@/services/api';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function RegisterScreen() {
+  const scheme = useColorScheme();
+  const theme = Colors[scheme ?? 'light'];
   const router = useRouter();
   const params = useLocalSearchParams<{ mobile?: string }>();
   const [name, setName] = useState('');
@@ -34,22 +37,60 @@ export default function RegisterScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Register</Text>
-        <Text style={styles.label}>Name</Text>
-        <TextInput value={name} onChangeText={setName} placeholder="Full Name" style={styles.input} />
-        <Text style={styles.label}>Mobile Number</Text>
-        <TextInput value={mobile} onChangeText={setMobile} keyboardType="number-pad" maxLength={10} placeholder="10-digit number" style={styles.input} />
-        <Text style={styles.label}>State (required)</Text>
-        <TextInput value={state} onChangeText={setState} placeholder="State" style={styles.input} />
-        <Text style={styles.label}>District (optional)</Text>
-        <TextInput value={district} onChangeText={setDistrict} placeholder="District" style={styles.input} />
-        <Text style={styles.label}>Mandal (optional)</Text>
-        <TextInput value={mandal} onChangeText={setMandal} placeholder="Mandal" style={styles.input} />
-        <Text style={styles.label}>Village (optional)</Text>
-        <TextInput value={village} onChangeText={setVillage} placeholder="Village" style={styles.input} />
-        <Pressable style={[styles.button, styles.primary, { marginTop: 14 }]} onPress={onSubmit} disabled={saving}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
+      <ScrollView contentContainerStyle={[styles.container, { backgroundColor: theme.background }]}>
+        <Text style={[styles.title, { color: theme.text }]}>Register</Text>
+        <Text style={[styles.label, { color: theme.muted }]}>Name</Text>
+        <TextInput
+          value={name}
+          onChangeText={setName}
+          placeholder="Full Name"
+          placeholderTextColor={theme.muted}
+          style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+        />
+        <Text style={[styles.label, { color: theme.muted }]}>Mobile Number</Text>
+        <TextInput
+          value={mobile}
+          onChangeText={setMobile}
+          keyboardType="number-pad"
+          maxLength={10}
+          placeholder="10-digit number"
+          placeholderTextColor={theme.muted}
+          style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+        />
+        <Text style={[styles.label, { color: theme.muted }]}>State (required)</Text>
+        <TextInput
+          value={state}
+          onChangeText={setState}
+          placeholder="State"
+          placeholderTextColor={theme.muted}
+          style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+        />
+        <Text style={[styles.label, { color: theme.muted }]}>District (optional)</Text>
+        <TextInput
+          value={district}
+          onChangeText={setDistrict}
+          placeholder="District"
+          placeholderTextColor={theme.muted}
+          style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+        />
+        <Text style={[styles.label, { color: theme.muted }]}>Mandal (optional)</Text>
+        <TextInput
+          value={mandal}
+          onChangeText={setMandal}
+          placeholder="Mandal"
+          placeholderTextColor={theme.muted}
+          style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+        />
+        <Text style={[styles.label, { color: theme.muted }]}>Village (optional)</Text>
+        <TextInput
+          value={village}
+          onChangeText={setVillage}
+          placeholder="Village"
+          placeholderTextColor={theme.muted}
+          style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+        />
+        <Pressable style={[styles.button, { backgroundColor: theme.secondary, marginTop: 14 }]} onPress={onSubmit} disabled={saving}>
           <Text style={[styles.buttonText, { color: '#fff' }]}>{saving ? 'Submitting...' : 'Register'}</Text>
         </Pressable>
       </ScrollView>

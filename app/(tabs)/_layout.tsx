@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Tabs } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import BottomSheet from '@/components/ArticleBottomSheet';
@@ -130,7 +130,7 @@ function InnerLayout() {
       initialSnapIndex={0}
   respectSafeAreaBottom={false}
   shadowEnabled={false}
-      header={<Text style={{ fontSize: 16, fontWeight: '700', color: theme.primary }}>Categories</Text>}
+  header={<Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>Categories</Text>}
     >
       <ScrollView
         horizontal
@@ -175,15 +175,30 @@ function InnerLayout() {
             >
               <View style={[
                 styles.iconCircle,
-                active && { backgroundColor: theme.primary },
+                {
+                  backgroundColor: colorScheme === 'dark' ? '#223042' : '#eef2ff',
+                  borderWidth: StyleSheet.hairlineWidth,
+                  borderColor: theme.border,
+                },
+                active && { backgroundColor: colorScheme === 'dark' ? theme.secondary : theme.primary },
               ]}>
                 {c.iconUrl ? (
                   <Image source={{ uri: c.iconUrl }} style={{ width: 22, height: 22, borderRadius: 4 }} />
                 ) : (
-                  <MaterialCommunityIcons name="shape" size={22} color={active ? '#fff' : theme.primary} />
+                  <MaterialCommunityIcons
+                    name="shape"
+                    size={22}
+                    color={active ? '#fff' : (colorScheme === 'dark' ? theme.text : theme.primary)}
+                  />
                 )}
               </View>
-              <Text style={[styles.tileText, active && styles.tileTextActive]} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.tileText,
+                  { color: active ? (colorScheme === 'dark' ? theme.secondary : theme.primary) : theme.text },
+                ]}
+                numberOfLines={1}
+              >
                 {c.name}
               </Text>
             </Pressable>
@@ -226,9 +241,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
   },
   tileH: {
     alignItems: 'center',
@@ -252,6 +267,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#eef2ff',
     marginBottom: 6,
   },
-  tileText: { color: '#032557', fontWeight: '700', fontSize: 12, textAlign: 'center', marginTop: 2, maxWidth: 88 },
-  tileTextActive: { color: Colors.light.primary },
+  tileText: { fontWeight: '700', fontSize: 12, textAlign: 'center', marginTop: 2, maxWidth: 88 },
+  tileTextActive: {},
 });

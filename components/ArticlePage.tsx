@@ -1,4 +1,4 @@
-import VideoWrapper from '@/components/VideoWrapper';
+import { VideoWrapper } from '@/components/VideoWrapper';
 import { WEB_BASE_URL } from '@/config/appConfig';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { useAutoHideBottomBar } from '@/hooks/useAutoHideBottomBar';

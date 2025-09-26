@@ -1,5 +1,7 @@
+import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { Feather } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ListRenderItem } from 'react-native';
 import { ActivityIndicator, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -33,6 +35,8 @@ interface Props {
 
 
 function CitizenReporterArticles({ visible, onClose, token }: Props) {
+  const scheme = useColorScheme();
+  const theme = Colors[scheme ?? 'light'];
   const [status, setStatus] = useState<StatusType>('');
   const [loading, setLoading] = useState(false);
   const [articles, setArticles] = useState<ArticleType[]>([]);
@@ -71,8 +75,9 @@ function CitizenReporterArticles({ visible, onClose, token }: Props) {
   }, [visible, fetchArticles]);
 
   const getChipStyle = (chip: ChipType) => {
-    if (chip.value === '') return status === '' ? styles.chipActiveAll : styles.chip;
-    if (!status || status !== chip.value) return styles.chip;
+    // Return ONLY active styles. Base style is applied separately with dark override in render.
+    if (chip.value === '') return status === '' ? styles.chipActiveAll : undefined;
+    if (!status || status !== chip.value) return undefined;
     switch (chip.value) {
       case 'PENDING': return styles.chipActivePending;
       case 'DESK_PENDING': return styles.chipActiveDeskPending;
@@ -97,30 +102,38 @@ function CitizenReporterArticles({ visible, onClose, token }: Props) {
   const renderChip = (chip: ChipType, idx: number) => (
     <TouchableOpacity
       key={chip.value}
-      style={[styles.chip, getChipStyle(chip)]}
+      style={[
+        styles.chip,
+        { backgroundColor: scheme === 'dark' ? '#223042' : styles.chip.backgroundColor },
+        getChipStyle(chip),
+      ]}
       onPress={() => handleChipPress(chip)}
     >
-      <Text style={getChipTextStyle(chip)}>{chip.label}</Text>
+      <Text style={[
+        getChipTextStyle(chip),
+        // Force white text for all chips in dark mode for maximum contrast
+        scheme === 'dark' ? { color: '#fff' } : (status === chip.value ? null : { color: theme.text })
+      ]}>{chip.label}</Text>
     </TouchableOpacity>
   );
 
   // Removed invalid renderItem function. Only use the correct version below.
   const renderItem: ListRenderItem<ArticleType> = ({ item, index }) => {
     return (
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: theme.card }]}>
         {item.mediaUrls?.length ? (
           <Image source={{ uri: item.mediaUrls[0] }} style={styles.image} />
         ) : (
-          <View style={styles.imagePlaceholder}><Feather name="image" size={32} color="#ccc" /></View>
+          <View style={[styles.imagePlaceholder, { backgroundColor: theme.border }]}><Feather name="image" size={32} color={theme.muted} /></View>
         )}
         <View style={styles.cardContent}>
-          <Text style={styles.title}>{item.title}</Text>
-          <Text style={styles.summary} numberOfLines={2}>{item.content || item.summary}</Text>
+          <Text style={[styles.title, { color: theme.text }]}>{item.title}</Text>
+          <Text style={[styles.summary, { color: theme.muted }]} numberOfLines={2}>{item.content || item.summary}</Text>
           <View style={styles.chipRow}>
             <View style={[styles.statusChip, (styles as any)[`status${item.status}`]]}>
               <Text style={styles.statusChipText}>{item.status}</Text>
             </View>
-            <Text style={styles.author}>{item.authorName}</Text>
+            <Text style={[styles.author, { color: theme.muted }]}>{item.authorName}</Text>
           </View>
         </View>
       </View>
@@ -134,11 +147,11 @@ function CitizenReporterArticles({ visible, onClose, token }: Props) {
   return (
     <View style={styles.sheetBackdrop}>
       <TouchableOpacity style={styles.backdropTouchable} activeOpacity={1} onPress={onClose} />
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, { backgroundColor: theme.card }]}>
         <View style={styles.sheetHeader}>
-          <Text style={styles.sheetTitle}>Citizen Reporter Articles</Text>
+          <Text style={[styles.sheetTitle, { color: theme.text }]}>Citizen Reporter Articles</Text>
           <TouchableOpacity onPress={onClose} ref={closeBtnRef}>
-            <Feather name="x" size={24} color="#333" />
+            <Feather name="x" size={24} color={scheme === 'dark' ? '#fff' : '#333'} />
           </TouchableOpacity>
         </View>
         <View style={styles.chipBarScroll}>
@@ -152,7 +165,7 @@ function CitizenReporterArticles({ visible, onClose, token }: Props) {
           />
         </View>
         {loading && !articles.length ? (
-          <ActivityIndicator size="large" color="#DB4437" style={{ marginTop: 32 }} />
+          <ActivityIndicator size="large" color={theme.secondary} style={{ marginTop: 32 }} />
         ) : (
           <View style={{ flex: 1 }}>
             <FlatList

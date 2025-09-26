@@ -1,10 +1,8 @@
 
 import { getLanguages, getNews } from '@/services/api';
 import { clearTokens, isExpired, loadTokens, refreshTokens, Tokens } from '@/services/auth';
-import { migrateLegacySelectedLanguage } from '@/services/languageMigration';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// router replaced by nav logger
-import { nav } from '@/services/navLogger';
+import { router } from 'expo-router';
 import * as ExpoSplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { Alert, View } from 'react-native';
@@ -24,23 +22,14 @@ export default function SplashScreen() {
           expired: tokens ? isExpired(tokens.expiresAt) : null,
         });
         try {
-          // Perform one-time migration of legacy numeric language IDs to new UUID ids
-          const mig = await migrateLegacySelectedLanguage();
-          if (mig.migrated) {
-            console.log('[BOOT] Language migration applied');
-          } else {
-            console.log('[BOOT] Language migration not needed', mig.reason);
-          }
           const langRaw = await AsyncStorage.getItem('selectedLanguage');
-            if (langRaw) {
-              const lang = JSON.parse(langRaw) as { id?: string; code?: string; name?: string };
-              console.log('[BOOT] Selected language', { id: lang.id, code: (lang as any).code, name: lang.name });
-            } else {
-              console.log('[BOOT] Selected language: none');
-            }
-        } catch (e) {
-          console.log('[BOOT] Language inspect/migrate failed', (e as any)?.message || e);
-        }
+          if (langRaw) {
+            const lang = JSON.parse(langRaw) as { id?: string; code?: string; name?: string };
+            console.log('[BOOT] Selected language', { id: lang.id, code: (lang as any).code, name: lang.name });
+          } else {
+            console.log('[BOOT] Selected language: none');
+          }
+        } catch {}
         if (tokens && (isExpired(tokens.expiresAt) || !tokens.expiresAt)) {
           console.log('[BOOT] Token expired, attempting refresh');
           try {
@@ -82,7 +71,7 @@ export default function SplashScreen() {
             console.log('[BOOT] Shortnews reachable');
             await ensureMinSplash();
             try { await ExpoSplashScreen.hideAsync(); } catch {}
-            nav.replace('/(tabs)/news');
+            router.replace('/news');
             return;
           } catch (e: any) {
             console.warn('[BOOT] Shortnews probe failed, keeping splash', e?.message || e);
@@ -107,7 +96,7 @@ export default function SplashScreen() {
           } catch {}
           await ensureMinSplash();
             try { await ExpoSplashScreen.hideAsync(); } catch {}
-            nav.replace('/(tabs)/news');
+            router.replace('/news');
             return;
         }
 
@@ -116,13 +105,13 @@ export default function SplashScreen() {
         getLanguages().catch((e) => console.log('[BOOT] Warmup getLanguages failed (ignored)', e?.message || e));
         await ensureMinSplash();
         try { await ExpoSplashScreen.hideAsync(); } catch {}
-  nav.replace('/language');
+        router.replace('/language');
       } catch (e) {
         console.warn('[BOOT] Boot failed, redirecting to language', e);
         // Be safe and clear any potentially invalid tokens
         try { await clearTokens(); } catch {}
         try { await ExpoSplashScreen.hideAsync(); } catch {}
-  nav.replace('/language');
+        router.replace('/language');
       }
     })();
   }, []);

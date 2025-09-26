@@ -1,4 +1,6 @@
 // import { log } from '@/services/logger';
+import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
     Animated,
@@ -63,6 +65,8 @@ export default function BottomSheet({
   shadowEnabled = true,
   dragEnabled = true,
 }: BottomSheetProps) {
+  const colorScheme = useColorScheme();
+  const theme = Colors[colorScheme ?? 'light'];
   const OPEN_DUR = 280;
   const CLOSE_DUR = 240;
   const UNMOUNT_DUR = CLOSE_DUR + 40; // leave a small buffer after close
@@ -213,6 +217,9 @@ export default function BottomSheet({
           style={[
             styles.sheet,
             {
+              backgroundColor: theme.card,
+              borderTopWidth: StyleSheet.hairlineWidth,
+              borderTopColor: theme.border,
               borderTopLeftRadius: radius,
               borderTopRightRadius: radius,
               paddingBottom: respectSafeAreaBottom ? insets.bottom : 0,
@@ -229,11 +236,11 @@ export default function BottomSheet({
           {...(dragEnabled ? panResponder.panHandlers : {})}
         >
           <View style={styles.handleContainer}>
-            <View style={styles.handleBar} />
+            <View style={[styles.handleBar, { backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.2)' }]} />
             <View style={styles.handleHintRow}>
-              <View style={styles.handleDot} />
-              <View style={styles.handleDot} />
-              <View style={styles.handleDot} />
+              <View style={[styles.handleDot, { backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.15)' }]} />
+              <View style={[styles.handleDot, { backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.15)' }]} />
+              <View style={[styles.handleDot, { backgroundColor: colorScheme === 'dark' ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.15)' }]} />
             </View>
           </View>
           {header ? <View style={styles.header}>{header}</View> : null}

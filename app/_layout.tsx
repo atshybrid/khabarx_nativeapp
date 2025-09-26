@@ -1,18 +1,20 @@
+import AppLockGate from '@/components/AppLockGate';
 import Toast from '@/components/Toast';
 import { ensureFirebaseAuthAsync, isFirebaseConfigComplete, logFirebaseGoogleAlignment } from '@/services/firebaseClient';
-import { notificationService } from '@/services/notifications';
-import { Feather } from '@expo/vector-icons';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { deactivateKeepAwake } from 'expo-keep-awake';
 import * as Linking from 'expo-linking';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { AuthProvider } from '../context/AuthContext';
+import { ThemeProviderLocal, useThemePref } from '../context/ThemeContext';
+import { UiPrefsProvider } from '../context/UiPrefsContext';
 import { useColorScheme } from '../hooks/useColorScheme';
 
 // Keep native splash visible while we boot in app/splash.tsx
@@ -31,17 +33,22 @@ const CustomHeader = () => {
   );
 };
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+function ThemedApp() {
+  const system = useColorScheme();
+  const { themePref } = useThemePref();
+  const effective = themePref === 'system' ? system : themePref;
   const router = useRouter();
   // Font loading temporarily disabled for debugging blank screen
 
-  // Initialize notification service and Firebase
+  // Dev-only keep-awake guard to avoid activation errors on some devices
   React.useEffect(() => {
-    // Initialize notification service
-    notificationService.initialize();
-    
-    // Initialize Firebase auth
+    if (__DEV__) {
+      try { deactivateKeepAwake().catch(() => {}); } catch {}
+    }
+  }, []);
+
+  // Defer preload to allow Firebase modules to register (RN 0.81 timing)
+  React.useEffect(() => {
     (async () => {
       try {
         if (isFirebaseConfigComplete()) {
@@ -53,11 +60,6 @@ export default function RootLayout() {
         console.log('[AUTH_INIT] Layout init skipped', e?.message);
       }
     })();
-
-    // Cleanup function
-    return () => {
-      notificationService.cleanup();
-    };
   }, []);
 
   // Deep link & initial URL handling for khabarx://article/<id>
@@ -87,14 +89,14 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <BottomSheetModalProvider>
         <AuthProvider>
-          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <ThemeProvider value={effective === 'dark' ? DarkTheme : DefaultTheme}>
             <Stack
               initialRouteName="splash"
               screenOptions={{
                 // Avoid freezing previous screen during gestures to prevent blank screen
                 freezeOnBlur: false,
-                // Ensure a solid background during transitions
-                contentStyle: { backgroundColor: '#fff' },
+                // Ensure a solid background during transitions using theme colors
+                contentStyle: { backgroundColor: effective === 'dark' ? DarkTheme.colors.background : DefaultTheme.colors.background },
                 gestureEnabled: true,
                 animationTypeForReplace: 'push',
               }}
@@ -104,41 +106,17 @@ export default function RootLayout() {
                 name="language"
                 options={{
                   header: () => <CustomHeader />,
-                  headerStyle: {
-                    backgroundColor: '#fcfcff',
-                  },
                 }}
               />
               {/* Keep previous screen attached to avoid blank screen when swiping back from article */}
               <Stack.Screen
                 name="article/[id]"
-                options={({ navigation }) => ({
-                  headerShown: true,
-                  headerTitle: 'Article',
-                  headerTitleStyle: { fontWeight: '600' },
-                  headerStyle: { backgroundColor: '#fff' },
+                options={{
+                  headerShown: false,
                   freezeOnBlur: false,
                   animation: 'slide_from_right',
-                  contentStyle: { backgroundColor: '#fff' },
-                  gestureEnabled: true,
-                  // Custom back behavior
-                  headerLeft: () => (
-                    <TouchableOpacity
-                      onPress={() => {
-                        // Navigate back safely - first try going back, fallback to news tab
-                        if (navigation.canGoBack()) {
-                          navigation.goBack();
-                        } else {
-                          navigation.navigate('(tabs)', { screen: 'news' });
-                        }
-                      }}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      style={{ marginLeft: 16 }}
-                    >
-                      <Feather name="arrow-left" size={24} color="#007AFF" />
-                    </TouchableOpacity>
-                  ),
-                })}
+                  contentStyle: { backgroundColor: effective === 'dark' ? DarkTheme.colors.background : DefaultTheme.colors.background },
+                }}
               />
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen
@@ -153,8 +131,9 @@ export default function RootLayout() {
               />
               <Stack.Screen name="+not-found" />
             </Stack>
-            <StatusBar style="auto" />
+            <StatusBar style={effective === 'dark' ? 'light' : 'dark'} />
             <Toast />
+            <AppLockGate />
           </ThemeProvider>
         </AuthProvider>
       </BottomSheetModalProvider>
@@ -162,9 +141,18 @@ export default function RootLayout() {
   );
 }
 
+export default function RootLayout() {
+  return (
+    <ThemeProviderLocal>
+      <UiPrefsProvider>
+        <ThemedApp />
+      </UiPrefsProvider>
+    </ThemeProviderLocal>
+  );
+}
+
 const styles = StyleSheet.create({
   headerContainer: {
-    backgroundColor: '#fcfcff',
     paddingTop: 50,
     paddingHorizontal: 15,
     paddingBottom: 10,

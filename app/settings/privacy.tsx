@@ -1,8 +1,9 @@
 import { WEB_BASE_URL } from '@/config/appConfig';
 import { useThemeColor } from '@/hooks/useThemeColor';
+import { getLockMode, type AppLockMode } from '@/services/appLock';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 export default function PrivacyScreen() {
@@ -17,8 +18,8 @@ export default function PrivacyScreen() {
   const [personalizedAds, setPersonalizedAds] = useState(true);
   const [analytics, setAnalytics] = useState(true);
   const [crashReports, setCrashReports] = useState(true);
-  const [appLock, setAppLock] = useState(false);
-  const [biometrics, setBiometrics] = useState(false);
+  const [lockMode, setLockModeSummary] = useState<AppLockMode>('off');
+  useEffect(() => { (async () => setLockModeSummary(await getLockMode()))(); }, []);
 
   type SectionItem = {
     icon: string;
@@ -66,18 +67,8 @@ export default function PrivacyScreen() {
         {
           icon: 'lock',
           title: 'App Lock',
-          subtitle: 'Require PIN or biometrics to open the app',
-          right: (
-            <Switch value={appLock} onValueChange={setAppLock} />
-          ),
-        },
-        {
-          icon: 'unlock',
-          title: 'Biometric Unlock',
-          subtitle: 'Use Face ID/Touch ID to unlock',
-          right: (
-            <Switch value={biometrics} onValueChange={setBiometrics} disabled={!appLock} />
-          ),
+          subtitle: `Current: ${lockMode === 'off' ? 'Off' : lockMode === 'biometric' ? 'Biometric' : lockMode === 'mpin' ? 'MPIN' : 'Biometric + MPIN'}`,
+          onPress: () => router.push({ pathname: '/settings/app-lock' } as any),
         },
       ],
     },
@@ -113,7 +104,7 @@ export default function PrivacyScreen() {
         },
       ],
     },
-  ]), [personalizedAds, analytics, crashReports, appLock, biometrics, router]);
+  ]), [personalizedAds, analytics, crashReports, lockMode, router]);
 
   return (
     <View style={[styles.safe, { backgroundColor: bg }]}>

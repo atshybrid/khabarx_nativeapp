@@ -1,9 +1,10 @@
 import { Colors } from '@/constants/Colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import type { CategoryItem } from '@/services/api';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import BottomSheet from './BottomSheet';
 
@@ -21,6 +22,8 @@ type Props = {
 const DEFAULT_RECENT_KEY = 'recentCategories';
 
 export default function CategoryPicker({ categories, value, onChange, label = 'Category', placeholder = 'Select Category', recentKey = DEFAULT_RECENT_KEY }: Props) {
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
   const [visible, setVisible] = useState(false);
   const [query, setQuery] = useState('');
   const pressLockedRef = useRef(false);
@@ -169,7 +172,7 @@ export default function CategoryPicker({ categories, value, onChange, label = 'C
             }}
             style={{ paddingHorizontal: 2, paddingVertical: 2 }}
           >
-            <Feather name="chevron-right" size={18} color="#666" />
+            <Feather name="chevron-right" size={18} color={isDark ? '#fff' : '#666'} />
           </Pressable>
         ) : null}
       </Pressable>
@@ -193,10 +196,10 @@ export default function CategoryPicker({ categories, value, onChange, label = 'C
         style={[styles.card]}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Feather name="tag" size={16} color={Colors.light.primary} />
-          <Text style={styles.cardText}>{title}</Text>
+          <Feather name="tag" size={16} color={isDark ? '#fff' : Colors.light.primary} />
+          <Text style={[styles.cardText, { color: isDark ? '#fff' : undefined }]}>{title}</Text>
         </View>
-        <Feather name="chevron-right" size={18} color="#666" />
+  <Feather name="chevron-right" size={18} color={isDark ? '#fff' : '#666'} />
       </Pressable>
 
       <BottomSheet
@@ -209,19 +212,19 @@ export default function CategoryPicker({ categories, value, onChange, label = 'C
           <View style={styles.headerRow}>
             {currentParent ? (
               <Pressable onPress={() => setCurrentParent(null)} style={styles.backBtn} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                <Feather name="chevron-left" size={20} color={Colors.light.primary} />
-                <Text style={styles.backText}>Back</Text>
+                <Feather name="chevron-left" size={20} color={isDark ? '#fff' : Colors.light.primary} />
+                <Text style={[styles.backText, { color: isDark ? '#fff' : undefined }]}>Back</Text>
               </Pressable>
             ) : (
-              <Text style={styles.sheetTitle}>Choose category</Text>
+              <Text style={[styles.sheetTitle, { color: isDark ? '#fff' : undefined }]}>Choose category</Text>
             )}
             <View style={styles.searchBox}>
-              <Feather name="search" size={16} color="#666" />
+              <Feather name="search" size={16} color={isDark ? '#fff' : '#666'} />
               <TextInput
                 value={query}
                 onChangeText={setQuery}
                 placeholder="Search categories"
-                placeholderTextColor="#999"
+                placeholderTextColor={isDark ? '#9BA1A6' : '#999'}
                 style={styles.searchInput}
               />
             </View>

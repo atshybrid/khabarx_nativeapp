@@ -68,7 +68,5 @@ export function logFirebaseGoogleAlignment(debug?: boolean) {
 // Convenience eager init (safe – will no-op on failure and lazy path will retry).
 // Fire an eager async init (not awaited) to warm up early; errors are logged silently.
 if (isFirebaseConfigComplete()) {
-  setTimeout(() => {
-    ensureFirebaseAuthAsync().catch(e => console.log('[AUTH_INIT] Eager async init failed', e?.message));
-  }, 0);
+  ensureFirebaseAuthAsync().catch(e => console.log('[AUTH_INIT] Eager async init failed', e?.message));
 }

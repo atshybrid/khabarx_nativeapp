@@ -1,4 +1,4 @@
-import { nav } from '@/services/navLogger';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
@@ -10,7 +10,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import LottieView from 'lottie-react-native';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, BackHandler, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CitizenReporterArticlesSheet from '../../components/CitizenReporterArticlesSheet';
 import { FIREBASE_CONFIG } from '../../config/firebase';
@@ -24,18 +24,18 @@ import { requestAppPermissions, type PermissionStatus } from '../../services/per
 
 // Add missing styles object
 export default function PostCreateScreen() {
+  const scheme = useColorScheme();
+  const theme = Colors[scheme ?? 'light'];
 
   // --- GROUPED HOOKS AND STATE ---
   const mediaRef = useRef<any[]>([]);
   const [media, setMedia] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [localCategoryId, setLocalCategoryId] = useState<string | null>(null);
-  // languageId: backend UUID, languageCode: ISO/script code (te, hi, ta, kn...)
   const [languageId, setLanguageId] = useState<string>('');
-  const [languageCode, setLanguageCode] = useState<string>('');
   const [languageName, setLanguageName] = useState<string>('');
-  const titleTx = useTransliteration({ languageCode, enabled: true, mode: 'on-boundary', debounceMs: 140 });
-  const contentTx = useTransliteration({ languageCode, enabled: true, mode: 'on-boundary', debounceMs: 140 });
+  const titleTx = useTransliteration({ languageCode: languageId, enabled: true, mode: 'on-boundary', debounceMs: 140 });
+  const contentTx = useTransliteration({ languageCode: languageId, enabled: true, mode: 'on-boundary', debounceMs: 140 });
   // showLogin state removed - now uses direct navigation to /auth/login
   // showUpgrade state removed - now uses direct navigation to /auth/login
   const [showLottie, setShowLottie] = useState<string | boolean>(false);
@@ -169,6 +169,24 @@ export default function PostCreateScreen() {
     return () => setTabBarVisible(true);
   }, [setTabBarVisible]);
 
+  // Android hardware back: always go to News (close modal first)
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBack = () => {
+        if (showCategoryModal) {
+          setShowCategoryModal(false);
+          return true;
+        }
+        try { setTabBarVisible(true); } catch {}
+        try { setLocalCategoryId(null); } catch {}
+        try { router.replace('/news'); } catch {}
+        return true; // prevent default behavior
+      };
+      const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+      return () => sub.remove();
+    }, [showCategoryModal, router, setTabBarVisible])
+  );
+
   useEffect(() => {
     (async () => {
       // derive selected language display from storage
@@ -181,7 +199,6 @@ export default function PostCreateScreen() {
           const lang = JSON.parse(langJson);
           setLanguageName(lang?.nativeName || lang?.name || 'Language');
           setLanguageId(lang?.id);
-          if (lang?.code) setLanguageCode(lang.code);
           effLangId = lang?.id;
         } catch {}
       }
@@ -203,7 +220,7 @@ export default function PostCreateScreen() {
       } catch {}
       // fetch categories for dropdown (language resolved internally)
       try {
-  const list = await getCategories(effLangId);
+        const list = await getCategories(effLangId);
         setCategories(list);
       } catch {}
       // Configure native Google Sign-In if chosen
@@ -264,7 +281,7 @@ export default function PostCreateScreen() {
           },
           {
             text: 'Login',
-            onPress: () => nav.push('/auth/login?from=post')
+            onPress: () => router.push('/auth/login?from=post')
           }
         ]
       );
@@ -274,7 +291,7 @@ export default function PostCreateScreen() {
     return true;
   };
 
-  const TITLE_LIMIT = 50;
+  const titleRemaining = 35 - titleTx.value.length;
   const contentWords = useMemo(() => (contentTx.value.trim() ? contentTx.value.trim().split(/\s+/).length : 0), [contentTx.value]);
   // const contentRemaining = Math.max(0, 60 - contentWords); // not currently surfaced
 
@@ -479,52 +496,60 @@ export default function PostCreateScreen() {
 
   const canPublish = titleTx.value.trim().length > 0 && contentTx.value.trim().length > 0 && localCategoryId && media.length > 0 && !submitting;
 
+  const translitBg = titleTx.enabled
+    ? (scheme === 'dark' ? 'rgba(34,197,94,0.22)' : '#dcfce7')
+    : (scheme === 'dark' ? 'rgba(239,68,68,0.22)' : '#fee2e2');
+  const translitColor = titleTx.enabled
+    ? (scheme === 'dark' ? '#86efac' : '#166534')
+    : (scheme === 'dark' ? '#fca5a5' : '#991b1b');
+
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }] }>
       {/* Minimal header */}
-      <View style={styles.headerBar}>
+      <View style={[styles.headerBar, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
         <TouchableOpacity
           onPress={() => {
             setTabBarVisible(true);
             setLocalCategoryId(null);
-            router.replace('/news'); // Always go to main news screen
+            // Always return to News screen
+            router.replace('/news');
           }}
           style={styles.headerLeft}
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Feather name="arrow-left" size={22} color={Colors.light.primary} />
-          <Text style={styles.headerBackText}>Back</Text>
+          <Feather name="arrow-left" size={22} color={scheme === 'dark' ? '#fff' : theme.primary} />
+          <Text style={[styles.headerBackText, { color: scheme === 'dark' ? '#fff' : theme.primary }]}>Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Post Article</Text>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Post Article</Text>
         <TouchableOpacity onPress={() => setShowArticlesSheet(true)} style={styles.headerRight} accessibilityLabel="Your Articles">
-          <Feather name="list" size={22} color={Colors.light.primary} />
+          <Feather name="list" size={22} color={scheme === 'dark' ? '#fff' : theme.primary} />
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollBody} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.scrollBody, { backgroundColor: theme.background }]} keyboardShouldPersistTaps="handled">
         {/* Location Badge */}
         {perms?.coords && (
-          <View style={styles.locationPill}>
-            <Text style={styles.locationPillText}>📍 {perms.place?.city || perms.place?.region || 'Location On'}</Text>
+          <View style={[styles.locationPill, { backgroundColor: scheme === 'dark' ? '#223042' : '#eef2f7' }]}>
+            <Text style={[styles.locationPillText, { color: theme.muted }]}>📍 {perms.place?.city || perms.place?.region || 'Location On'}</Text>
           </View>
         )}
 
         {/* Category & Language Row */}
         <View style={styles.inlineRow}>
-          <TouchableOpacity style={styles.selector} onPress={() => setShowCategoryModal(true)}>
-            <Text style={styles.selectorLabel}>Category</Text>
-            <Text style={styles.selectorValue}>{displayedCategoryName || 'Select'}</Text>
+          <TouchableOpacity style={[styles.selector, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={() => setShowCategoryModal(true)}>
+            <Text style={[styles.selectorLabel, { color: theme.muted }]}>Category</Text>
+            <Text style={[styles.selectorValue, { color: theme.text }]}>{displayedCategoryName || 'Select'}</Text>
           </TouchableOpacity>
-          <View style={styles.selector}>
-            <Text style={styles.selectorLabel}>Language</Text>
+          <View style={[styles.selector, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.selectorLabel, { color: theme.muted }]}>Language</Text>
             <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between' }}>
-              <Text style={styles.selectorValue}>{languageName || 'Auto'}</Text>
+              <Text style={[styles.selectorValue, { color: theme.text }]}>{languageName || 'Auto'}</Text>
               <TouchableOpacity
                 onPress={titleTx.toggle}
-                style={{ marginLeft:8, backgroundColor: titleTx.enabled ? '#dcfce7' : '#fee2e2', paddingHorizontal:10, paddingVertical:4, borderRadius:999 }}
+                style={{ marginLeft:8, backgroundColor: translitBg, paddingHorizontal:10, paddingVertical:4, borderRadius:999 }}
               >
-                <Text style={{ fontSize:11, fontWeight:'600', color: titleTx.enabled ? '#166534' : '#991b1b' }}>{titleTx.enabled ? 'Translit ON' : 'Translit OFF'}</Text>
+                <Text style={{ fontSize:11, fontWeight:'600', color: translitColor }}>{titleTx.enabled ? 'Translit ON' : 'Translit OFF'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -534,60 +559,60 @@ export default function PostCreateScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionLabel}>Title</Text>
-            <Text style={styles.counter}>{titleTx.value.length}/{TITLE_LIMIT}</Text>
+            <Text style={styles.counter}>{titleRemaining}</Text>
           </View>
           <TextInput
-            style={styles.titleInput}
+            style={[styles.titleInput, { backgroundColor: theme.card, borderColor: theme.border, color: theme.text }]}
             placeholder="Short, factual headline"
             value={titleTx.value}
-            maxLength={TITLE_LIMIT}
+            maxLength={35}
             onChangeText={titleTx.onChangeText}
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.muted}
           />
         </View>
 
         {/* Content Input */}
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionLabel}>Short News</Text>
+            <Text style={styles.sectionLabel}>Summary</Text>
             <Text style={styles.counter}>{contentWords}/60w</Text>
           </View>
           <TextInput
-            style={styles.contentInput}
+            style={[styles.contentInput, { backgroundColor: theme.card, borderColor: theme.border, color: theme.text }]}
             placeholder="What happened? Keep it concise and objective."
             multiline
             value={contentTx.value}
             onChangeText={contentTx.onChangeText}
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.muted}
           />
         </View>
 
         {/* Media Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionLabel}>Media</Text>
-            <TouchableOpacity style={styles.addMediaBtn} onPress={pickMedia}>
-              <Feather name="plus" size={16} color={Colors.light.primary} />
-              <Text style={styles.addMediaText}>Add</Text>
+            <Text style={[styles.sectionLabel, { color: theme.text }]}>Media</Text>
+            <TouchableOpacity style={[styles.addMediaBtn, { backgroundColor: scheme === 'dark' ? '#223042' : '#eef2f7' }]} onPress={pickMedia}>
+              <Feather name="plus" size={16} color={theme.primary} />
+              <Text style={[styles.addMediaText, { color: theme.primary }]}>Add</Text>
             </TouchableOpacity>
           </View>
           {media.length === 0 && (
-            <Pressable style={styles.mediaPlaceholder} onPress={pickMedia}>
-              <Feather name="image" size={34} color="#9ca3af" />
-              <Text style={styles.mediaPlaceholderText}>Add images / video</Text>
-              <Text style={styles.mediaHint}>At least 1 image. Video optional.</Text>
+            <Pressable style={[styles.mediaPlaceholder, { borderColor: theme.border, backgroundColor: theme.card }]} onPress={pickMedia}>
+              <Feather name="image" size={34} color={theme.muted} />
+              <Text style={[styles.mediaPlaceholderText, { color: theme.text }]}>Add images / video</Text>
+              <Text style={[styles.mediaHint, { color: theme.muted }]}>At least 1 image. Video optional.</Text>
             </Pressable>
           )}
           {media.length > 0 && (
             <View style={styles.mediaGrid}>
               {media.map((m, idx) => (
-                <View key={idx} style={styles.mediaItem}>
+                <View key={idx} style={[styles.mediaItem, { backgroundColor: theme.card, borderColor: theme.border }]}>
                   {m.thumbnailUri ? (
                     <Image source={{ uri: m.thumbnailUri }} style={styles.mediaThumb} />
                   ) : (
-                    <View style={styles.mediaThumbSkeleton} />
+                    <View style={[styles.mediaThumbSkeleton, { backgroundColor: theme.border }]} />
                   )}
-                  {m.status === 'uploading' && <View style={styles.uploadBadge}><Text style={styles.uploadBadgeText}>…</Text></View>}
+                  {m.status === 'uploading' && <View style={[styles.uploadBadge, { backgroundColor: theme.primary }]}><Text style={styles.uploadBadgeText}>…</Text></View>}
                   {m.status === 'error' && <View style={[styles.uploadBadge, styles.uploadError]}><Text style={styles.uploadBadgeText}>!</Text></View>}
                   <Pressable style={styles.removeMediaBtn} onPress={() => {
                     setMedia(prev => prev.filter((_, i) => i !== idx));
@@ -608,14 +633,14 @@ export default function PostCreateScreen() {
       {/* Category Modal */}
       <Modal visible={showCategoryModal} animationType="slide" transparent onRequestClose={() => setShowCategoryModal(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { maxHeight: '75%', width: '88%' }]}> 
-            <Text style={{ fontSize:16, fontWeight:'600', marginBottom:12 }}>Select Category</Text>
+          <View style={[styles.modalCard, { maxHeight: '75%', width: '88%', backgroundColor: theme.card }]}> 
+            <Text style={{ fontSize:16, fontWeight:'600', marginBottom:12, color: theme.text }}>Select Category</Text>
             <TextInput
-              style={styles.searchInput}
+              style={[styles.searchInput, { backgroundColor: scheme === 'dark' ? '#1f2326' : '#f1f5f9', color: theme.text }]}
               placeholder="Search"
               value={categorySearch}
               onChangeText={setCategorySearch}
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={theme.muted}
             />
             <ScrollView keyboardShouldPersistTaps="handled">
               {categories
@@ -629,18 +654,18 @@ export default function PostCreateScreen() {
                         setLocalCategoryId(c.id);
                         setShowCategoryModal(false);
                       }}
-                      style={[styles.categoryRow, selected && styles.categoryRowSelected]}
+                      style={[styles.categoryRow, { borderBottomColor: theme.border }, selected && [styles.categoryRowSelected, { backgroundColor: scheme === 'dark' ? '#223042' : '#eef2f7' }]]}
                     >
-                      <Text style={[styles.categoryRowText, selected && styles.categoryRowTextSelected]}>{c.name}</Text>
-                      {selected && <Feather name="check" size={18} color={Colors.light.primary} />}
+                      <Text style={[styles.categoryRowText, { color: theme.text }, selected && [styles.categoryRowTextSelected, { color: theme.primary }]]}>{c.name}</Text>
+                      {selected && <Feather name="check" size={18} color={theme.primary} />}
                     </Pressable>
                   );
                 })}
               {categories.length === 0 && (
-                <Text style={{ textAlign:'center', paddingVertical:24, color:'#64748b' }}>No categories</Text>
+                <Text style={{ textAlign:'center', paddingVertical:24, color: theme.muted }}>No categories</Text>
               )}
             </ScrollView>
-            <TouchableOpacity onPress={() => setShowCategoryModal(false)} style={[styles.publishBtn, { marginTop:16 }]}> 
+            <TouchableOpacity onPress={() => setShowCategoryModal(false)} style={[styles.publishBtn, { marginTop:16, backgroundColor: theme.primary }]}> 
               <Text style={styles.publishBtnText}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -648,19 +673,15 @@ export default function PostCreateScreen() {
       </Modal>
 
       {/* Fixed bottom action bar */}
-      <View style={styles.bottomBar}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.validationRow}
-        >
-          {!titleTx.value.trim() && <Text style={styles.validationChip}>Title required</Text>}
-          {!contentTx.value.trim() && <Text style={styles.validationChip}>Short News required</Text>}
-          {!localCategoryId && <Text style={styles.validationChip}>Category</Text>}
-          {media.length === 0 && <Text style={styles.validationChip}>Media</Text>}
-        </ScrollView>
+      <View style={[styles.bottomBar, { backgroundColor: scheme === 'dark' ? 'rgba(21,23,24,0.93)' : 'rgba(255,255,255,0.93)', borderTopColor: theme.border }] }>
+        <View style={styles.validationRow}>
+          {!titleTx.value.trim() && <Text style={styles.validationText}>Title required</Text>}
+          {!contentTx.value.trim() && <Text style={styles.validationText}>Summary required</Text>}
+          {!localCategoryId && <Text style={styles.validationText}>Category</Text>}
+          {media.length === 0 && <Text style={styles.validationText}>Media</Text>}
+        </View>
         <TouchableOpacity
-          style={[styles.publishBtn, !canPublish && styles.publishBtnDisabled]}
+          style={[styles.publishBtn, { backgroundColor: theme.primary }, !canPublish && styles.publishBtnDisabled]}
           onPress={onSubmit}
           disabled={!canPublish}
           accessibilityRole="button"
@@ -682,7 +703,7 @@ export default function PostCreateScreen() {
           <Modal visible animationType="fade" transparent>
             <View style={styles.lottieOverlay}>
               <LottieView source={require('../../assets/lotti/News icon.json')} autoPlay loop style={{ width: 180, height: 180 }} />
-              <Text style={styles.lottieText}>Publishing…</Text>
+              <Text style={[styles.lottieText, { color: theme.text }]}>Publishing…</Text>
             </View>
           </Modal>
         )}
@@ -690,7 +711,7 @@ export default function PostCreateScreen() {
           <Modal visible animationType="fade" transparent>
             <View style={styles.lottieOverlay}>
               <LottieView source={require('../../assets/lotti/congratulation.json')} autoPlay loop={false} style={{ width: 220, height: 220 }} />
-              <Text style={styles.congratsText}>Congratulations!</Text>
+              <Text style={[styles.congratsText, { color: '#22c55e' }]}>Congratulations!</Text>
             </View>
           </Modal>
         )}
@@ -732,9 +753,8 @@ const styles = StyleSheet.create({
   uploadBadgeText: { fontSize: 11, fontWeight: '600', color: '#fff' },
   uploadError: { backgroundColor: '#dc2626' },
   bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 24, backgroundColor: '#ffffffee', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e2e8f0' },
-  validationRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 8, marginBottom: 10 },
+  validationRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
   validationText: { fontSize: 11, color: '#dc2626', backgroundColor: '#fee2e2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  validationChip: { fontSize: 11, color: '#b91c1c', backgroundColor: '#ffe4e6', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, fontWeight: '600', marginRight: 6 },
   publishBtn: { backgroundColor: Colors.light.primary, borderRadius: 16, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
   publishBtnDisabled: { backgroundColor: '#94a3b8' },
   publishBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },

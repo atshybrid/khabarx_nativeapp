@@ -1,6 +1,7 @@
 import { Colors } from '@/constants/Colors';
 import { useCategorySheet } from '@/context/CategorySheetContext';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
+import { useColorScheme } from '@/hooks/useColorScheme';
 import { PostArticleIcon } from '@/icons';
 import { checkPostArticleAccess } from '@/services/auth';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -10,6 +11,8 @@ import { Alert, Animated, Pressable, StyleSheet, Text, View } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AutoHideTabBar(props: BottomTabBarProps) {
+  const colorScheme = useColorScheme();
+  const theme = Colors[colorScheme ?? 'light'];
   const router = useRouter();
   const { isTabBarVisible, setTabBarVisible } = useTabBarVisibility();
   const { open: openCategorySheet } = useCategorySheet();
@@ -52,7 +55,7 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
     outputRange: [measuredHeight + Math.max(insets.bottom, 0), 0],
   });
 
-  // Solid background (100% white)
+  // Solid background comes from theme.card
 
   // Active indicator (removed) positioning placeholder
   const tabCount = routes.length || 1;
@@ -129,7 +132,17 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
   importantForAccessibility={shouldShow ? 'yes' : 'no-hide-descendants'}
     >
       <Animated.View style={[styles.shadowWrap, { transform: [{ scale: scaleRef.current }] }]}>
-        <View style={styles.inner} onLayout={onContainerLayout}>
+        <View
+          style={[
+            styles.inner,
+            {
+              backgroundColor: theme.card,
+              borderTopColor: theme.border,
+              borderTopWidth: StyleSheet.hairlineWidth,
+            },
+          ]}
+          onLayout={onContainerLayout}
+        >
           <View style={styles.tabRow}>
             {/* Determine only the visible tab routes and enforce order [news, donations] [center] [career, tech] */}
             {(['news', 'donations'] as const).map((name) => {
@@ -138,7 +151,7 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
               const isFocused = activeRouteName === route.name;
               const { options } = props.descriptors[route.key];
               const label = (options.tabBarLabel as string) || options.title || route.name;
-              const color = isFocused ? Colors.light.tint : Colors.light.tabIconDefault;
+              const color = isFocused ? (colorScheme === 'dark' ? '#fff' : theme.tint) : theme.tabIconDefault;
               const size = 24;
               const icon =
                 typeof options.tabBarIcon === 'function'
@@ -172,7 +185,7 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
               <Text
                 style={[
                   styles.tabLabel,
-                  { color: onExplore ? Colors.light.tint : Colors.light.tabIconDefault },
+                  { color: onExplore ? theme.tint : theme.tabIconDefault },
                 ]}
                 numberOfLines={1}
               >
@@ -187,7 +200,7 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
               const isFocused = activeRouteName === route.name;
               const { options } = props.descriptors[route.key];
               const label = (options.tabBarLabel as string) || options.title || route.name;
-              const color = isFocused ? Colors.light.tint : Colors.light.tabIconDefault;
+              const color = isFocused ? (colorScheme === 'dark' ? '#fff' : theme.tint) : theme.tabIconDefault;
               const size = 24;
               const icon =
                 typeof options.tabBarIcon === 'function'
@@ -247,7 +260,7 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
               onPress={goToPostArticle}
               accessibilityRole="button"
               accessibilityLabel="Post News"
-              style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+              style={({ pressed }) => [styles.fab, { backgroundColor: theme.secondary }, pressed && styles.fabPressed]}
               android_ripple={{ color: 'rgba(0,0,0,0.08)', borderless: true }}
             >
               <View style={styles.fabInner}>
@@ -276,7 +289,7 @@ const styles = StyleSheet.create({
     borderRadius: 0,
     overflow: 'hidden',
     minHeight: 62,
-    backgroundColor: '#fff', // 100% opacity white
+    // backgroundColor moved to themed inline style
     paddingHorizontal: 0, // remove left/right padding to maximize usable width
   },
   tabRow: {
@@ -311,6 +324,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
+    // backgroundColor themed at render time
     backgroundColor: Colors.light.secondary,
     elevation: 8,
     shadowColor: '#000',

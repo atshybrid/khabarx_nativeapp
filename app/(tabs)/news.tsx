@@ -1,8 +1,9 @@
 import AnimatedArticle from '@/components/AnimatedArticle';
 import { ArticleSkeleton } from '@/components/ui/ArticleSkeleton';
+import { Colors } from '@/constants/Colors';
 import { useCategory } from '@/context/CategoryContext';
+import { useColorScheme } from '@/hooks/useColorScheme';
 // import { sampleArticles } from '@/data/sample-articles';
-import { usePreferences } from '@/hooks/usePreferences';
 import { getNews } from '@/services/api';
 import type { Article } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,9 +13,8 @@ import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { useSharedValue, withSpring } from 'react-native-reanimated';
 
 const NewsScreen = () => {
-  const { prefs } = usePreferences();
-  const currentLanguageId = prefs?.languageId; // triggers refetch when language changes
-
+  const colorScheme = useColorScheme();
+  const theme = Colors[colorScheme ?? 'light'];
   useEffect(() => {
     console.log('[NAV] ArticleScreen (news) mounted');
   }, []);
@@ -51,19 +51,9 @@ const NewsScreen = () => {
       setLoading(true);
       setError(null);
       try {
-        // Resolve language: prefer prefs.languageId -> map to code via stored object if available
-        let langCode = 'en';
-        try {
-          const stored = await AsyncStorage.getItem('selectedLanguage');
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            // When updating language we store only { id }, so fallback: if no code present but prefs.languageId exists
-            if (parsed?.code) langCode = parsed.code; else if (prefs?.languageId) langCode = prefs.languageId; // assume backend uses code as id for now
-          } else if (prefs?.languageId) {
-            langCode = prefs.languageId;
-          }
-        } catch {}
-        const list = await getNews(langCode, filterKey || undefined);
+        const stored = await AsyncStorage.getItem('selectedLanguage');
+        const lang = stored ? JSON.parse(stored)?.code ?? 'en' : 'en';
+        const list = await getNews(lang, filterKey || undefined);
         const safe = Array.isArray(list) ? list : [];
         // If API doesn't filter by category, filter client-side as a fallback
         let filtered = filterKey
@@ -85,9 +75,7 @@ const NewsScreen = () => {
         setLoading(false);
       }
     })();
-  // currentLanguageId already derived from prefs; adding prefs directly unnecessary.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCategory, currentLanguageId]);
+  }, [selectedCategory]);
 
   const handleSwipeUp = () => {
   if (activeIndex < articles.length - 1) {
@@ -113,13 +101,13 @@ const NewsScreen = () => {
     }
   }, []);
   return (
-    <View style={styles.container} onLayout={onLayout}>
+    <View style={[styles.container, { backgroundColor: theme.background }]} onLayout={onLayout}>
       {showCongrats && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center' }}>
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
           <LottieView source={require('@/assets/lotti/congratulation.json')} autoPlay loop={false} style={{ width: 320, height: 320 }} />
         </View>
       )}
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
         {loading && (
           <ArticleSkeleton />
         )}
@@ -152,7 +140,7 @@ const NewsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    // background is set from theme inline
   },
   debugOverlay: {
     position: 'absolute',

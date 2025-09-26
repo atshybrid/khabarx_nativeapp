@@ -102,7 +102,7 @@ async function clearStoredTokens() {
   await AsyncStorage.multiRemove([JWT_KEY, REFRESH_KEY, EXPIRES_AT_KEY]);
 }
 
-export async function request<T = any>(path: string, options: { method?: HttpMethod; body?: any; headers?: Record<string, string>; timeoutMs?: number; noAuth?: boolean; retry?: boolean | number } = {}): Promise<T> {
+export async function request<T = any>(path: string, options: { method?: HttpMethod; body?: any; headers?: Record<string, string>; timeoutMs?: number; noAuth?: boolean } = {}): Promise<T> {
   const method: HttpMethod = options.method || 'GET';
   const jwt = options.noAuth ? null : await AsyncStorage.getItem(JWT_KEY);
   const headers: Record<string, string> = {
@@ -156,20 +156,12 @@ export async function request<T = any>(path: string, options: { method?: HttpMet
   };
 
   // Retry policy: retry up to 2 times on network errors or 5xx
-  let maxRetries: number;
-  if (typeof options.retry === 'number') {
-    maxRetries = options.retry;
-  } else if (options.retry === false) {
-    maxRetries = 0;
-  } else {
-    maxRetries = 2; // default
-  }
+  const maxRetries = 2;
   let attempt = 0;
   let attemptedRefresh = false;
   while (true) {
     try {
-      const result = await doOnce();
-      return result;
+      return await doOnce();
     } catch (err: any) {
       const isHttp = err instanceof HttpError;
       const status = isHttp ? err.status : 0;
@@ -191,9 +183,6 @@ export async function request<T = any>(path: string, options: { method?: HttpMet
       }
 
       const transient = !isHttp || (status >= 500 && status < 600);
-      if (DEBUG_HTTP) {
-        console.log('[HTTP] attempt fail', { path, method, attempt, maxRetries, transient, status });
-      }
       if (attempt < maxRetries && transient) {
         const backoff = 300 * Math.pow(2, attempt) + Math.random() * 200;
         await new Promise(r => setTimeout(r, backoff));

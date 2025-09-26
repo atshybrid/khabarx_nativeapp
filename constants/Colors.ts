@@ -15,6 +15,9 @@ export const Colors = {
   light: {
     text: '#11181C',
     background: '#fff',
+    card: '#ffffff',
+    border: '#e5e7eb',
+    muted: '#6b7280',
     tint: tintColorLight,
     primary: PRIMARY,
     secondary: SECONDARY,
@@ -26,6 +29,9 @@ export const Colors = {
   dark: {
     text: '#ECEDEE',
     background: '#151718',
+    card: '#1b1f22',
+    border: '#2a2f33',
+    muted: '#9BA1A6',
     tint: tintColorDark,
     primary: PRIMARY,
     secondary: SECONDARY,

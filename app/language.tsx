@@ -17,7 +17,7 @@ import { saveTokens } from '@/services/auth';
 import { getDeviceIdentity } from '@/services/device';
 import { requestAppPermissions } from '@/services/permissions';
 import { Language } from '../constants/languages';
-import { getLanguages, registerGuestUser } from '../services/api';
+import { afterPreferencesUpdated, getLanguages, registerGuestUser, updatePreferences } from '../services/api';
 
 const LanguageSelectionScreen = () => {
   // use expo-router to navigate to the News tab after selection
@@ -49,7 +49,7 @@ const LanguageSelectionScreen = () => {
     setSelectedLanguage(language);
     await AsyncStorage.setItem('selectedLanguage', JSON.stringify(language));
 
-    const deviceDetails = await getDeviceIdentity();
+  const deviceDetails = await getDeviceIdentity();
 
     try {
       setSubmitting(true);
@@ -58,6 +58,10 @@ const LanguageSelectionScreen = () => {
       const existingJwt = await AsyncStorage.getItem('jwt');
       const existingRefresh = await AsyncStorage.getItem('refreshToken');
       if (existingJwt && existingRefresh) {
+        try {
+          await updatePreferences({ languageId: language.id, languageCode: language.code });
+          await afterPreferencesUpdated({ languageIdChanged: language.id, languageCode: language.code });
+        } catch {}
         router.replace('/news');
         return;
       }
@@ -79,6 +83,11 @@ const LanguageSelectionScreen = () => {
         languageId: authResponse.languageId || language.id,
         user: authResponse.user,
       });
+
+      try {
+        // Warm caches for the chosen language
+        await afterPreferencesUpdated({ languageIdChanged: language.id, languageCode: language.code });
+      } catch {}
 
       // await requestPermissions();
       router.replace('/news');

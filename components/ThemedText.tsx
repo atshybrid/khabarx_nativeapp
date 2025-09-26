@@ -1,5 +1,6 @@
 import { StyleSheet, Text, type TextProps } from 'react-native';
 
+import { useUiPrefs } from '@/context/UiPrefsContext';
 import { useThemeColor } from '@/hooks/useThemeColor';
 
 export type ThemedTextProps = TextProps & {
@@ -15,17 +16,36 @@ export function ThemedText({
   type = 'default',
   ...rest
 }: ThemedTextProps) {
-  const color = useThemeColor({ light: lightColor, dark: darkColor }, 'text');
+  const textColor = useThemeColor({ light: lightColor, dark: darkColor }, 'text');
+  const linkColor = useThemeColor({}, 'tint');
+  const { fontScale, readingMode } = useUiPrefs();
+  const sizeByType: Record<NonNullable<ThemedTextProps['type']>, number> = {
+    default: 16,
+    defaultSemiBold: 16,
+    title: 32,
+    subtitle: 20,
+    link: 16,
+  };
+  const lineByType: Record<NonNullable<ThemedTextProps['type']>, number> = {
+    default: 24,
+    defaultSemiBold: 24,
+    title: 32,
+    subtitle: 24,
+    link: 30,
+  };
+  const scaledFontSize = sizeByType[type] * (fontScale || 1);
+  const baseLine = lineByType[type];
+  const scaledLineHeight = readingMode ? Math.round(baseLine * 1.1) : baseLine;
 
   return (
     <Text
       style={[
-        { color },
         type === 'default' ? styles.default : undefined,
         type === 'title' ? styles.title : undefined,
         type === 'defaultSemiBold' ? styles.defaultSemiBold : undefined,
         type === 'subtitle' ? styles.subtitle : undefined,
         type === 'link' ? styles.link : undefined,
+        { color: type === 'link' ? linkColor : textColor, fontSize: scaledFontSize, lineHeight: scaledLineHeight },
         style,
       ]}
       {...rest}
@@ -55,6 +75,5 @@ const styles = StyleSheet.create({
   link: {
     lineHeight: 30,
     fontSize: 16,
-    color: '#0a7ea4',
   },
 });

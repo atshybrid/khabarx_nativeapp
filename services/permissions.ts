@@ -1,7 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { notificationService } from './notifications';
 
 const PERM_KEY = 'permission_status';
 export type PermissionStatus = {
@@ -47,15 +46,39 @@ export async function requestAppPermissions(): Promise<PermissionStatus> {
   const status: PermissionStatus = await getCachedPermissions();
 
   try {
-    // Use our notification service for handling permissions and token
-    const permissionStatus = await notificationService.getPermissionStatus();
-    status.notifications = permissionStatus.status as any;
-
-    if (permissionStatus.granted) {
-      const token = await notificationService.getNotificationToken();
-      status.pushToken = token || undefined;
+    // Always try permissions; safe in Expo Go and Dev Client
+    const Notifications = await import('expo-notifications');
+  const Constants = await import('expo-constants');
+    const current = await Notifications.getPermissionsAsync();
+    let notifStatus = current.status;
+    if (notifStatus !== 'granted') {
+      const req = await Notifications.requestPermissionsAsync();
+      notifStatus = req.status;
     }
-    
+    status.notifications = notifStatus as any;
+
+    if (notifStatus === 'granted') {
+      try {
+        // Prefer Expo push token (requires projectId for dev client/standalone)
+        const projectId = (Constants as any)?.default?.expoConfig?.extra?.eas?.projectId
+          || (Constants as any)?.expoConfig?.extra?.eas?.projectId
+          || undefined;
+        const expoToken = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } as any : undefined as any);
+        status.pushToken = expoToken?.data;
+      } catch {
+        console.warn('[PERM] Expo push token unavailable, will try device token fallback');
+      }
+
+      if (!status.pushToken) {
+        try {
+          const deviceToken = await Notifications.getDevicePushTokenAsync();
+          const tokenStr = (deviceToken as any)?.data || (deviceToken as any)?.token || String(deviceToken || '');
+          status.pushToken = tokenStr || undefined;
+        } catch {
+          console.warn('[PERM] Device push token unavailable');
+        }
+      }
+    }
     console.log('[PERM] Notifications', { status: status.notifications, pushToken: status.pushToken || 'none' });
   } catch (e) { console.warn('[PERM] Notifications check failed', e instanceof Error ? e.message : e); }
 
