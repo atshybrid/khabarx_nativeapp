@@ -6,7 +6,8 @@ import { Article } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { loadTokens } from './auth';
+import { loadTokens, refreshTokens, saveTokens } from './auth';
+import { getDeviceIdentity } from './device';
 import { HttpError, getBaseUrl, request } from './http';
 
 // ---- Mock Mode (ON/OFF) ----
@@ -88,17 +89,170 @@ export async function updateUserProfile(partial: UserProfileUpdateInput): Promis
   }
 }
 
-// Fetch current user profile; if not found (404) return an empty object so UI can treat as new profile.
-export async function getUserProfile(): Promise<UserProfileResponse | null> {
-  const endpoint = '/profiles/me';
+// -------- Preferences (language, device, location) --------
+export type PreferencesData = {
+  user?: {
+    id?: string;
+    languageId?: string;
+    languageCode?: string;
+    languageName?: string;
+    role?: string;
+    isGuest?: boolean;
+    status?: string;
+  };
+  device?: {
+    id?: string;
+    deviceId?: string;
+    deviceModel?: string;
+    hasPushToken?: boolean;
+    location?: {
+      latitude?: number;
+      longitude?: number;
+      accuracyMeters?: number;
+      placeId?: string;
+      placeName?: string;
+      address?: string;
+      source?: string;
+    };
+  };
+  userLocation?: {
+    latitude?: number;
+    longitude?: number;
+    accuracyMeters?: number;
+    provider?: string;
+    timestampUtc?: string;
+    placeId?: string;
+    placeName?: string;
+    address?: string;
+    source?: string;
+    updatedAt?: string;
+  };
+};
+
+export async function getUserPreferences(userId?: string): Promise<PreferencesData | null> {
   try {
-    const profile = await request<UserProfileResponse>(endpoint, { method: 'GET' });
-    return profile || null;
-  } catch (e: any) {
-    if (e instanceof HttpError && (e.status === 404 || e.status === 401)) {
-      return null; // no profile yet or unauthorized (caller can handle auth)
+    let uid = userId?.trim();
+    if (!uid) {
+      try {
+        const t = await loadTokens();
+        uid = (t as any)?.user?.id || (t as any)?.user?._id || (t as any)?.user?.userId;
+        // fallback: try to decode JWT subject
+        if (!uid && t?.jwt) {
+          try {
+            const parts = t.jwt.split('.');
+            if (parts.length >= 2) {
+              const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+              const json = Buffer.from(b64, 'base64').toString('utf8');
+              const payload = JSON.parse(json);
+              uid = payload?.sub || payload?.userId || payload?.id || payload?.uid || undefined;
+            }
+          } catch {}
+        }
+      } catch {}
     }
-    return null; // swallow other errors for now; caller may refetch explicitly
+    if (!uid) {
+      if (DEBUG_API) console.warn('[API] getUserPreferences skipped: missing userId');
+      return null; // avoid 400 by not calling without userId
+    }
+    const endpoint = `/preferences?userId=${encodeURIComponent(String(uid))}`;
+    const res = await request<{ success?: boolean; data?: PreferencesData }>(endpoint, { method: 'GET' });
+    return (res as any)?.data || (res as any) || null;
+  } catch (e) {
+    if (DEBUG_API) console.warn('[API] getUserPreferences failed', (e as any)?.message || e);
+    return null;
+  }
+}
+
+export function pickPreferenceLanguage(p: PreferencesData | null): Language | null {
+  if (!p?.user) return null;
+  const code = p.user.languageCode?.toLowerCase();
+  if (!code) return null;
+  const found = LANGUAGES.find(l => l.code.toLowerCase() === code);
+  if (found) return found;
+  // Fallback: synthesize a Language using known props
+  const name = p.user.languageName || code.toUpperCase();
+  return { id: p.user.languageId || code, name, nativeName: name, code, color: '#888', isRtl: false } as Language;
+}
+
+export function pickPreferenceLocation(p: PreferencesData | null): string | null {
+  if (!p) return null;
+  const loc = p.userLocation || p.device?.location;
+  const name = loc?.placeName || loc?.address;
+  return name || null;
+}
+
+// -------- Update Preferences --------
+export type UpdatePreferencesInput = {
+  languageId?: string;
+  languageCode?: string;
+  location?: {
+    latitude?: number;
+    longitude?: number;
+    accuracyMeters?: number;
+    placeId?: string;
+    placeName?: string;
+    address?: string;
+    source?: string;
+  };
+  pushToken?: string;
+  deviceModel?: string;
+  forceUpdate?: boolean; // will be forced to true by client
+};
+
+export async function updatePreferences(partial: UpdatePreferencesInput, userId?: string): Promise<any> {
+  const t = await loadTokens();
+  const uid = (userId || (t as any)?.user?.id || (t as any)?.user?._id || (t as any)?.user?.userId)?.toString();
+  if (!uid) throw new Error('Cannot update preferences without userId');
+  const body: any = { userId: uid, forceUpdate: true };
+  if (partial.languageId) body.languageId = partial.languageId;
+  if (partial.languageCode) body.languageCode = partial.languageCode;
+  if (partial.location) body.location = partial.location;
+  if (partial.pushToken) body.pushToken = partial.pushToken;
+  // Prefer caller-provided model; else derive a simple model name
+  body.deviceModel = partial.deviceModel || (await getDeviceIdentity()).deviceModel;
+  return await request<any>('/preferences/update', { method: 'POST', body });
+}
+
+// After preferences change, refresh auth/session and local caches
+export async function afterPreferencesUpdated(opts: { languageIdChanged?: string | null; languageCode?: string | null } = {}) {
+  try {
+    // Refresh tokens/session to ensure server-side language/claims propagate
+    const next = await refreshTokens();
+    // Best-effort: if languageId changed, persist hint in tokens for downstream readers
+    if (opts.languageIdChanged) {
+      await saveTokens({ ...next, languageId: opts.languageIdChanged });
+    }
+  } catch (e) {
+    if (DEBUG_API) console.warn('[API] afterPreferencesUpdated refreshTokens failed', (e as any)?.message || e);
+  }
+  // Refresh language-dependent caches (news, etc.)
+  try {
+    await refreshLanguageDependentCaches(opts.languageCode || undefined);
+  } catch (e) {
+    if (DEBUG_API) console.warn('[API] refreshLanguageDependentCaches failed', (e as any)?.message || e);
+  }
+}
+
+export async function refreshLanguageDependentCaches(langCode?: string) {
+  try {
+    let code = langCode;
+    if (!code) {
+      // Try from selectedLanguage in storage
+      const raw = await AsyncStorage.getItem('selectedLanguage');
+      if (raw) {
+        try {
+          const j = JSON.parse(raw);
+          code = j?.code || (typeof j === 'string' ? j : undefined);
+        } catch {
+          code = raw;
+        }
+      }
+    }
+    // Default to English if still missing
+    code = code || 'en';
+    await getNews(code);
+  } catch {
+    // best-effort
   }
 }
 
@@ -875,104 +1029,189 @@ export const registerGuestUser = async (data: { languageId: string; deviceDetail
   throw (lastErr instanceof Error ? lastErr : new Error('Guest registration failed (unknown)'));
 };
 
-// Comments API - updated to match actual backend response structure
+// Comments API
 export type CommentDTO = {
   id: string;
-  userId: string;
-  articleId: string | null;
-  shortNewsId: string;
-  content: string;
-  parentId: string | null;
+  user: { id: string; name: string; avatar: string };
+  text: string;
   createdAt: string;
-  updatedAt: string;
-  user: {
-    id: string;
-    profile: {
-      fullName: string;
-      profilePhotoUrl: string | null;
-    };
-  };
-  replies: CommentDTO[];
+  likes: number;
+  replies?: CommentDTO[];
+  parentId?: string | null;
 };
 
 const COMMENTS_KEY = 'LOCAL_COMMENTS_STORE';
+// Lightweight in-memory cache for comments per shortNewsId to speed up navigation
+const COMMENTS_CACHE = new Map<string, CommentDTO[]>();
+export function getCachedCommentsByShortNews(shortNewsId: string): CommentDTO[] | undefined {
+  return COMMENTS_CACHE.get(shortNewsId);
+}
+export async function prefetchCommentsByShortNews(shortNewsId: string): Promise<void> {
+  try {
+    const data = await getCommentsByShortNews(shortNewsId);
+    COMMENTS_CACHE.set(shortNewsId, data);
+  } catch {
+    // ignore prefetch errors
+  }
+}
 
 // getBaseUrl provided by services/http
 
-// Unified comments fetch: supports legacy article-based endpoint and new public shortNewsId query param
-export async function getComments(id: string, opts?: { type?: 'article' | 'shortnews' }): Promise<CommentDTO[]> {
-  const kind = opts?.type || 'shortnews';
+export async function getComments(articleId: string): Promise<CommentDTO[]> {
+  try {
+    if (await getMockMode()) {
+      // Always use local storage in mock mode
+      const raw = (await AsyncStorage.getItem(COMMENTS_KEY)) || '{}';
+      const all = JSON.parse(raw);
+      return (all[articleId] || []) as CommentDTO[];
+    }
+    const json = await request<{ success?: boolean; data: CommentDTO[] }>(`/comments/article/${encodeURIComponent(articleId)}`);
+    return (json.data || []) as CommentDTO[];
+  } catch {
+    // Fallback to local storage
+    const raw = (await AsyncStorage.getItem(COMMENTS_KEY)) || '{}';
+    const all = JSON.parse(raw);
+    return (all[articleId] || []) as CommentDTO[];
+  }
+}
+
+// Map backend comment shape (content, nested user.profile) into CommentDTO
+function mapServerComment(node: any): CommentDTO {
+  const name = node?.user?.profile?.fullName || node?.user?.name || 'User';
+  // Do not fake avatar; allow UI to fallback to initials when missing
+  const avatar = node?.user?.profile?.profilePhotoUrl || node?.user?.avatar || '';
+  const children: CommentDTO[] = Array.isArray(node?.replies) ? node.replies.map(mapServerComment) : [];
+  return {
+    id: String(node?.id || node?._id || Date.now()),
+    user: { id: String(node?.userId || node?.user?.id || 'user'), name, avatar },
+    text: String(node?.content || node?.text || ''),
+    createdAt: String(node?.createdAt || new Date().toISOString()),
+    likes: Number(node?.likes || 0),
+    replies: children,
+    parentId: node?.parentId ?? null,
+  };
+}
+
+// Fetch comments by shortNewsId from backend: GET /comments?shortNewsId=...
+export async function getCommentsByShortNews(shortNewsId: string): Promise<CommentDTO[]> {
   try {
     if (await getMockMode()) {
       const raw = (await AsyncStorage.getItem(COMMENTS_KEY)) || '{}';
       const all = JSON.parse(raw);
-      return (all[id] || []) as CommentDTO[];
+      const list = (all[shortNewsId] || []) as CommentDTO[];
+      COMMENTS_CACHE.set(shortNewsId, list);
+      return list;
     }
-    let json: { success?: boolean; data?: CommentDTO[] } | undefined;
-    if (kind === 'shortnews') {
-      // Public API: /comments?shortNewsId=ID
-      json = await request<{ success?: boolean; data: CommentDTO[] }>(`/comments?shortNewsId=${encodeURIComponent(id)}`);
-    } else {
-      json = await request<{ success?: boolean; data: CommentDTO[] }>(`/comments/article/${encodeURIComponent(id)}`);
-    }
-    return (json?.data || []) as CommentDTO[];
+    const params = new URLSearchParams({ shortNewsId });
+    const json = await request<{ success?: boolean; data: any[] }>(`/comments?${params.toString()}`);
+    const arr = Array.isArray(json?.data) ? json.data : [];
+    const mapped = arr.map(mapServerComment);
+    COMMENTS_CACHE.set(shortNewsId, mapped);
+    return mapped;
   } catch {
     const raw = (await AsyncStorage.getItem(COMMENTS_KEY)) || '{}';
     const all = JSON.parse(raw);
-    return (all[id] || []) as CommentDTO[];
+    const list = (all[shortNewsId] || []) as CommentDTO[];
+    COMMENTS_CACHE.set(shortNewsId, list);
+    return list;
   }
 }
 
-// Post comment with proper payload structure matching backend expectations
-export async function postComment(shortNewsId: string, content: string, userId: string, parentId?: string): Promise<CommentDTO> {
+export async function postComment(articleId: string, text: string, parentId?: string, user?: { id: string; name: string; avatar: string }): Promise<CommentDTO> {
   try {
-    if (await getMockMode()) throw new Error('mock-mode');
-    const body = {
-      content,
-      userId,
-      articleId: null,
-      shortNewsId,
-      parentId: parentId || null,
-    };
-    
-    // Debug logging to show the exact payload being sent
-    console.log('[API] POST /comments payload:', JSON.stringify(body, null, 2));
-    console.log('[API] Request details:', {
-      endpoint: '/comments',
+    if (await getMockMode()) {
+      // Short-circuit to local store in mock mode
+      throw new Error('mock-mode');
+    }
+    const json = await request<{ success?: boolean; data: CommentDTO }>(`/comments`, {
       method: 'POST',
-      shortNewsId,
-      content: content.substring(0, 50) + (content.length > 50 ? '...' : ''),
-      userId,
-      parentId: parentId || 'null (direct comment)'
+      body: { articleId, text, parentId, user },
     });
-    
-    const json = await request<{ success?: boolean; data: CommentDTO }>(`/comments`, { method: 'POST', body });
-    
-    // Debug logging to show the response
-    console.log('[API] POST /comments response:', JSON.stringify(json, null, 2));
-    
     return json.data as CommentDTO;
   } catch {
-    // Create mock response for local fallback
-    const mockResponse: CommentDTO = {
-      id: `mock_${Date.now()}`,
-      userId,
-      articleId: null,
-      shortNewsId,
-      content,
-      parentId: parentId || null,
+    // Fallback to local storage
+    const raw = (await AsyncStorage.getItem(COMMENTS_KEY)) || '{}';
+    const all = JSON.parse(raw);
+    const newNode: CommentDTO = {
+      id: `${Date.now()}`,
+      user: user || { id: 'guest', name: 'Guest', avatar: 'https://i.pravatar.cc/100' },
+      text,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      user: {
-        id: userId,
-        profile: {
-          fullName: 'Mock User',
-          profilePhotoUrl: 'https://i.pravatar.cc/100',
-        },
-      },
+      likes: 0,
       replies: [],
     };
-    return mockResponse;
+    all[articleId] = all[articleId] || [];
+    const insert = (list: CommentDTO[], pid?: string): boolean => {
+      if (!pid) return false;
+      for (const item of list) {
+        if (item.id === pid) {
+          item.replies = item.replies || [];
+          item.replies.push(newNode);
+          return true;
+        }
+        if (item.replies && insert(item.replies, pid)) return true;
+      }
+      return false;
+    };
+    if (!parentId) {
+      all[articleId].unshift(newNode);
+    } else {
+      insert(all[articleId], parentId);
+    }
+    await AsyncStorage.setItem(COMMENTS_KEY, JSON.stringify(all));
+    return newNode;
+  }
+}
+
+// Post a comment by shortNewsId to backend: POST /comments { shortNewsId, content, parentId }
+export async function postCommentByShortNews(shortNewsId: string, text: string, parentId?: string): Promise<CommentDTO> {
+  try {
+    if (await getMockMode()) {
+      throw new Error('mock-mode');
+    }
+    // include userId if present in tokens
+    let userId: string | undefined;
+    try {
+      const t = await loadTokens();
+      userId = t?.user?.id || t?.user?._id || t?.user?.userId;
+    } catch {}
+    const json = await request<{ success?: boolean; data: any }>(`/comments`, {
+      method: 'POST',
+      body: { shortNewsId, content: text, parentId: parentId || undefined, ...(userId ? { userId } : {}) },
+    });
+    return mapServerComment(json.data);
+  } catch {
+    const raw = (await AsyncStorage.getItem(COMMENTS_KEY)) || '{}';
+    const all = JSON.parse(raw);
+    const newNode: CommentDTO = {
+      id: `${Date.now()}`,
+      user: { id: 'guest', name: 'Guest', avatar: 'https://i.pravatar.cc/100' },
+      text,
+      createdAt: new Date().toISOString(),
+      likes: 0,
+      replies: [],
+      parentId: parentId || null,
+    };
+    all[shortNewsId] = all[shortNewsId] || [];
+    const insert = (list: CommentDTO[], pid?: string): boolean => {
+      if (!pid) return false;
+      for (const item of list) {
+        if (item.id === pid) {
+          item.replies = item.replies || [];
+          item.replies.push(newNode);
+          return true;
+        }
+        if (item.replies && insert(item.replies, pid)) return true;
+      }
+      return false;
+    };
+    if (!parentId) {
+      all[shortNewsId].unshift(newNode);
+    } else {
+      insert(all[shortNewsId], parentId);
+    }
+    await AsyncStorage.setItem(COMMENTS_KEY, JSON.stringify(all));
+    return newNode;
   }
 }
 
@@ -1000,34 +1239,12 @@ async function resolveLanguageId(): Promise<string | undefined> {
 }
 
 export async function getCategories(languageId?: string): Promise<CategoryItem[]> {
-  let langId = languageId || (await resolveLanguageId());
-  // Prevent legacy numeric id usage: remap if numeric and we can find a matching code in stored JSON
-  try {
-    if (langId && /^\d+$/.test(langId)) {
-      const raw = await AsyncStorage.getItem('selectedLanguage');
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw);
-          const storedCode = parsed?.code;
-          if (storedCode) {
-            // fetch live languages list (best-effort)
-            try {
-              const list = await getLanguages();
-              const match = list.find((l: any) => l.code === storedCode);
-              if (match && match.id && match.id !== langId) {
-                console.log('[CATEGORIES][LANG_MIGRATE] Remapping legacy numeric languageId', langId, '→', match.id, 'code', storedCode);
-                langId = match.id;
-              }
-            } catch (e) {
-              console.log('[CATEGORIES][LANG_MIGRATE] getLanguages failed, keeping legacy id', (e as any)?.message || e);
-            }
-          }
-        } catch {}
-      }
-    }
-  } catch {}
-  const safeLangId = langId || 'en';
-  const cacheKey = CATEGORIES_CACHE_KEY(safeLangId);
+  const langId = languageId || (await resolveLanguageId());
+  // If we don't have a language yet, return empty (or cached fallback from any lang if needed)
+  if (!langId) return [];
+
+  // Mock mode short-circuit to cached data (if any)
+  const cacheKey = CATEGORIES_CACHE_KEY(langId);
   const cachedRaw = await AsyncStorage.getItem(cacheKey);
   const cached: CategoryItem[] | null = cachedRaw ? (() => { try { return JSON.parse(cachedRaw) as CategoryItem[]; } catch { return null; } })() : null;
 
@@ -1036,69 +1253,14 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
   }
 
   try {
-    console.log('[CATEGORIES][REQ] primary fetch with languageId', safeLangId);
-    const params = new URLSearchParams({ languageId: safeLangId });
-    let res: any;
-    let primaryFailed400 = false;
-    try {
-      res = await request<any>(`/categories?${params.toString()}`, { noAuth: true });
-    } catch (e: any) {
-      // Detect 400 likely due to invalid languageId
-      const msg = e?.message || String(e);
-      if (/400/.test(msg) || /Bad Request/i.test(msg)) {
-        primaryFailed400 = true;
-        console.warn('[CATEGORIES][REQ] primary 400 for languageId', safeLangId, '→ will attempt remap & retry');
-      } else {
-        throw e;
-      }
-    }
-    if (primaryFailed400) {
-      // Attempt retry WITHOUT param first
-      try {
-        const retryNoParam = await request<any>('/categories', { noAuth: true });
-        const arrNP = Array.isArray(retryNoParam)
-          ? retryNoParam
-          : Array.isArray(retryNoParam?.data) ? retryNoParam.data
-          : Array.isArray(retryNoParam?.items) ? retryNoParam.items
-          : Array.isArray(retryNoParam?.categories) ? retryNoParam.categories
-          : null;
-        if (Array.isArray(arrNP) && arrNP.length) {
-          console.log('[CATEGORIES][RETRY] succeeded without languageId after 400 primary', { count: arrNP.length });
-          return normalizeAndCacheCategoryList(arrNP, cacheKey);
-        }
-      } catch (e) {
-        console.warn('[CATEGORIES][RETRY] no-param after 400 failed', e instanceof Error ? e.message : e);
-      }
-      // Attempt code-based remap if we still have legacy id (already tried earlier, but maybe list changed)
-      if (langId && /^\d+$/.test(langId)) {
-        try {
-          const raw = await AsyncStorage.getItem('selectedLanguage');
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            const code = parsed?.code;
-            if (code) {
-              try {
-                const list = await getLanguages();
-                const match = list.find((l: any) => l.code === code);
-                if (match && match.id && match.id !== langId) {
-                  console.log('[CATEGORIES][RETRY] remapped legacy id after 400', langId, '→', match.id);
-                  langId = match.id;
-                  const retryParams = new URLSearchParams({ languageId: langId });
-                  const resRemap = await request<any>(`/categories?${retryParams.toString()}`, { noAuth: true });
-                  res = resRemap; // proceed to normalization below
-                }
-              } catch {}
-            }
-          }
-        } catch {}
-      }
-    }
+    const params = new URLSearchParams({ languageId: langId });
+    const res = await request<any>(`/categories?${params.toString()}`, { noAuth: true });
     const arr = Array.isArray(res)
       ? res
-      : Array.isArray(res?.items)
-      ? res.items
       : Array.isArray(res?.data)
       ? res.data
+      : Array.isArray(res?.items)
+      ? res.items
       : Array.isArray(res?.categories)
       ? res.categories
       : Array.isArray(res?.data?.items)
@@ -1106,44 +1268,7 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
       : Array.isArray(res?.data?.categories)
       ? res.data.categories
       : null;
-    if (!arr || !Array.isArray(arr) || arr.length === 0) {
-      console.warn('[CATEGORIES][WARN] Empty or invalid response for languageId=', safeLangId, '→ trying fallback strategies');
-      // Strategy 2: no language param
-      try {
-        const res2 = await request<any>(`/categories`, { noAuth: true });
-        const arr2 = Array.isArray(res2)
-          ? res2
-          : Array.isArray(res2?.data) ? res2.data
-          : Array.isArray(res2?.items) ? res2.items
-          : Array.isArray(res2?.categories) ? res2.categories
-          : null;
-        if (Array.isArray(arr2) && arr2.length) {
-          console.log('[CATEGORIES][FALLBACK] succeeded without languageId param', { count: arr2.length });
-          return normalizeAndCacheCategoryList(arr2, cacheKey);
-        }
-      } catch (e) {
-        console.warn('[CATEGORIES][FALLBACK] no-param attempt failed', e instanceof Error ? e.message : e);
-      }
-      // Strategy 3: alt param name like lang / langId
-      for (const key of ['lang', 'langId']) {
-        try {
-          const res3 = await request<any>(`/categories?${key}=${encodeURIComponent(safeLangId)}`, { noAuth: true });
-          const arr3 = Array.isArray(res3)
-            ? res3
-            : Array.isArray(res3?.data) ? res3.data
-            : Array.isArray(res3?.items) ? res3.items
-            : Array.isArray(res3?.categories) ? res3.categories
-            : null;
-          if (Array.isArray(arr3) && arr3.length) {
-            console.log('[CATEGORIES][FALLBACK] succeeded with alt param', key, { count: arr3.length });
-            return normalizeAndCacheCategoryList(arr3, cacheKey);
-          }
-        } catch (e) {
-          console.warn('[CATEGORIES][FALLBACK] alt param', key, 'failed', e instanceof Error ? e.message : e);
-        }
-      }
-      throw new Error('Invalid categories response');
-    }
+    if (!arr) throw new Error('Invalid categories response');
     const list: CategoryItem[] = (arr as any[]).map((x) => ({
       id: String(x?.id || x?._id || x?.value || x?.key || x?.slug || x?.name),
       name: String(x?.name || x?.title || x?.label || x?.slug || 'Category'),
@@ -1165,25 +1290,6 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
     console.warn('getCategories failed', err);
     return [];
   }
-}
-
-function normalizeAndCacheCategoryList(arr: any[], cacheKey: string): CategoryItem[] {
-  const list: CategoryItem[] = (arr as any[]).map((x) => ({
-    id: String(x?.id || x?._id || x?.value || x?.key || x?.slug || x?.name),
-    name: String(x?.name || x?.title || x?.label || x?.slug || 'Category'),
-    slug: x?.slug,
-    iconUrl: x?.iconUrl || x?.icon || x?.iconURL || x?.imageUrl || null,
-    children: Array.isArray(x?.children)
-      ? (x.children as any[]).map((c) => ({
-          id: String(c?.id || c?._id || c?.value || c?.key || c?.slug || c?.name),
-          name: String(c?.name || c?.title || c?.label || c?.slug || 'Category'),
-          slug: c?.slug,
-          iconUrl: c?.iconUrl || c?.icon || c?.iconURL || c?.imageUrl || null,
-        }))
-      : [],
-  }));
-  try { AsyncStorage.setItem(cacheKey, JSON.stringify(list)); } catch {}
-  return list;
 }
 
 // Auth APIs
@@ -1517,8 +1623,6 @@ export async function createShortNews(input: CreateShortNewsInput): Promise<Crea
     if (await getMockMode()) {
       return { id: `sn_${Date.now()}`, url: undefined, raw: { mock: true, input } };
     }
-    // Provide an idempotency key so backend (if it supports) can ignore duplicates
-    const clientRequestId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const payload: any = {
       title: input.title,
       content: input.content,
@@ -1538,23 +1642,13 @@ export async function createShortNews(input: CreateShortNewsInput): Promise<Crea
       lng: input.location?.longitude,
       accuracy: input.location?.accuracyMeters,
       role: input.role || 'CITIZEN_REPORTER',
-      clientRequestId,
     };
     if (DEBUG_API) {
       try {
         console.log('[API] createShortNews payload keys', Object.keys(payload));
       } catch {}
     }
-    let json: any;
-    try {
-      json = await request<any>('/shortnews', { method: 'POST', body: payload, retry: 0, timeoutMs: 60000 });
-    } catch (e: any) {
-      if (e?.message === 'Request timed out') {
-        // Re-throw with clearer context for UI layer
-        throw new Error('Upload taking too long. Please check network and try again.');
-      }
-      throw e;
-    }
+    const json = await request<any>('/shortnews', { method: 'POST', body: payload });
     const data = (json as any)?.data ?? json;
     const id: string = data?.id || data?._id || `${Date.now()}`;
     const url: string | undefined = data?.url || data?.shareUrl || data?.permalink;
