@@ -16,6 +16,7 @@ import { AuthProvider } from '../context/AuthContext';
 import { ThemeProviderLocal, useThemePref } from '../context/ThemeContext';
 import { UiPrefsProvider } from '../context/UiPrefsContext';
 import { useColorScheme } from '../hooks/useColorScheme';
+import { ensureNotificationsSetup } from '../services/notifications';
 
 // Keep native splash visible while we boot in app/splash.tsx
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -58,6 +59,18 @@ function ThemedApp() {
         }
       } catch (e:any) {
         console.log('[AUTH_INIT] Layout init skipped', e?.message);
+      }
+    })();
+  }, []);
+
+  // Initialize notifications and obtain push token on app start
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const res = await ensureNotificationsSetup();
+        console.log('[NOTIF_INIT] status', res.status, 'expoToken?', !!res.expoToken, 'deviceToken?', !!res.deviceToken);
+      } catch (e:any) {
+        console.log('[NOTIF_INIT] failed', e?.message);
       }
     })();
   }, []);
