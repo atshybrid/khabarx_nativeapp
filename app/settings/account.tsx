@@ -219,15 +219,17 @@ export default function AccountScreen() {
           />
         </View>
 
-        {/* Debug utilities */}
-        <View style={styles.card}>
-          <SettingsRow
-            icon={<Feather name="tool" size={20} color={Colors.light.primary} />}
-            title="Account debug"
-            subtitle="Reset app storage, tokens, etc."
-            onPress={() => router.push('/settings/account-debug')}
-          />
-        </View>
+        {/* Debug utilities (hidden) */}
+        {false && (
+          <View style={styles.card}>
+            <SettingsRow
+              icon={<Feather name="tool" size={20} color={Colors.light.primary} />}
+              title="Account debug"
+              subtitle="Reset app storage, tokens, etc."
+              onPress={() => router.push('/settings/account-debug')}
+            />
+          </View>
+        )}
       </ScrollView>
     </View>
   );
