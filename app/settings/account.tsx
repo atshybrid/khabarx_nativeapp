@@ -7,7 +7,7 @@ import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, Text, UIManager, View } from 'react-native';
+import { Alert, LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, Text, UIManager, View } from 'react-native';
 
 // Enable LayoutAnimation only on Old Architecture (Bridged) Android.
 // On New Architecture (Fabric), this API is a no-op and logs a warning.
@@ -25,6 +25,7 @@ export default function AccountScreen() {
   const [locExpanded, setLocExpanded] = useState<boolean>(false);
   const [loggedIn, setLoggedIn] = useState<boolean>(false);
   const [roleReporter, setRoleReporter] = useState<boolean>(false);
+  const [developerMode, setDeveloperMode] = useState<boolean>(false);
   // Profile welcome card removed per request
 
   const fetchPrefs = useCallback(async () => {
@@ -79,6 +80,13 @@ export default function AccountScreen() {
         setLoggedIn(Boolean(t?.jwt));
       } catch {}
       try { setRoleReporter(await isCitizenReporter()); } catch {}
+      // Initialize developer mode from env/AsyncStorage
+      try {
+        const raw = String(process.env.EXPO_PUBLIC_DEVELOPER_MODE ?? '').toLowerCase();
+        const envOn = raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+        const stored = (await AsyncStorage.getItem('developer_mode')) === '1';
+        setDeveloperMode(envOn || stored);
+      } catch {}
     })();
   }, [fetchPrefs]);
 
@@ -121,11 +129,20 @@ export default function AccountScreen() {
     );
   }, [loggedIn]);
 
+  const toggleDeveloperMode = async () => {
+    const next = !developerMode;
+    setDeveloperMode(next);
+    try { await AsyncStorage.setItem('developer_mode', next ? '1' : '0'); } catch {}
+    try { Alert.alert('Developer mode', next ? 'Enabled' : 'Disabled'); } catch {}
+  };
+
   return (
     <View style={styles.safe}>
       {/* App Bar */}
       <View style={styles.appBar}>
-        <Text style={styles.appTitle}>Account</Text>
+        <Pressable onLongPress={toggleDeveloperMode} delayLongPress={600} hitSlop={8}>
+          <Text style={styles.appTitle}>Account{developerMode ? ' · Dev' : ''}</Text>
+        </Pressable>
         {AppBarIcons}
       </View>
 
@@ -219,8 +236,8 @@ export default function AccountScreen() {
           />
         </View>
 
-        {/* Debug utilities (hidden) */}
-        {false && (
+        {/* Debug utilities (visible only in Developer Mode) */}
+        {developerMode && (
           <View style={styles.card}>
             <SettingsRow
               icon={<Feather name="tool" size={20} color={Colors.light.primary} />}
