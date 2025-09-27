@@ -236,8 +236,8 @@ export default function AccountScreen() {
           />
         </View>
 
-        {/* Debug utilities (visible only in Developer Mode) */}
-        {developerMode && (
+        {/* Debug utilities (hidden) */}
+        {false && developerMode && (
           <View style={styles.card}>
             <SettingsRow
               icon={<Feather name="tool" size={20} color={Colors.light.primary} />}
