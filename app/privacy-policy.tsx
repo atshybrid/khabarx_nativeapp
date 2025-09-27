@@ -1,7 +1,8 @@
+import LegalSkeleton from '@/components/ui/LegalSkeleton';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { getTerms } from '@/services/api';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 export default function PrivacyPolicyPage() {
@@ -27,9 +28,7 @@ export default function PrivacyPolicyPage() {
       {html ? (
         <WebView originWhitelist={["*"]} source={source} />
       ) : (
-        <View style={styles.center}> 
-          <ActivityIndicator />
-        </View>
+        <LegalSkeleton />
       )}
     </View>
   );
