@@ -9,7 +9,7 @@
   <!-- Android 13+ specific media permissions -->
   <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
   <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
-  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+  <!-- Removed RECORD_AUDIO as the app does not record audio -->
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>

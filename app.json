@@ -19,10 +19,7 @@
       "edgeToEdgeEnabled": true,
       "package": "com.amoghnya.khabarx",
       "googleServicesFile": "./google-services.json",
-      "softwareKeyboardLayoutMode": "pan",
-      "permissions": [
-        "android.permission.RECORD_AUDIO"
-      ]
+      "softwareKeyboardLayoutMode": "pan"
     },
     "web": {
       "bundler": "metro",
