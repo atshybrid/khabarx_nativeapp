@@ -1,6 +1,7 @@
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { getLockMode, type AppLockMode } from '@/services/appLock';
 import { Feather } from '@expo/vector-icons';
+import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -78,13 +79,13 @@ export default function PrivacyScreen() {
           icon: 'file-text',
           title: 'Privacy Policy',
           subtitle: 'How we collect and use your data',
-          onPress: () => router.push('/privacy-policy' as any),
+          onPress: () => Linking.openURL('https://app.hrcitodaynews.in/legal/privacy/html'),
         },
         {
           icon: 'file-text',
           title: 'Terms & Conditions',
           subtitle: 'Your rights and obligations',
-          onPress: () => router.push('/terms-and-conditions' as any),
+          onPress: () => Linking.openURL('https://app.hrcitodaynews.in/legal/terms/html'),
         },
         {
           icon: 'key',
