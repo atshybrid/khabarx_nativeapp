@@ -1,3 +1,4 @@
+import { Collapsible } from '@/components/Collapsible';
 import { WEB_BASE_URL } from '@/config/appConfig';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { getDeviceIdentity } from '@/services/device';
@@ -30,14 +31,14 @@ export default function SupportScreen() {
   const versionName = (Constants as any)?.expoConfig?.version || (Constants as any)?.nativeAppVersion || '1.0.0';
   const buildCode = (Constants as any)?.expoConfig?.android?.versionCode || (Constants as any)?.nativeBuildVersion || '';
 
-  const sendEmail = (kind: 'support' | 'feature' = 'support') => {
+  const sendEmail = (kind: 'support' | 'feature' | 'issue' = 'support') => {
     const to = 'info@hrcitodaynews.in';
     const subject = encodeURIComponent(
-      `KhabarX ${kind === 'support' ? 'Support' : 'Feature Request'} — v${versionName} (${Platform.OS}${buildCode ? `, ${buildCode}` : ''})`
+      `KhabarX ${kind === 'feature' ? 'Feature Request' : kind === 'issue' ? 'Issue Report' : 'Support'} — v${versionName} (${Platform.OS}${buildCode ? `, ${buildCode}` : ''})`
     );
     const body = encodeURIComponent(
       `Hello KhabarX team,%0D%0A%0D%0A` +
-      `${kind === 'support' ? 'I need help with...' : 'I have a feature idea: ...'}%0D%0A%0D%0A` +
+      `${kind === 'feature' ? 'I have a feature idea: ...' : kind === 'issue' ? 'I found an issue: ...' : 'I need help with...'}%0D%0A%0D%0A` +
       `—%0D%0ADevice ID: ${deviceId}%0D%0ADevice: ${deviceModel}%0D%0APlatform: ${Platform.OS}%0D%0AApp: v${versionName}${buildCode ? ` (${buildCode})` : ''}`
     );
     const url = `mailto:${to}?subject=${subject}&body=${body}`;
@@ -104,7 +105,19 @@ export default function SupportScreen() {
           <View style={styles.separator} />
           <ItemRow icon="mail" title="Contact support" subtitle="Email us your questions" onPress={() => sendEmail('support')} />
           <View style={styles.divider} />
-          <ItemRow icon="alert-circle" title="Report an issue" subtitle="Open our support page" onPress={openSupport} />
+          <ItemRow icon="alert-circle" title="Report an issue" subtitle="Email report (fallback web)" onPress={() => {
+            // Try email first, fallback to support page if mail cannot open
+            const to = 'info@hrcitodaynews.in';
+            const subject = encodeURIComponent(`KhabarX Issue Report — v${versionName} (${Platform.OS}${buildCode ? `, ${buildCode}` : ''})`);
+            const body = encodeURIComponent(
+              `Hello KhabarX team,%0D%0A%0D%0A` +
+              `I found an issue: ...%0D%0A%0D%0A` +
+              `Steps to reproduce:%0D%0A1.%0D%0A2.%0D%0A3.%0D%0A%0D%0A` +
+              `—%0D%0ADevice ID: ${deviceId}%0D%0ADevice: ${deviceModel}%0D%0APlatform: ${Platform.OS}%0D%0AApp: v${versionName}${buildCode ? ` (${buildCode})` : ''}`
+            );
+            const url = `mailto:${to}?subject=${subject}&body=${body}`;
+            Linking.openURL(url).catch(() => openSupport());
+          }} />
           <View style={styles.divider} />
           <ItemRow icon="star" title="Rate us" subtitle="Love the app? Leave a review" onPress={rateUs} />
         </View>
@@ -121,6 +134,33 @@ export default function SupportScreen() {
           <Text style={[styles.cardTitle, { color: text }]}>App info</Text>
           <View style={styles.separator} />
           <ItemRow icon="info" title={`Version ${versionName}${buildCode ? ` (${buildCode})` : ''}`} subtitle={`${Platform.OS} • ${deviceModel}`} onPress={copyDebugInfo} />
+        </View>
+
+        <View style={[styles.card, { backgroundColor: card, borderColor: border }]}> 
+          <Text style={[styles.cardTitle, { color: text }]}>FAQ</Text>
+          <View style={styles.separator} />
+          <View style={styles.faqList}>
+            <View style={[styles.faqItem, { borderColor: border }]}> 
+              <Collapsible title="How do I report a bug?">
+                <Text style={[styles.faqText, { color: text }]}>Use the “Report an issue” option above. It will open your email with device details pre-filled. Describe steps to reproduce and attach screenshots if possible.</Text>
+              </Collapsible>
+            </View>
+            <View style={[styles.faqItem, { borderColor: border }]}> 
+              <Collapsible title="How to change my language?">
+                <Text style={[styles.faqText, { color: text }]}>Go to Settings → Language, pick your preferred language. News and categories will update accordingly.</Text>
+              </Collapsible>
+            </View>
+            <View style={[styles.faqItem, { borderColor: border }]}> 
+              <Collapsible title="Why is posting limited?">
+                <Text style={[styles.faqText, { color: text }]}>To prevent spam, posting requires basic profile details and respects limits. If you’re blocked by a validation, check the chips at the bottom of Post screen.</Text>
+              </Collapsible>
+            </View>
+            <View style={[styles.faqItem, { borderColor: border }]}> 
+              <Collapsible title="How to enable App Lock?">
+                <Text style={[styles.faqText, { color: text }]}>Go to Settings → Privacy & Security → App Lock. Enable and follow prompts to set up biometrics or device PIN fallback.</Text>
+              </Collapsible>
+            </View>
+          </View>
         </View>
       </ScrollView>
     </View>
@@ -143,4 +183,7 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: 16, fontWeight: '700' },
   rowSubtitle: { marginTop: 2, fontSize: 12 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(0,0,0,0.08)', marginVertical: 8 },
+  faqList: { gap: 8 },
+  faqItem: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, padding: 8 },
+  faqText: { fontSize: 14, lineHeight: 20 },
 });
