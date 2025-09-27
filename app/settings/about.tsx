@@ -57,13 +57,7 @@ export default function AboutScreen() {
           <ItemRow icon="globe" title="Website" subtitle="Open our homepage" onPress={() => Linking.openURL(WEB_BASE_URL).catch(() => Alert.alert('Error', 'Unable to open website'))} />
         </View>
 
-        <View style={[styles.card, { backgroundColor: card, borderColor: border }]}> 
-          <Text style={[styles.cardTitle, { color: text }]}>Legal</Text>
-          <View style={styles.separator} />
-          <ItemRow icon="shield" title="Privacy Policy" onPress={() => Linking.openURL(`${WEB_BASE_URL}/privacy`).catch(() => Alert.alert('Error', 'Unable to open page'))} />
-          <View style={styles.divider} />
-          <ItemRow icon="file-text" title="Terms of Service" onPress={() => Linking.openURL(`${WEB_BASE_URL}/terms`).catch(() => Alert.alert('Error', 'Unable to open page'))} />
-        </View>
+        {/* Legal section removed as requested */}
       </ScrollView>
     </View>
   );
