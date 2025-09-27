@@ -1414,7 +1414,9 @@ async function resolveLanguageId(): Promise<string | undefined> {
 }
 
 export async function getCategories(languageId?: string): Promise<CategoryItem[]> {
-  let langId = languageId || (await resolveLanguageId());
+  // Always use English for categories as per backend expectation
+  // Ignore any provided languageId or selected language; force 'en'
+  let langId: string | undefined = 'en';
   // Normalize if a language code was passed accidentally
   try {
     if (langId && !/^cmf/i.test(String(langId))) {

@@ -1,6 +1,5 @@
 import { useThemeColor } from '@/hooks/useThemeColor';
-import { getTerms } from '@/services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getPrivacyPolicy } from '@/services/api';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -13,10 +12,7 @@ export default function TermsAndConditionsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem('selectedLanguage');
-        const parsed = raw ? JSON.parse(raw) : null;
-        const code = (parsed?.code || parsed?.languageCode || 'en').toLowerCase();
-        const doc = await getTerms(code);
+        const doc = await getPrivacyPolicy('en');
         setHtml(doc?.content || '<p>No content</p>');
       } catch {
         setHtml('<p>Failed to load terms.</p>');

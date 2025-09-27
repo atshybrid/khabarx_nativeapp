@@ -1,6 +1,5 @@
 import { useThemeColor } from '@/hooks/useThemeColor';
-import { getPrivacyPolicy } from '@/services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getTerms } from '@/services/api';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -9,18 +8,14 @@ export default function PrivacyPolicyPage() {
   const bg = useThemeColor({}, 'background');
   const text = useThemeColor({}, 'text');
   const [html, setHtml] = useState<string | null>(null);
-  // derive language from stored preference
-
+  // Always load English legal content per global requirement (using Terms endpoint as requested)
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem('selectedLanguage');
-        const parsed = raw ? JSON.parse(raw) : null;
-        const code = (parsed?.code || parsed?.languageCode || 'en').toLowerCase();
-        const doc = await getPrivacyPolicy(code);
+        const doc = await getTerms('en');
         setHtml(doc?.content || '<p>No content</p>');
       } catch {
-        setHtml('<p>Failed to load privacy policy.</p>');
+        setHtml('<p>Failed to load terms.</p>');
       }
     })();
   }, []);
