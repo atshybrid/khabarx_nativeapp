@@ -1,9 +1,9 @@
-import { WEB_BASE_URL } from '@/config/appConfig';
+// Removed website link from About; keeping only app details
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { Feather } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import Constants from 'expo-constants';
-import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function AboutScreen() {
   const bg = useThemeColor({}, 'background');
@@ -15,6 +15,7 @@ export default function AboutScreen() {
   const version = (Constants as any)?.expoConfig?.version || (Constants as any)?.nativeAppVersion || '1.0.0';
   const build = (Constants as any)?.expoConfig?.android?.versionCode || (Constants as any)?.expoConfig?.ios?.buildNumber || (Constants as any)?.nativeBuildVersion || '';
   const appName = (Constants as any)?.expoConfig?.name || 'KhabarX';
+  const bundleId = (Constants as any)?.expoConfig?.android?.package || (Constants as any)?.expoConfig?.ios?.bundleIdentifier || 'unknown.package';
 
   const copyInfo = async () => {
     try {
@@ -54,7 +55,9 @@ export default function AboutScreen() {
           <View style={styles.separator} />
           <ItemRow icon="tag" title={`Version ${version}${build ? ` (${build})` : ''}`} subtitle={Platform.OS.toUpperCase()} onPress={copyInfo} />
           <View style={styles.divider} />
-          <ItemRow icon="globe" title="Website" subtitle="Open our homepage" onPress={() => Linking.openURL(WEB_BASE_URL).catch(() => Alert.alert('Error', 'Unable to open website'))} />
+          <ItemRow icon="briefcase" title="Developer" subtitle="Kaburlu Media" />
+          <View style={styles.divider} />
+          <ItemRow icon="package" title="Package ID" subtitle={bundleId} />
         </View>
 
         {/* Legal section removed as requested */}
