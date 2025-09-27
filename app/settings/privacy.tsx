@@ -1,10 +1,9 @@
-import { WEB_BASE_URL } from '@/config/appConfig';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { getLockMode, type AppLockMode } from '@/services/appLock';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 export default function PrivacyScreen() {
   const bg = useThemeColor({}, 'background');
@@ -79,13 +78,13 @@ export default function PrivacyScreen() {
           icon: 'file-text',
           title: 'Privacy Policy',
           subtitle: 'How we collect and use your data',
-          onPress: () => Linking.openURL(`${WEB_BASE_URL}/privacypolicy`).catch(() => Alert.alert('Error', 'Unable to open link')),
+          onPress: () => router.push('/privacy-policy' as any),
         },
         {
           icon: 'file-text',
           title: 'Terms & Conditions',
           subtitle: 'Your rights and obligations',
-          onPress: () => Linking.openURL(`${WEB_BASE_URL}/TermsandConditions`).catch(() => Alert.alert('Error', 'Unable to open link')),
+          onPress: () => router.push('/terms-and-conditions' as any),
         },
         {
           icon: 'key',

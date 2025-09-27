@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { createCitizenReporterMobile, getMpinStatus, loginWithMpin } from '../services/api';
 import { gatherRegistrationContext } from '../services/contextGather';
 
@@ -25,9 +25,17 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
   const lookedUpRef = useRef<string | null>(null);
   // React Native setTimeout returns NodeJS.Timeout; use appropriate type
   const lookupTimer = useRef<NodeJS.Timeout | null>(null);
+  // Input refs and focus guards
+  const mobileRef = useRef<TextInput>(null);
+  const mpinRef = useRef<TextInput>(null);
+  const fullNameRef = useRef<TextInput>(null);
+  const mpinAutofocusedRef = useRef<boolean>(false);
+  const didAutoBlurMpinRef = useRef<boolean>(false);
 
   const reset = () => {
     setMobile(''); setMpin(''); setFullName(''); setStatus('idle'); setError(null); setRoleName(null); setIsRegistered(null); lookedUpRef.current = null;
+    mpinAutofocusedRef.current = false;
+    didAutoBlurMpinRef.current = false;
   };
 
   // Debounced auto lookup when 10 digits entered OR when user presses Continue
@@ -118,6 +126,36 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mobile]);
 
+  // Manage initial focus when switching to sections, but avoid re-opening after auto-blur
+  useEffect(() => {
+    if (!visible) return;
+    if (status === 'mpin') {
+      // Focus MPIN only once when empty and not loading
+      if (!mpin && !loading && !mpinAutofocusedRef.current) {
+        mpinAutofocusedRef.current = true;
+        setTimeout(() => mpinRef.current?.focus(), 150);
+      }
+    } else if (status === 'register') {
+      // Focus full name first time
+      if (!fullName && !loading) {
+        setTimeout(() => fullNameRef.current?.focus(), 150);
+      }
+    }
+  }, [status, visible, mpin, loading, fullName]);
+
+  // When MPIN reaches 4 digits, blur and dismiss keyboard exactly once
+  useEffect(() => {
+    if (status === 'mpin' && mpin.length >= 4 && !didAutoBlurMpinRef.current) {
+      didAutoBlurMpinRef.current = true;
+      mpinRef.current?.blur();
+      Keyboard.dismiss();
+    }
+    if (mpin.length < 4) {
+      // Allow another auto-blur after corrections
+      didAutoBlurMpinRef.current = false;
+    }
+  }, [mpin, status]);
+
   const doLogin = async () => {
     console.log('[MOBILE_LOGIN] doLogin called', { mobile, mpinLength: mpin.length, loading });
     
@@ -127,6 +165,8 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
     }
     
     setError(null);
+    // Close keyboard for clearer progress feedback
+    Keyboard.dismiss();
     
     if (!/^\d{4}$/.test(mpin)) { 
       console.log('[MOBILE_LOGIN] Invalid MPIN format');
@@ -167,6 +207,7 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
     }
     
     setError(null);
+  Keyboard.dismiss();
     
     if (!fullName.trim()) { 
       console.log('[MOBILE_LOGIN] Full name missing');
@@ -251,12 +292,14 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
           keyboardType="number-pad"
           maxLength={10}
           value={mobile}
+          ref={mobileRef}
           onChangeText={(t) => {
             const cleaned = t.replace(/\D/g, '');
             console.log('[MOBILE_LOGIN] Mobile input changed', { original: t, cleaned, length: cleaned.length });
             setMobile(cleaned);
           }}
           placeholder="Enter 10 digit mobile"
+          editable={!loading}
         />
         {mobile.length === 10 && status === 'idle' && !loading && (
           <TouchableOpacity style={styles.secondaryBtn} onPress={() => triggerLookup(true)}>
@@ -286,9 +329,20 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
               value={mpin}
               onChangeText={setMpin}
               placeholder="Enter MPIN"
+              ref={mpinRef}
+              editable={!loading}
+              blurOnSubmit
+              onSubmitEditing={doLogin}
             />
-            <TouchableOpacity style={styles.primaryBtn} onPress={doLogin} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Login</Text>}
+            <TouchableOpacity style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]} onPress={doLogin} disabled={loading}>
+              {loading ? (
+                <View style={styles.rowCenter}>
+                  <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryText}>Logging in…</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryText}>Login</Text>
+              )}
             </TouchableOpacity>
           </>
         )}
@@ -301,6 +355,8 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
               value={fullName}
               onChangeText={setFullName}
               placeholder="Your full name"
+              ref={fullNameRef}
+              editable={!loading}
             />
             <Text style={styles.label}>Set MPIN</Text>
             <TextInput
@@ -311,9 +367,17 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
               value={mpin}
               onChangeText={setMpin}
               placeholder="4 digit MPIN"
+              editable={!loading}
             />
-            <TouchableOpacity style={styles.primaryBtn} onPress={doRegister} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Create & Login</Text>}
+            <TouchableOpacity style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]} onPress={doRegister} disabled={loading}>
+              {loading ? (
+                <View style={styles.rowCenter}>
+                  <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryText}>Creating…</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryText}>Create & Login</Text>
+              )}
             </TouchableOpacity>
           </>
         )}
@@ -346,6 +410,7 @@ const styles = StyleSheet.create({
   label: { marginTop: 12, marginBottom: 4, fontWeight: '500', fontSize: 13, color: '#333' },
   input: { backgroundColor: '#f3f4f6', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, fontSize: 15 },
   primaryBtn: { backgroundColor: '#2563eb', paddingVertical: 12, alignItems: 'center', borderRadius: 8, marginTop: 20 },
+  primaryBtnDisabled: { opacity: 0.8 },
   primaryText: { color: '#fff', fontWeight: '600' },
   error: { color: '#dc2626', marginTop: 8 },
   mobileHeading: { fontSize: 16, fontWeight: '600', marginTop: 4 },
@@ -353,6 +418,7 @@ const styles = StyleSheet.create({
   subtle: { color: '#6b7280', marginTop: 4, fontSize: 12 },
   secondaryBtn: { backgroundColor: '#e2e8f0', paddingVertical: 10, alignItems: 'center', borderRadius: 8, marginTop: 12 },
   secondaryText: { color: '#1e293b', fontWeight: '600' },
+  rowCenter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
 });
 
 export default MobileLoginModal;

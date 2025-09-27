@@ -117,6 +117,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialState);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastBackgroundTime = useRef<number>(0);
+  // Ref to hold latest refresh function to avoid cyclic deps in scheduleTokenRefresh
+  const doRefreshTokenRef = useRef<(() => Promise<boolean>) | undefined>(undefined);
 
   // Clear any existing timeout
   const clearRefreshTimeout = useCallback(() => {
@@ -139,19 +141,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (delay > 0) {
       refreshTimeoutRef.current = setTimeout(() => {
         console.log('[AUTH] Scheduled token refresh triggered');
-        refreshToken();
+        // Call latest version via ref to avoid useCallback cyclic deps
+        doRefreshTokenRef.current?.();
       }, delay);
       
       console.log(`[AUTH] Token refresh scheduled in ${Math.round(delay / 1000)}s`);
     }
   }, [clearRefreshTimeout]);
 
-  // Refresh token function
-  const refreshToken = useCallback(async (): Promise<boolean> => {
+  // Refresh token function (internal)
+  const doRefreshToken = useCallback(async (): Promise<boolean> => {
     try {
       console.log('[AUTH] Refreshing token...');
       
-      const newTokens = await refreshTokens();
+  const newTokens = await refreshTokens();
       
       dispatch({ type: 'TOKEN_REFRESH_SUCCESS', payload: newTokens });
       
@@ -195,6 +198,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.user, scheduleTokenRefresh, clearRefreshTimeout]);
 
+  // Keep ref in sync with latest doRefreshToken implementation
+  useEffect(() => {
+    doRefreshTokenRef.current = doRefreshToken;
+  }, [doRefreshToken]);
+
   // Initialize auth state
   useEffect(() => {
     const initializeAuth = async () => {
@@ -210,7 +218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Check if token is expired
         if (isExpired(tokens.expiresAt)) {
           console.log('[AUTH] Token expired, attempting refresh');
-          const refreshSuccess = await refreshToken();
+          const refreshSuccess = await doRefreshToken();
           if (!refreshSuccess) {
             // refreshToken handles logout internally now
             return;
@@ -243,33 +251,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     initializeAuth();
-  }, [refreshToken, scheduleTokenRefresh]);
+  }, [doRefreshToken, scheduleTokenRefresh]);
 
-  // Handle app state changes for background/foreground token validation
-  useEffect(() => {
-    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'background') {
-        lastBackgroundTime.current = Date.now();
-      } else if (nextAppState === 'active' && lastBackgroundTime.current > 0) {
-        const backgroundDuration = Date.now() - lastBackgroundTime.current;
-        
-        // If app was in background for more than 5 minutes, validate token
-        if (backgroundDuration > 5 * 60 * 1000 && state.isAuthenticated) {
-          console.log('[AUTH] App returned from background, validating token');
-          
-          if (isTokenExpired()) {
-            const refreshSuccess = await refreshToken();
-            if (!refreshSuccess) {
-              await logout('Session expired while app was in background');
-            }
-          }
-        }
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
-  }, [state.isAuthenticated]);
+  // (moved below isTokenExpired/logout definitions)
 
   // Login function
   const login = useCallback(async (tokens: Tokens, user: User) => {
@@ -323,45 +307,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clearRefreshTimeout]);
 
-  // Refresh token function
-  const refreshToken = useCallback(async (): Promise<boolean> => {
-    try {
-      console.log('[AUTH] Refreshing token...');
-      
-      const newTokens = await refreshTokens();
-      
-      dispatch({ type: 'TOKEN_REFRESH_SUCCESS', payload: newTokens });
-      
-      // Update user info if provided in refresh response
-      if (newTokens.user && state.user) {
-        const updatedUser: User = { ...state.user, ...newTokens.user };
-        dispatch({
-          type: 'LOGIN_SUCCESS',
-          payload: { tokens: newTokens, user: updatedUser },
-        });
-      }
-
-      // Schedule next refresh
-      scheduleTokenRefresh(newTokens.expiresAt);
-      
-      console.log('[AUTH] Token refresh successful');
-      return true;
-      
-    } catch (error) {
-      console.error('[AUTH] Token refresh failed:', error);
-      
-      const authError = AuthErrorHandler.handle(error, 'token_refresh');
-      dispatch({ type: 'TOKEN_REFRESH_ERROR', payload: authError.userMessage });
-      
-      // If refresh fails with auth error, logout user
-      if (authError.code === AuthErrorCode.TOKEN_INVALID || 
-          authError.code === AuthErrorCode.REFRESH_FAILED) {
-        await logout('Token refresh failed');
-      }
-      
-      return false;
-    }
-  }, [state.user, scheduleTokenRefresh, logout]);
+  // (duplicate refreshToken removed)
 
   // Check if token is expired
   const isTokenExpired = useCallback((): boolean => {
@@ -376,7 +322,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (isTokenExpired()) {
       console.log('[AUTH] Token expired, attempting refresh for request');
-      const refreshSuccess = await refreshToken();
+      const refreshSuccess = await doRefreshToken();
       if (!refreshSuccess) {
         return null;
       }
@@ -386,7 +332,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     return state.tokens.jwt;
-  }, [state.tokens, isTokenExpired, refreshToken]);
+  }, [state.tokens, isTokenExpired, doRefreshToken]);
 
   // Clear error function
   const clearError = useCallback(() => {
@@ -400,11 +346,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [clearRefreshTimeout]);
 
+  // Handle app state changes for background/foreground token validation
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'background') {
+        lastBackgroundTime.current = Date.now();
+      } else if (nextAppState === 'active' && lastBackgroundTime.current > 0) {
+        const backgroundDuration = Date.now() - lastBackgroundTime.current;
+        // If app was in background for more than 5 minutes, validate token
+        if (backgroundDuration > 5 * 60 * 1000 && state.isAuthenticated) {
+          console.log('[AUTH] App returned from background, validating token');
+          if (isTokenExpired()) {
+            const refreshSuccess = await doRefreshToken();
+            if (!refreshSuccess) {
+              await logout('Session expired while app was in background');
+            }
+          }
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription?.remove();
+  }, [state.isAuthenticated, isTokenExpired, doRefreshToken, logout]);
+
   const contextValue: AuthContextType = {
     ...state,
     login,
     logout,
-    refreshToken,
+    refreshToken: doRefreshToken,
     clearError,
     isTokenExpired,
     getValidToken,

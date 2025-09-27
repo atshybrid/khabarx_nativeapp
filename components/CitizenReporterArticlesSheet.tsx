@@ -3,7 +3,8 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { Feather } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ListRenderItem } from 'react-native';
-import { ActivityIndicator, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import ListItemSkeleton from './ui/ListItemSkeleton';
 
 
 type StatusType = '' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DESK_APPROVED' | 'AI_APPROVED' | 'DESK_PENDING';
@@ -104,16 +105,22 @@ function CitizenReporterArticles({ visible, onClose, token }: Props) {
       key={chip.value}
       style={[
         styles.chip,
+        styles.chipEqual,
         { backgroundColor: scheme === 'dark' ? '#223042' : styles.chip.backgroundColor },
         getChipStyle(chip),
       ]}
       onPress={() => handleChipPress(chip)}
     >
-      <Text style={[
-        getChipTextStyle(chip),
-        // Force white text for all chips in dark mode for maximum contrast
-        scheme === 'dark' ? { color: '#fff' } : (status === chip.value ? null : { color: theme.text })
-      ]}>{chip.label}</Text>
+      <Text
+        numberOfLines={1}
+        ellipsizeMode="tail"
+        style={[
+          getChipTextStyle(chip),
+          scheme === 'dark' ? { color: '#fff' } : (status === chip.value ? null : { color: theme.text })
+        ]}
+      >
+        {chip.label}
+      </Text>
     </TouchableOpacity>
   );
 
@@ -154,18 +161,13 @@ function CitizenReporterArticles({ visible, onClose, token }: Props) {
             <Feather name="x" size={24} color={scheme === 'dark' ? '#fff' : '#333'} />
           </TouchableOpacity>
         </View>
-        <View style={styles.chipBarScroll}>
-          <FlatList
-            data={STATUS_CHIPS}
-            renderItem={({ item, index }) => renderChip(item, index)}
-            keyExtractor={item => item.value}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingRight: 8 }}
-          />
+        <View style={styles.chipBarRow}>
+          {STATUS_CHIPS.map((item, index) => renderChip(item, index))}
         </View>
         {loading && !articles.length ? (
-          <ActivityIndicator size="large" color={theme.secondary} style={{ marginTop: 32 }} />
+          <View style={{ flex: 1 }}>
+            <ListItemSkeleton count={8} />
+          </View>
         ) : (
           <View style={{ flex: 1 }}>
             <FlatList
@@ -194,7 +196,9 @@ const styles = StyleSheet.create({
   sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   sheetTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   chipBarScroll: { marginBottom: 12 },
+  chipBarRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 },
   chip: { backgroundColor: '#f3f4f6', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6, marginRight: 8 },
+  chipEqual: { flexGrow: 1, flexBasis: 0, alignItems: 'center' },
   chipActiveAll: { backgroundColor: '#DB4437' },
   chipActivePending: { backgroundColor: '#fbbf24' },
   chipActiveDeskPending: { backgroundColor: '#ef4444' }, // red

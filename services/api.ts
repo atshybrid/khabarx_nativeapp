@@ -532,15 +532,50 @@ function detectScript(text: string, target: 'telugu' | 'devanagari' | 'tamil' | 
 }
 
 async function transliterateUsingSanscript(input: string, target: 'telugu' | 'devanagari' | 'tamil' | 'kannada'): Promise<string> {
+  const src = String(input || '');
+  if (!src) return src;
   try {
     const mod: any = await import('sanscript');
     const Sanscript = mod?.default || mod;
-    // Use ITRANS scheme for roman input; Sanscript handles punctuation/numbers
-    const out = Sanscript.t(String(input), 'itrans', target);
-    return typeof out === 'string' ? out : input;
+    // Evaluate multiple roman schemes and pick the best coverage in target script
+    const schemes: string[] = ['itrans', 'hk', 'iast', 'kolkata', 'slp1', 'velthuis', 'wx'];
+    const ranges: Record<string, RegExp> = {
+      devanagari: /[\u0900-\u097F]/,
+      telugu: /[\u0C00-\u0C7F]/,
+      tamil: /[\u0B80-\u0BFF]/,
+      kannada: /[\u0C80-\u0CFF]/,
+    };
+    const r = ranges[target];
+    let bestOut = '';
+    let bestScore = -1;
+    let bestScheme = '';
+    for (const scheme of schemes) {
+      try {
+        const out = Sanscript.t(src, scheme as any, target);
+        if (typeof out !== 'string' || !out) continue;
+        // score: fraction of characters that are in target script vs letters in input
+        const totalLetters = (src.match(/[A-Za-z]/g) || []).length || 1;
+        const targetChars = (out.match(r) || []).length;
+        const score = targetChars / totalLetters;
+        if (score > bestScore || (score === bestScore && bestScheme === '')) {
+          bestScore = score;
+          bestOut = out;
+          bestScheme = scheme;
+        }
+      } catch {}
+    }
+    if (bestOut && bestOut !== src) {
+      if ((process.env.EXPO_PUBLIC_TRANSLIT_DEBUG || '').toString().match(/^(1|true|on|yes)$/i)) {
+        try { console.log('[TX] best scheme', bestScheme, 'score', bestScore.toFixed(2), '→', bestOut.slice(0, 32)); } catch {}
+      }
+      return bestOut;
+    }
+    // Fallback to ITRANS even if unchanged
+    const out = Sanscript.t(src, 'itrans', target);
+    return typeof out === 'string' ? out : src;
   } catch {
     // If library not available, return original
-    return input;
+    return src;
   }
 }
 
@@ -575,6 +610,19 @@ export async function transliterateText(content: string, targetLangCode: string)
   };
   const targetRange = scriptRanges[target];
   let lastChar = '';
+  // Small lexicon overrides for Telugu to match common expectations
+  const teluguLexicon: Record<string, string> = target === 'telugu'
+    ? {
+        nenu: 'నేను',
+        mee: 'మీ',
+        nee: 'నీ',
+        na: 'నా',
+        meeru: 'మీరు',
+        nagendra: 'నాగేంద్ర',
+        reddy: 'రెడ్డి',
+      }
+    : {};
+
   for (const ch of chunks) {
     const isLatinWord = /^[A-Za-z]+$/.test(ch);
     const isSkippable = /^(https?:\/\/|\w+[\w.-]*@|`|\*|_|<|```)/.test(ch) || (/[^A-Za-z]/.test(ch) && !isLatinWord);
@@ -584,6 +632,14 @@ export async function transliterateText(content: string, targetLangCode: string)
       continue;
     }
     if (isLatinWord) {
+      // Lexicon override for exact roman token (case-insensitive)
+      const lower = ch.toLowerCase();
+      const lex = teluguLexicon[lower];
+      if (lex) {
+        parts.push(lex);
+        lastChar = lex.slice(-1) || lastChar;
+        continue;
+      }
       const prevIsTarget = targetRange?.test(lastChar || '') || false;
       const prevIsBoundary = /[\s\n\r\t.,;:!?()\[\]{}'"-]/.test(lastChar || '') || !lastChar;
       if (!prevIsTarget || prevIsBoundary) {
@@ -603,6 +659,9 @@ export async function transliterateText(content: string, targetLangCode: string)
     lastChar = ch.slice(-1) || lastChar;
   }
   const result = parts.join('');
+  if ((process.env.EXPO_PUBLIC_TRANSLIT_DEBUG || '').toString().match(/^(1|true|on|yes)$/i)) {
+    try { console.log('[TX] transliterateText', { code: targetLangCode, target, in: String(content).slice(0, 32), out: result.slice(0, 32) }); } catch {}
+  }
   return { detected: detected === 'roman' ? 'roman' : 'other', result, candidates: [result] };
 }
 
@@ -1117,6 +1176,57 @@ export async function getCommentsByShortNews(shortNewsId: string): Promise<Comme
   }
 }
 
+// -------- Legal / Privacy / Terms --------
+export type LegalDoc = {
+  id: string;
+  title: string;
+  content: string; // HTML
+  version?: string;
+  isActive?: boolean;
+  language?: string;
+  effectiveAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export async function getPrivacyPolicy(languageCode: string = 'en'): Promise<LegalDoc> {
+  // Use backend route /legal/privacy?language=en
+  const params = new URLSearchParams({ language: languageCode });
+  const json = await request<{ success?: boolean; data?: any }>(`/legal/privacy?${params.toString()}`, { method: 'GET', noAuth: true });
+  const data: any = (json as any)?.data ?? json;
+  if (!data || typeof data !== 'object') throw new Error('Invalid privacy policy response');
+  return {
+    id: String(data.id || data._id || 'privacy'),
+    title: String(data.title || 'Privacy Policy'),
+    content: String(data.content || ''),
+    version: data.version,
+    isActive: Boolean(data.isActive ?? true),
+    language: data.language || languageCode,
+    effectiveAt: data.effectiveAt,
+    createdAt: data.createdAt,
+    updatedAt: data.updatedAt,
+  };
+}
+
+export async function getTerms(languageCode: string = 'en'): Promise<LegalDoc> {
+  // Use backend route /legal/terms?language=en
+  const params = new URLSearchParams({ language: languageCode });
+  const json = await request<{ success?: boolean; data?: any }>(`/legal/terms?${params.toString()}`, { method: 'GET', noAuth: true });
+  const data: any = (json as any)?.data ?? json;
+  if (!data || typeof data !== 'object') throw new Error('Invalid terms response');
+  return {
+    id: String(data.id || data._id || 'terms'),
+    title: String(data.title || 'Terms & Conditions'),
+    content: String(data.content || ''),
+    version: data.version,
+    isActive: Boolean(data.isActive ?? true),
+    language: data.language || languageCode,
+    effectiveAt: data.effectiveAt,
+    createdAt: data.createdAt,
+    updatedAt: data.updatedAt,
+  };
+}
+
 export async function postComment(articleId: string, text: string, parentId?: string, user?: { id: string; name: string; avatar: string }): Promise<CommentDTO> {
   try {
     if (await getMockMode()) {
@@ -1227,21 +1337,100 @@ export type CategoryItem = {
 const CATEGORIES_CACHE_KEY = (langId: string) => `categories_cache:${langId}`;
 
 async function resolveLanguageId(): Promise<string | undefined> {
-  try {
-    const t = await loadTokens();
-    if (t?.languageId) return t.languageId;
-  } catch {}
+  // Load languages once to validate IDs and map codes
+  let langs: { id: string; code?: string; name?: string; nativeName?: string }[] = [];
+  try { langs = await getLanguages(); } catch {}
+
+  const findByCode = (code?: string) => langs.find(l => (l.code || '').toLowerCase() === String(code || '').toLowerCase());
+  const existsId = (id?: string) => !!langs.find(l => String(l.id) === String(id));
+
+  // 1) Try selectedLanguage from storage first (user's explicit choice)
   try {
     const raw = await AsyncStorage.getItem('selectedLanguage');
-    return raw ? (JSON.parse(raw)?.id as string | undefined) : undefined;
+    if (raw) {
+      let parsed: any;
+      try { parsed = JSON.parse(raw); } catch { parsed = raw; }
+      const code: string | undefined = (typeof parsed === 'string') ? parsed : (parsed?.code || parsed?.lang || parsed?.isoCode || undefined);
+      const idFromObj: string | undefined = (parsed && typeof parsed === 'object' && parsed.id) ? String(parsed.id) : undefined;
+      if (code) {
+        const found = findByCode(code);
+        if (found?.id) {
+          const mappedId = String(found.id);
+          if (idFromObj && idFromObj !== mappedId) {
+            try { console.log('[CAT] resolveLanguageId storage: code→id overrides object.id', { code, mappedId, idFromObj }); } catch {}
+            try {
+              const next = { ...(typeof parsed === 'object' ? parsed : {}), id: mappedId, code, name: parsed?.nativeName || parsed?.name || found.nativeName || found.name };
+              await AsyncStorage.setItem('selectedLanguage', JSON.stringify(next));
+            } catch {}
+          } else {
+            try { console.log('[CAT] resolveLanguageId from storage.code', { code, id: mappedId }); } catch {}
+          }
+          return mappedId;
+        }
+      }
+      if (idFromObj) {
+        if (existsId(idFromObj)) {
+          try { console.log('[CAT] resolveLanguageId from storage.id', idFromObj); } catch {}
+          return idFromObj;
+        } else if (code) {
+          const found = findByCode(code);
+          if (found?.id) {
+            const mappedId = String(found.id);
+            try { console.log('[CAT] resolveLanguageId storage.id invalid, falling back to code', { code, id: mappedId }); } catch {}
+            try {
+              const next = { ...(typeof parsed === 'object' ? parsed : {}), id: mappedId, code, name: parsed?.nativeName || parsed?.name || found.nativeName || found.name };
+              await AsyncStorage.setItem('selectedLanguage', JSON.stringify(next));
+            } catch {}
+            return mappedId;
+          }
+        }
+      }
+    }
   } catch {}
+
+  // 2) Fallback to tokens.languageId (validate against known languages)
+  try {
+    const t = await loadTokens();
+    const tid = t?.languageId ? String(t.languageId) : undefined;
+    if (tid && existsId(tid)) {
+      try { console.log('[CAT] resolveLanguageId from tokens', tid); } catch {}
+      return tid;
+    }
+    if (tid && !existsId(tid)) {
+      try { console.warn('[CAT] tokens.languageId not in languages; ignoring', { tid }); } catch {}
+    }
+  } catch {}
+
+  // 3) Final fallback: default language code (prefer Telugu 'te' if present)
+  const defaultCode = String(process.env.EXPO_PUBLIC_DEFAULT_LANG_CODE || 'te');
+  const fallback = findByCode(defaultCode);
+  if (fallback?.id) {
+    try { console.log('[CAT] resolveLanguageId fallback by code', { defaultCode, id: fallback.id }); } catch {}
+    return String(fallback.id);
+  }
+  // If no languages available, return undefined
+  try { console.warn('[CAT] resolveLanguageId: no valid language found'); } catch {}
   return undefined;
 }
 
 export async function getCategories(languageId?: string): Promise<CategoryItem[]> {
-  const langId = languageId || (await resolveLanguageId());
+  let langId = languageId || (await resolveLanguageId());
+  // Normalize if a language code was passed accidentally
+  try {
+    if (langId && !/^cmf/i.test(String(langId))) {
+      const list = await getLanguages();
+      const found = list.find(l => (l.code || '').toLowerCase() === String(langId).toLowerCase());
+      if (found?.id) {
+        try { console.log('[CAT] getCategories: normalize code→id', { code: langId, id: found.id }); } catch {}
+        langId = String(found.id);
+      }
+    }
+  } catch {}
   // If we don't have a language yet, return empty (or cached fallback from any lang if needed)
-  if (!langId) return [];
+  if (!langId) {
+    try { console.warn('[CAT] getCategories: no languageId resolved'); } catch {}
+    return [];
+  }
 
   // Mock mode short-circuit to cached data (if any)
   const cacheKey = CATEGORIES_CACHE_KEY(langId);
@@ -1249,12 +1438,15 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
   const cached: CategoryItem[] | null = cachedRaw ? (() => { try { return JSON.parse(cachedRaw) as CategoryItem[]; } catch { return null; } })() : null;
 
   if (await getMockMode()) {
+    try { console.log('[CAT] getCategories: mock mode, cached', { langId, count: cached?.length || 0 }); } catch {}
     return cached || [];
   }
 
   try {
     const params = new URLSearchParams({ languageId: langId });
-    const res = await request<any>(`/categories?${params.toString()}`, { noAuth: true });
+    const url = `/categories?${params.toString()}`;
+    try { console.log('[CAT] GET', url); } catch {}
+    const res = await request<any>(url, { noAuth: true });
     const arr = Array.isArray(res)
       ? res
       : Array.isArray(res?.data)
@@ -1268,7 +1460,10 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
       : Array.isArray(res?.data?.categories)
       ? res.data.categories
       : null;
-    if (!arr) throw new Error('Invalid categories response');
+    if (!arr) {
+      try { console.warn('[CAT] categories: invalid response shape', Object.keys(res || {})); } catch {}
+      throw new Error('Invalid categories response');
+    }
     const list: CategoryItem[] = (arr as any[]).map((x) => ({
       id: String(x?.id || x?._id || x?.value || x?.key || x?.slug || x?.name),
       name: String(x?.name || x?.title || x?.label || x?.slug || 'Category'),
@@ -1284,6 +1479,7 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
         : [],
     }));
     try { await AsyncStorage.setItem(cacheKey, JSON.stringify(list)); } catch {}
+    try { console.log('[CAT] categories loaded', { langId, count: list.length }); } catch {}
     return list;
   } catch (err) {
     if (cached && Array.isArray(cached)) return cached;
@@ -1326,14 +1522,18 @@ export type RegisterPayload = {
   mandal?: string;
   village?: string;
 };
-export type RegisterResponse = { ok: boolean; id?: string };
+export type RegisterResponse = { ok: boolean; id?: string; message?: string };
 export async function registerUser(data: RegisterPayload): Promise<RegisterResponse> {
   try {
-    return await request<RegisterResponse>(`/auth/register`, { method: 'POST', body: data });
+    const res = await request<any>('/auth/register', { method: 'POST', body: data });
+    const payload = (res as any)?.data ?? res;
+    const id: string | undefined = payload?.id || payload?._id || payload?.userId;
+    const ok: boolean = payload?.ok !== undefined ? !!payload.ok : true;
+    return { ok, id, message: payload?.message };
   } catch {
     // Mock accept any with state provided
     if (data.state) return { ok: true, id: `${Date.now()}` };
-    return { ok: false };
+    return { ok: false, message: 'Registration failed' };
   }
 }
 
@@ -1598,7 +1798,7 @@ export async function createPost(input: CreatePostInput): Promise<CreatePostResp
 
 // ---------- ShortNews Create (Citizen Reporter) ----------
 export type CreateShortNewsInput = {
-  title: string; // max 35 chars
+  title: string; // max 50 chars
   content: string; // max 60 words
   categoryId: string;
   languageId: string;
@@ -1617,11 +1817,87 @@ export type CreateShortNewsInput = {
   role?: 'CITIZEN_REPORTER';
 };
 export type CreateShortNewsResponse = { id: string; url?: string; raw?: any };
+// --- Idempotency & duplicate prevention helpers ---
+const SN_INFLIGHT = new Map<string, Promise<CreateShortNewsResponse>>();
+const SN_RECENT_KEY = 'shortnews_recent_submissions_v1';
+const SN_RECENT_TTL_MS = 2 * 60 * 1000; // 2 minutes window to treat as duplicate
+
+function normalizeWhitespace(s: string): string {
+  return String(s || '').replace(/[\s\u00A0\t\r\n]+/g, ' ').trim();
+}
+
+function stableShortNewsKey(input: CreateShortNewsInput): string {
+  const title = normalizeWhitespace(input.title).toLowerCase();
+  const content = normalizeWhitespace(input.content).toLowerCase();
+  const categoryId = String(input.categoryId || '');
+  const languageId = String(input.languageId || '');
+  const media = Array.isArray(input.mediaUrls) ? [...input.mediaUrls].filter(Boolean).map(String).sort() : [];
+  // Do NOT include location or timestamps in key to avoid minor changes defeating dedupe
+  const obj = { title, content, categoryId, languageId, media };
+  const json = JSON.stringify(obj);
+  // Simple 32-bit hash
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < json.length; i++) {
+    h ^= json.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return 'sn_' + (h >>> 0).toString(16);
+}
+
+async function loadRecentShortNewsMap(): Promise<Record<string, { ts: number; res: CreateShortNewsResponse }>> {
+  try {
+    const raw = await AsyncStorage.getItem(SN_RECENT_KEY);
+    if (!raw) return {};
+    const map = JSON.parse(raw) as Record<string, { ts: number; res: CreateShortNewsResponse }>;
+    const now = Date.now();
+    // prune expired
+    for (const k of Object.keys(map)) {
+      if (!map[k] || (now - map[k].ts) > SN_RECENT_TTL_MS) delete map[k];
+    }
+    return map;
+  } catch { return {}; }
+}
+
+async function saveRecentShortNews(key: string, res: CreateShortNewsResponse) {
+  try {
+    const now = Date.now();
+    const raw = await AsyncStorage.getItem(SN_RECENT_KEY);
+    const map = raw ? (JSON.parse(raw) as Record<string, { ts: number; res: CreateShortNewsResponse }>) : {};
+    map[key] = { ts: now, res };
+    // Limit map size
+    const entries = Object.entries(map);
+    if (entries.length > 100) {
+      entries.sort((a, b) => a[1].ts - b[1].ts);
+      const trimmed = Object.fromEntries(entries.slice(entries.length - 100));
+      await AsyncStorage.setItem(SN_RECENT_KEY, JSON.stringify(trimmed));
+      return;
+    }
+    await AsyncStorage.setItem(SN_RECENT_KEY, JSON.stringify(map));
+  } catch {}
+}
+
 export async function createShortNews(input: CreateShortNewsInput): Promise<CreateShortNewsResponse> {
   const t0 = Date.now();
   try {
     if (await getMockMode()) {
       return { id: `sn_${Date.now()}`, url: undefined, raw: { mock: true, input } };
+    }
+    // Idempotency: compute stable key for this content
+    const idemKey = stableShortNewsKey(input);
+
+    // 1) Return in-flight promise if same payload is already posting
+    const inflightExisting = SN_INFLIGHT.get(idemKey);
+    if (inflightExisting) {
+      try { console.log('[API] createShortNews dedupe: returning in-flight result for', idemKey); } catch {}
+      return await inflightExisting;
+    }
+
+    // 2) Quick local recent-cache check to avoid rapid re-posts
+    const recentMap = await loadRecentShortNewsMap();
+    const recent = recentMap[idemKey];
+    if (recent && (Date.now() - recent.ts) <= SN_RECENT_TTL_MS) {
+      try { console.log('[API] createShortNews dedupe: recent submission found for', idemKey); } catch {}
+      return recent.res;
     }
     const payload: any = {
       title: input.title,
@@ -1643,18 +1919,34 @@ export async function createShortNews(input: CreateShortNewsInput): Promise<Crea
       accuracy: input.location?.accuracyMeters,
       role: input.role || 'CITIZEN_REPORTER',
     };
+    // Provide idempotency key to backend too (header and body), best-effort
+    payload.idempotencyKey = idemKey;
+    const requestOptions: any = { method: 'POST', body: payload, headers: { 'X-Idempotency-Key': idemKey } };
     if (DEBUG_API) {
       try {
         console.log('[API] createShortNews payload keys', Object.keys(payload));
       } catch {}
     }
-    const json = await request<any>('/shortnews', { method: 'POST', body: payload });
-    const data = (json as any)?.data ?? json;
-    const id: string = data?.id || data?._id || `${Date.now()}`;
-    const url: string | undefined = data?.url || data?.shareUrl || data?.permalink;
-    const dt = Date.now() - t0;
-    try { console.log('[API] createShortNews success', { id, ms: dt, mediaCount: Array.isArray(input.mediaUrls) ? input.mediaUrls.length : 0 }); } catch {}
-    return { id: String(id), url, raw: data };
+    const promise = (async () => {
+      try {
+        const json = await request<any>('/shortnews', requestOptions);
+        const data = (json as any)?.data ?? json;
+        const id: string = data?.id || data?._id || `${Date.now()}`;
+        const url: string | undefined = data?.url || data?.shareUrl || data?.permalink;
+        const dt = Date.now() - t0;
+        try { console.log('[API] createShortNews success', { id, ms: dt, mediaCount: Array.isArray(input.mediaUrls) ? input.mediaUrls.length : 0 }); } catch {}
+        const res: CreateShortNewsResponse = { id: String(id), url, raw: data };
+        // Save recent to avoid re-posting
+        saveRecentShortNews(idemKey, res);
+        return res;
+      } finally {
+        // Clear in-flight entry
+        SN_INFLIGHT.delete(idemKey);
+      }
+    })();
+    // Register in-flight promise for dedupe of concurrent taps
+    SN_INFLIGHT.set(idemKey, promise);
+    return await promise;
   } catch (err) {
     if (await getMockMode()) {
       return { id: `sn_${Date.now()}`, url: undefined, raw: { fallback: true, input } };

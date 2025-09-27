@@ -3,13 +3,13 @@ import Toast from '@/components/Toast';
 import { ensureFirebaseAuthAsync, isFirebaseConfigComplete, logFirebaseGoogleAlignment } from '@/services/firebaseClient';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { deactivateKeepAwake } from 'expo-keep-awake';
 import * as Linking from 'expo-linking';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+// removed duplicate react-native import (merged above)
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { AuthProvider } from '../context/AuthContext';
@@ -43,8 +43,21 @@ function ThemedApp() {
 
   // Dev-only keep-awake guard to avoid activation errors on some devices
   React.useEffect(() => {
-    if (__DEV__) {
-      try { deactivateKeepAwake().catch(() => {}); } catch {}
+    if (__DEV__ && Platform.OS !== 'web') {
+      // Lazy import to avoid initializing keep-awake too early
+      (async () => {
+        try {
+          const mod = await import('expo-keep-awake');
+          if (mod?.deactivateKeepAwake) {
+            await mod.deactivateKeepAwake();
+          } else if ((mod as any)?.deactivateKeepAwakeAsync) {
+            await (mod as any).deactivateKeepAwakeAsync();
+          }
+        } catch (e) {
+          // Swallow – keep awake isn’t critical to functionality
+          console.log('[KEEP_AWAKE] skip', (e as any)?.message);
+        }
+      })();
     }
   }, []);
 

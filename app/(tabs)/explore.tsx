@@ -33,9 +33,10 @@ export default function PostCreateScreen() {
   const [categories, setCategories] = useState<any[]>([]);
   const [localCategoryId, setLocalCategoryId] = useState<string | null>(null);
   const [languageId, setLanguageId] = useState<string>('');
+  const [languageCode, setLanguageCode] = useState<string>('');
   const [languageName, setLanguageName] = useState<string>('');
-  const titleTx = useTransliteration({ languageCode: languageId, enabled: true, mode: 'on-boundary', debounceMs: 140 });
-  const contentTx = useTransliteration({ languageCode: languageId, enabled: true, mode: 'on-boundary', debounceMs: 140 });
+  const titleTx = useTransliteration({ languageCode: languageCode, enabled: true, mode: 'on-boundary', debounceMs: 140 });
+  const contentTx = useTransliteration({ languageCode: languageCode, enabled: true, mode: 'on-boundary', debounceMs: 140 });
   // showLogin state removed - now uses direct navigation to /auth/login
   // showUpgrade state removed - now uses direct navigation to /auth/login
   const [showLottie, setShowLottie] = useState<string | boolean>(false);
@@ -45,6 +46,9 @@ export default function PostCreateScreen() {
   // Removed loginMobile state and related MPIN flow to reduce unused code noise
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
+  // Refs to focus inputs when tapping validation chips
+  const titleInputRef = useRef<TextInput>(null);
+  const contentInputRef = useRef<TextInput>(null);
 
   // Parallel upload processor: starts upload for each pending item immediately
   const processUploads = React.useCallback(() => {
@@ -189,19 +193,57 @@ export default function PostCreateScreen() {
 
   useEffect(() => {
     (async () => {
-      // derive selected language display from storage
-      // load languages list (cached or live)
-  try { await getLanguages(); } catch {}
-      const langJson = await AsyncStorage.getItem('selectedLanguage');
+      // derive selected language display from storage and normalize id/code pair
       let effLangId: string | undefined;
+      let effLangCode: string | undefined;
+      let effLangName: string | undefined;
+      let langs: any[] | null = null;
+      try { langs = await getLanguages(); } catch { langs = null; }
+      const langJson = await AsyncStorage.getItem('selectedLanguage');
       if (langJson) {
         try {
           const lang = JSON.parse(langJson);
-          setLanguageName(lang?.nativeName || lang?.name || 'Language');
-          setLanguageId(lang?.id);
-          effLangId = lang?.id;
+          const inId = lang?.id as string | undefined;
+          const inCode = (lang?.code || lang?.slug) as string | undefined;
+          const inName = (lang?.nativeName || lang?.name) as string | undefined;
+          effLangId = inId;
+          effLangCode = inCode;
+          effLangName = inName;
+          // If either piece is missing, try to resolve from languages list
+          if ((!effLangId || !effLangCode) && langs && langs.length) {
+            if (!effLangId && effLangCode) {
+              const found = langs.find((l: any) => String(l.code).toLowerCase() === String(effLangCode).toLowerCase());
+              if (found) {
+                effLangId = String(found.id);
+                effLangName = effLangName || found.nativeName || found.name;
+              }
+            } else if (effLangId && !effLangCode) {
+              const found = langs.find((l: any) => String(l.id) === String(effLangId));
+              if (found) {
+                effLangCode = String(found.code);
+                effLangName = effLangName || found.nativeName || found.name;
+              }
+            }
+          }
+          // If both exist but don't match mapping, normalize to mapping and persist
+          if (effLangId && effLangCode && langs && langs.length) {
+            const found = langs.find((l: any) => String(l.code).toLowerCase() === String(effLangCode).toLowerCase());
+            const mappedId = found ? String(found.id) : undefined;
+            if (mappedId && mappedId !== effLangId) {
+              try { console.log('[POST] normalize selectedLanguage id from code mapping', { code: effLangCode, oldId: effLangId, newId: mappedId }); } catch {}
+              effLangId = mappedId;
+              try {
+                const next = { ...(lang || {}), id: mappedId, code: effLangCode, name: effLangName };
+                await AsyncStorage.setItem('selectedLanguage', JSON.stringify(next));
+              } catch {}
+            }
+          }
         } catch {}
       }
+      // Commit state for language
+      if (effLangName) setLanguageName(effLangName);
+      if (effLangId) setLanguageId(effLangId);
+      if (effLangCode) setLanguageCode(effLangCode);
       // load current role if any (from tokens or AsyncStorage)
       try {
         const t = await loadTokens();
@@ -218,9 +260,11 @@ export default function PostCreateScreen() {
         const st = await requestAppPermissions();
         setPerms(st);
       } catch {}
-      // fetch categories for dropdown (language resolved internally)
+      // fetch categories for dropdown using effective language id (fallback handled in API as well)
+      try { console.log('[POST] fetch categories', { languageId: effLangId, code: effLangCode, name: effLangName }); } catch {}
       try {
         const list = await getCategories(effLangId);
+        try { console.log('[POST] categories result', { count: Array.isArray(list) ? list.length : 0 }); } catch {}
         setCategories(list);
       } catch {}
       // Configure native Google Sign-In if chosen
@@ -232,6 +276,18 @@ export default function PostCreateScreen() {
       setAuthLoaded(true);
     })();
   }, [googleMode, webClientId]);
+
+  // Refetch categories whenever languageId changes (e.g., after login or language selection sync)
+  useEffect(() => {
+    (async () => {
+      try {
+        if (languageId) {
+          const list = await getCategories(languageId);
+          setCategories(list);
+        }
+      } catch {}
+    })();
+  }, [languageId]);
 
   // Displayed category name (fallback to stored name if list doesn't include current id yet)
   const [displayedCategoryName, setDisplayedCategoryName] = useState<string | null>(null);
@@ -291,7 +347,7 @@ export default function PostCreateScreen() {
     return true;
   };
 
-  const titleRemaining = 35 - titleTx.value.length;
+  const titleCount = titleTx.value.length;
   const contentWords = useMemo(() => (contentTx.value.trim() ? contentTx.value.trim().split(/\s+/).length : 0), [contentTx.value]);
   // const contentRemaining = Math.max(0, 60 - contentWords); // not currently surfaced
 
@@ -546,7 +602,7 @@ export default function PostCreateScreen() {
             <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between' }}>
               <Text style={[styles.selectorValue, { color: theme.text }]}>{languageName || 'Auto'}</Text>
               <TouchableOpacity
-                onPress={titleTx.toggle}
+                onPress={() => { titleTx.toggle(); contentTx.toggle(); }}
                 style={{ marginLeft:8, backgroundColor: translitBg, paddingHorizontal:10, paddingVertical:4, borderRadius:999 }}
               >
                 <Text style={{ fontSize:11, fontWeight:'600', color: translitColor }}>{titleTx.enabled ? 'Translit ON' : 'Translit OFF'}</Text>
@@ -559,15 +615,16 @@ export default function PostCreateScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionLabel}>Title</Text>
-            <Text style={styles.counter}>{titleRemaining}</Text>
+            <Text style={styles.counter}>{titleCount}/50</Text>
           </View>
           <TextInput
             style={[styles.titleInput, { backgroundColor: theme.card, borderColor: theme.border, color: theme.text }]}
             placeholder="Short, factual headline"
             value={titleTx.value}
-            maxLength={35}
+            maxLength={50}
             onChangeText={titleTx.onChangeText}
             placeholderTextColor={theme.muted}
+            ref={titleInputRef}
           />
         </View>
 
@@ -584,6 +641,7 @@ export default function PostCreateScreen() {
             value={contentTx.value}
             onChangeText={contentTx.onChangeText}
             placeholderTextColor={theme.muted}
+            ref={contentInputRef}
           />
         </View>
 
@@ -674,12 +732,62 @@ export default function PostCreateScreen() {
 
       {/* Fixed bottom action bar */}
       <View style={[styles.bottomBar, { backgroundColor: scheme === 'dark' ? 'rgba(21,23,24,0.93)' : 'rgba(255,255,255,0.93)', borderTopColor: theme.border }] }>
-        <View style={styles.validationRow}>
-          {!titleTx.value.trim() && <Text style={styles.validationText}>Title required</Text>}
-          {!contentTx.value.trim() && <Text style={styles.validationText}>Summary required</Text>}
-          {!localCategoryId && <Text style={styles.validationText}>Category</Text>}
-          {media.length === 0 && <Text style={styles.validationText}>Media</Text>}
-        </View>
+        {/* Single-row, horizontally scrollable validation chips */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.validationChipRow}
+          keyboardShouldPersistTaps="handled"
+        >
+          {!titleTx.value.trim() && (
+            <Pressable
+              style={[styles.valChip, scheme === 'dark' ? styles.valChipDark : null]}
+              onPress={() => titleInputRef.current?.focus()}
+              accessibilityRole="button"
+              accessibilityLabel="Title required"
+              hitSlop={6}
+            >
+              <Feather name="type" size={13} color={scheme === 'dark' ? '#fecaca' : '#b91c1c'} style={styles.valChipIcon} />
+              <Text style={[styles.valChipText, scheme === 'dark' ? styles.valChipTextDark : null]}>Title required</Text>
+            </Pressable>
+          )}
+          {!contentTx.value.trim() && (
+            <Pressable
+              style={[styles.valChip, scheme === 'dark' ? styles.valChipDark : null]}
+              onPress={() => contentInputRef.current?.focus()}
+              accessibilityRole="button"
+              accessibilityLabel="Summary required"
+              hitSlop={6}
+            >
+              <Feather name="file-text" size={13} color={scheme === 'dark' ? '#fecaca' : '#b91c1c'} style={styles.valChipIcon} />
+              <Text style={[styles.valChipText, scheme === 'dark' ? styles.valChipTextDark : null]}>Summary required</Text>
+            </Pressable>
+          )}
+          {!localCategoryId && (
+            <Pressable
+              style={[styles.valChip, scheme === 'dark' ? styles.valChipDark : null]}
+              onPress={() => setShowCategoryModal(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Category required"
+              hitSlop={6}
+            >
+              <Feather name="tag" size={13} color={scheme === 'dark' ? '#fecaca' : '#b91c1c'} style={styles.valChipIcon} />
+              <Text style={[styles.valChipText, scheme === 'dark' ? styles.valChipTextDark : null]}>Category</Text>
+            </Pressable>
+          )}
+          {media.length === 0 && (
+            <Pressable
+              style={[styles.valChip, scheme === 'dark' ? styles.valChipDark : null]}
+              onPress={pickMedia}
+              accessibilityRole="button"
+              accessibilityLabel="Media required"
+              hitSlop={6}
+            >
+              <Feather name="image" size={13} color={scheme === 'dark' ? '#fecaca' : '#b91c1c'} style={styles.valChipIcon} />
+              <Text style={[styles.valChipText, scheme === 'dark' ? styles.valChipTextDark : null]}>Media</Text>
+            </Pressable>
+          )}
+        </ScrollView>
         <TouchableOpacity
           style={[styles.publishBtn, { backgroundColor: theme.primary }, !canPublish && styles.publishBtnDisabled]}
           onPress={onSubmit}
@@ -754,6 +862,13 @@ const styles = StyleSheet.create({
   uploadError: { backgroundColor: '#dc2626' },
   bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 24, backgroundColor: '#ffffffee', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e2e8f0' },
   validationRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
+  // New: single-row horizontal validation chips
+  validationChipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 10, paddingRight: 6 },
+  valChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fee2e2', borderColor: '#fecaca', borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginRight: 8 },
+  valChipDark: { backgroundColor: '#3b1111', borderColor: '#7f1d1d' },
+  valChipIcon: { marginRight: 6 },
+  valChipText: { fontSize: 12, color: '#b91c1c', fontWeight: '600' },
+  valChipTextDark: { color: '#fecaca' },
   validationText: { fontSize: 11, color: '#dc2626', backgroundColor: '#fee2e2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   publishBtn: { backgroundColor: Colors.light.primary, borderRadius: 16, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
   publishBtnDisabled: { backgroundColor: '#94a3b8' },

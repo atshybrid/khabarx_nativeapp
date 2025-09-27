@@ -34,6 +34,9 @@ export function useTransliteration(opts: UseTransliterationOptions): UseTranslit
 
   const debTimer = useRef<any>(null);
   const lastLangRef = useRef<string | undefined>(languageCode);
+  const rawRef = useRef<string>('');
+  const valueRef = useRef<string>('');
+  const opSeqRef = useRef<number>(0); // async op seq id
 
   // When language changes, re-run transliteration across full buffer
   useEffect(() => {
@@ -46,59 +49,80 @@ export function useTransliteration(opts: UseTransliterationOptions): UseTranslit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [languageCode]);
 
-  const performTransliteration = useCallback(async (text: string, forceFull?: boolean) => {
+  useEffect(() => { rawRef.current = raw; }, [raw]);
+  useEffect(() => { valueRef.current = value; }, [value]);
+
+  const performTransliteration = useCallback(async (text: string, forceFull?: boolean, opIdParam?: number) => {
     if (!enabled || !languageCode) {
-      setValue(text);
+      if (valueRef.current !== text) setValue(text);
       return;
+    }
+    // Assign/gate operation id to avoid stale overwrites
+    let opId = opIdParam;
+    if (opId == null) {
+      opSeqRef.current += 1;
+      opId = opSeqRef.current;
     }
     // Decide scope for transliteration in on-boundary mode: only last token if not forced
     const shouldFull = mode === 'immediate' || forceFull;
     let toProcess = text;
     let prefix = '';
+    let suffix = '';
     if (!shouldFull && mode === 'on-boundary') {
-      // Split into prefix + lastToken
-      const match = /(.*?)([A-Za-z]+)$/.exec(text);
+      // Only transliterate when boundary present; otherwise, show as-is
+      if (!endsWithBoundary(text)) {
+        if (valueRef.current !== text) setValue(text);
+        return;
+      }
+      // With boundary at end, strip trailing boundary to find the last Latin token
+      const mSuffix = /[\s.,;:!?\n\r]+$/.exec(text);
+      suffix = mSuffix ? mSuffix[0] : '';
+      const base = suffix ? text.slice(0, -suffix.length) : text;
+      // Split into prefix + lastToken from base
+      const match = /(.*?)([A-Za-z]+)$/.exec(base);
       if (match) {
         prefix = match[1];
         toProcess = match[2];
-        // If previous char before token is target script char we skip transliteration of this token
-        // (the services/api transliterateText already guards Latin-after-target, this is extra)
-      }
-      if (!endsWithBoundary(text) && !shouldFull) {
-        // Not at boundary yet: show raw text unchanged
-        setValue(text);
+      } else {
+        // No Latin token found; keep text unchanged
+        if (valueRef.current !== text) setValue(text);
         return;
       }
     }
     setPending(true);
     try {
       const res = await transliterateText(toProcess, languageCode);
+      // Discard stale result if a newer op started
+      if (opId !== opSeqRef.current) return;
       if (res?.result) {
-        const newVal = prefix + res.result;
-        setValue(newVal);
+        const newVal = prefix + res.result + suffix;
+        if (valueRef.current !== newVal) setValue(newVal);
       } else {
-        setValue(text);
+        if (valueRef.current !== text) setValue(text);
       }
       setLastError(null);
     } catch (e: any) {
       setLastError(e?.message || 'transliteration_failed');
-      setValue(text);
+      if (opId === opSeqRef.current && valueRef.current !== text) setValue(text);
     } finally {
-      setPending(false);
+      if (opId === opSeqRef.current) setPending(false);
     }
   }, [enabled, languageCode, mode]);
 
   const queueTransliteration = useCallback((text: string, forceFull?: boolean) => {
     if (debTimer.current) clearTimeout(debTimer.current);
+    opSeqRef.current += 1;
+    const opId = opSeqRef.current;
     debTimer.current = setTimeout(() => {
-      performTransliteration(text, forceFull);
+      performTransliteration(text, forceFull, opId);
     }, debounceMs);
   }, [performTransliteration, debounceMs]);
 
   const onChangeText = useCallback((next: string) => {
     setRaw(next);
+    rawRef.current = next;
     if (!enabled || !languageCode) {
-      setValue(next);
+      if (valueRef.current !== next) setValue(next);
       return;
     }
     // Immediate mode: transliterate entire buffer every keystroke (debounced)
@@ -106,22 +130,20 @@ export function useTransliteration(opts: UseTransliterationOptions): UseTranslit
       queueTransliteration(next, true);
       return;
     }
-    // on-boundary mode enhancements:
-    // 1. If this is the very first token (no spaces, only Latin letters so far), transliterate eagerly after debounce even without boundary.
-    // 2. Otherwise wait for boundary as before.
-    const noBoundaryYet = !/\s/.test(next);
-    const singleLatinToken = /^[A-Za-z]+$/.test(next);
-    if (noBoundaryYet && singleLatinToken) {
-      // first word being typed - transliterate eagerly so user sees Telugu immediately
-      queueTransliteration(next, true);
+    // on-boundary mode: transliterate only after boundary (space/punctuation), and only last word
+    if (endsWithBoundary(next)) {
+      // Process immediately at boundary to avoid visible lag/flicker
+      if (debTimer.current) clearTimeout(debTimer.current);
+      opSeqRef.current += 1;
+      const opId = opSeqRef.current;
+      performTransliteration(next, false, opId);
       return;
     }
-    if (endsWithBoundary(next)) {
-      queueTransliteration(next, true);
-    } else {
-      setValue(next);
-    }
-  }, [enabled, languageCode, mode, queueTransliteration]);
+    // No boundary yet: keep as typed and cancel any pending op
+    if (debTimer.current) clearTimeout(debTimer.current);
+    opSeqRef.current += 1; // invalidate in-flight ops
+    if (valueRef.current !== next) setValue(next);
+  }, [enabled, languageCode, mode, queueTransliteration, performTransliteration]);
 
   const toggle = useCallback(() => setEnabled(e => !e), []);
 
