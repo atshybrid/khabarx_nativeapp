@@ -1401,8 +1401,8 @@ async function resolveLanguageId(): Promise<string | undefined> {
     }
   } catch {}
 
-  // 3) Final fallback: default language code (prefer Telugu 'te' if present)
-  const defaultCode = String(process.env.EXPO_PUBLIC_DEFAULT_LANG_CODE || 'te');
+  // 3) Final fallback: default language code (hardcoded to English 'en')
+  const defaultCode = 'en';
   const fallback = findByCode(defaultCode);
   if (fallback?.id) {
     try { console.log('[CAT] resolveLanguageId fallback by code', { defaultCode, id: fallback.id }); } catch {}
