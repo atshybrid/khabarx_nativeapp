@@ -42,7 +42,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
 }) => {
   // Use a fixed design coordinate space then scale for width to avoid font/layout drift
   const baseWidth = 720;
-  const baseHeight = baseWidth * 1.45; // reduced aspect to tighten vertical space
+  const baseHeight = baseWidth * 1.42; // slightly tighter
   const scale = width / baseWidth;
   const height = baseHeight * scale;
 
@@ -61,7 +61,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   return (
     <View style={[{ width, height }, style]}>
       <View style={{ width: baseWidth, height: baseHeight, transform: [{ translateX: -(baseWidth * (1 - scale) / 2) }, { translateY: -(baseHeight * (1 - scale) / 2) }, { scale } ] }}>
-        <View style={[styles.card, { width: baseWidth, height: baseHeight }]}> 
+  <View style={[styles.card, { width: baseWidth, height: baseHeight }]}> 
       {/* Top Red Title */}
       <View style={styles.topRed}>
         <Text
@@ -82,7 +82,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
       </View>
       {/* Logo + Jurisdiction section */}
       <View style={styles.bodySection}>
-        <View style={styles.logoWrapper}>
+  <View style={styles.logoWrapper}>
           {logoUri ? (
             <Image source={{ uri: logoUri }} style={styles.logo} />
           ) : (
@@ -113,7 +113,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
             )}
           </View>
         </View>
-        <Text style={styles.cellName} numberOfLines={2}>{cellName}</Text>
+  <Text style={styles.cellName} numberOfLines={2}>{cellName}</Text>
         {/* Details table (fixed order) */}
         <View style={styles.detailsTable}>
           <DetailRow label="Name" value={memberName} />
@@ -162,34 +162,34 @@ const styles = StyleSheet.create({
   topRedTitle: { color: '#fff', fontSize: 30, fontWeight: '900', textAlign: 'center', letterSpacing: 0.5 },
   blueBand: { backgroundColor: BLUE, paddingVertical: 14, paddingHorizontal: 20 },
   regLine: { color: '#ffffff', fontSize: 20, fontWeight: '700', textAlign: 'center', lineHeight: 26, letterSpacing: 0.5 },
-  bodySection: { flex: 1, alignItems: 'center', paddingTop: 20, paddingHorizontal: 36 },
-  logoWrapper: { marginBottom: 20 },
-  logo: { width: 140, height: 140, borderRadius: 70, resizeMode: 'cover', borderWidth: 4, borderColor: '#ffffff' },
-  logoPlaceholder: { width: 146, height: 146, borderRadius: 73, backgroundColor: '#d4d4d8', alignItems: 'center', justifyContent: 'center' },
+  bodySection: { flex: 1, alignItems: 'center', paddingTop: 16, paddingHorizontal: 32 },
+  logoWrapper: { marginBottom: 12 },
+  logo: { width: 0.19 * 720, height: 0.19 * 720, borderRadius: 0.095 * 720, resizeMode: 'cover', borderWidth: 4, borderColor: '#ffffff' },
+  logoPlaceholder: { width: 0.2 * 720, height: 0.2 * 720, borderRadius: 0.1 * 720, backgroundColor: '#d4d4d8', alignItems: 'center', justifyContent: 'center' },
   placeholderText: { textAlign: 'center', color: '#111827', fontWeight: '700' },
   placeholderTextSmall: { textAlign: 'center', color: '#111827', fontSize: 12, fontWeight: '600' },
-  jurisdiction: { fontSize: 28, fontWeight: '900', color: BLUE_TEXT, marginTop: 0, textAlign: 'center', letterSpacing: 0.5 },
-  nitiLine: { color: RED, fontWeight: '800', fontSize: 22, textAlign: 'center', marginTop: 8, letterSpacing: 0.2, includeFontPadding: false },
-  identityHeading: { color: RED, fontWeight: '900', fontSize: 26, marginTop: 14, letterSpacing: 0.8 },
-  photoStampRow: { marginTop: 10, marginBottom: 14 },
-  photoShell: { width: 260, height: 260, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#e5e7eb' },
-  photo: { width: 252, height: 252, resizeMode: 'cover' },
-  photoPlaceholder: { width: 252, height: 252, alignItems: 'center', justifyContent: 'center' },
-  stamp: { position: 'absolute', width: 150, height: 150, borderRadius: 75, bottom: -20, right: -20, backgroundColor: '#d4d4d8', borderWidth: 4, borderColor: '#ffffff' },
+  jurisdiction: { fontSize: 26, fontWeight: '900', color: BLUE_TEXT, marginTop: 0, textAlign: 'center', letterSpacing: 0.5, lineHeight: 30 },
+  nitiLine: { color: RED, fontWeight: '800', fontSize: 20, textAlign: 'center', marginTop: 6, letterSpacing: 0.15, includeFontPadding: false, lineHeight: 24 },
+  identityHeading: { color: RED, fontWeight: '900', fontSize: 24, marginTop: 10, letterSpacing: 0.8, lineHeight: 26 },
+  photoStampRow: { marginTop: 8, marginBottom: 10 },
+  photoShell: { width: 0.36 * 720, height: 0.36 * 720, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#e5e7eb' },
+  photo: { width: 0.355 * 720, height: 0.355 * 720, resizeMode: 'cover' },
+  photoPlaceholder: { width: 0.355 * 720, height: 0.355 * 720, alignItems: 'center', justifyContent: 'center' },
+  stamp: { position: 'absolute', width: 0.21 * 720, height: 0.21 * 720, borderRadius: 0.105 * 720, bottom: -14, right: -14, backgroundColor: 'transparent', borderWidth: 4, borderColor: '#ffffff' },
   stampPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  cellName: { color: BLUE_TEXT, fontSize: 34, fontWeight: '900', marginTop: 40, textAlign: 'center', letterSpacing: 0.5 },
-  detailsTable: { width: '100%', marginTop: 24 },
+  cellName: { color: BLUE_TEXT, fontSize: 30, fontWeight: '900', marginTop: 28, textAlign: 'center', letterSpacing: 0.5, lineHeight: 34 },
+  detailsTable: { width: '100%', marginTop: 18 },
   detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 4 },
-  detailLabel: { width: 150, fontSize: 20, fontWeight: '700', color: '#111827', letterSpacing: 0.25 },
-  colon: { width: 12, fontSize: 20, fontWeight: '700', color: '#111827' },
-  detailValue: { flex: 1, fontSize: 20, fontWeight: '700', color: '#111827' },
-  signatureRow: { flexDirection: 'row', alignItems: 'flex-end', width: '100%', marginTop: 28 },
+  detailLabel: { width: 140, fontSize: 18, fontWeight: '700', color: '#111827', letterSpacing: 0.25 },
+  colon: { width: 12, fontSize: 18, fontWeight: '700', color: '#111827' },
+  detailValue: { flex: 1, fontSize: 18, fontWeight: '700', color: '#111827', lineHeight: 22 },
+  signatureRow: { flexDirection: 'row', alignItems: 'flex-end', width: '100%', marginTop: 22 },
   signatureBox: { flex: 1, alignItems: 'flex-end' },
-  authorSign: { width: 220, height: 110 },
-  authorSignPlaceholder: { backgroundColor: '#d4d4d8', alignItems: 'center', justifyContent: 'center' },
-  signatureLabel: { fontSize: 24, fontWeight: '900', color: BLUE_TEXT, marginLeft: 14, letterSpacing: 0.5 },
-  bottomRed: { backgroundColor: RED, paddingVertical: 16, paddingHorizontal: 18, marginTop: 24 },
-  bottomText: { color: '#ffffff', textAlign: 'center', fontSize: 16, fontWeight: '800', letterSpacing: 0.5, lineHeight: 20 },
+  authorSign: { width: 180, height: 90 },
+  authorSignPlaceholder: { backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' },
+  signatureLabel: { fontSize: 20, fontWeight: '900', color: BLUE_TEXT, marginLeft: 12, letterSpacing: 0.5 },
+  bottomRed: { backgroundColor: RED, paddingVertical: 14, paddingHorizontal: 16, marginTop: 16 },
+  bottomText: { color: '#ffffff', textAlign: 'center', fontSize: 14, fontWeight: '800', letterSpacing: 0.4, lineHeight: 18 },
 });
 
 export default HrciIdCardFrontExact;
