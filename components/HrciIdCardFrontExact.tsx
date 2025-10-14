@@ -141,12 +141,12 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
         </View>
         {/* Signature Row */}
         <View style={styles.signatureRow}>
-          <Text style={styles.signatureLabel}>Signature Issue Auth.</Text>
           {authorSignUri ? (
-            <Image source={{ uri: authorSignUri }} style={styles.authorSignOverlap} resizeMode="contain" />
+            <Image source={{ uri: authorSignUri }} style={styles.authorSign} resizeMode="contain" />
           ) : (
-            <View style={[styles.authorSignOverlap, styles.authorSignPlaceholder]}><Text style={styles.placeholderTextSmall}>Author Sign{`\n`}PNG</Text></View>
+            <View style={[styles.authorSign, styles.authorSignPlaceholder]}><Text style={styles.placeholderTextSmall}>Author Sign{`\n`}PNG</Text></View>
           )}
+          <Text style={styles.signatureLabel}>Signature Issue Auth.</Text>
         </View>
       </View>
   {/* Bottom Red Strip */}
@@ -194,12 +194,11 @@ const styles = StyleSheet.create({
   detailLabel: { width: 140, fontSize: 18, fontWeight: '700', color: '#111827', letterSpacing: 0.25 },
   colon: { width: 12, fontSize: 18, fontWeight: '700', color: '#111827' },
   detailValue: { flex: 1, fontSize: 18, fontWeight: '700', color: '#111827', lineHeight: 22 },
-  signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: 28 },
+  signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: 40 },
   signatureBox: { display: 'none' },
-  authorSign: { width: 200, height: 100 },
-  authorSignOverlap: { width: 200, height: 100, marginTop: -20 },
+  authorSign: { width: 190, height: 90 },
   authorSignPlaceholder: { backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' },
-  signatureLabel: { fontSize: 20, fontWeight: '900', color: BLUE_TEXT, marginTop: 4, letterSpacing: 0.5, alignSelf: 'flex-end' },
+  signatureLabel: { fontSize: 20, fontWeight: '900', color: BLUE_TEXT, marginTop: 6, letterSpacing: 0.5, alignSelf: 'flex-end' },
   bottomRed: { backgroundColor: RED, paddingVertical: 14, paddingHorizontal: 16, marginTop: 0 },
   bottomText: { color: '#ffffff', textAlign: 'center', fontSize: 14, fontWeight: '800', letterSpacing: 0.4, lineHeight: 18 },
 });
