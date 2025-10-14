@@ -26,6 +26,8 @@ export interface HrciIdCardFrontProps {
   photoHeight?: number;
   /** Minimum gap (design px) between signature block bottom and red strip */
   signatureToStripGap?: number;
+  /** Optional background color behind signature image (defaults transparent) */
+  signatureBgColor?: string;
 }
 
 const RED = '#FE0002';
@@ -48,6 +50,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   photoWidth,
   photoHeight,
   signatureToStripGap,
+  signatureBgColor,
 }) => {
   // Use a fixed design coordinate space then scale for width to avoid font/layout drift
   const baseWidth = 720;
@@ -74,6 +77,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   const stampOffset = Math.min(18, Math.round(stampSize * 0.18)); // keep inside bounds
 
   const gap = signatureToStripGap ?? 2; // default tight gap
+  const signBg = signatureBgColor ?? 'transparent';
 
   return (
     <View style={[{ width, height }, style]}>
@@ -142,9 +146,9 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
         {/* Signature Row */}
         <View style={styles.signatureRow}>
           {authorSignUri ? (
-            <Image source={{ uri: authorSignUri }} style={styles.authorSign} resizeMode="contain" />
+            <Image source={{ uri: authorSignUri }} style={[styles.authorSign, { backgroundColor: signBg }]} resizeMode="contain" />
           ) : (
-            <View style={[styles.authorSign, styles.authorSignPlaceholder]}><Text style={styles.placeholderTextSmall}>Author Sign{`\n`}PNG</Text></View>
+            <View style={[styles.authorSign, styles.authorSignPlaceholder, { backgroundColor: signBg }]}><Text style={styles.placeholderTextSmall}>Author Sign{`\n`}PNG</Text></View>
           )}
           <Text style={styles.signatureLabel}>Signature Issue Auth.</Text>
         </View>
@@ -197,7 +201,7 @@ const styles = StyleSheet.create({
   signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: 40 },
   signatureBox: { display: 'none' },
   authorSign: { width: 190, height: 90 },
-  authorSignPlaceholder: { backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' },
+  authorSignPlaceholder: { backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', borderWidth: 0 },
   signatureLabel: { fontSize: 20, fontWeight: '900', color: BLUE_TEXT, marginTop: 6, letterSpacing: 0.5, alignSelf: 'flex-end' },
   bottomRed: { backgroundColor: RED, paddingVertical: 14, paddingHorizontal: 16, marginTop: 0 },
   bottomText: { color: '#ffffff', textAlign: 'center', fontSize: 14, fontWeight: '800', letterSpacing: 0.4, lineHeight: 18 },
