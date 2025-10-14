@@ -38,10 +38,15 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   style,
   width = 720,
 }) => {
-  // Refined aspect ratio closer to provided artwork (slightly taller than previous 1.45)
-  const height = width * 1.55;
+  // Use a fixed design coordinate space then scale for width to avoid font/layout drift
+  const baseWidth = 720;
+  const baseHeight = baseWidth * 1.55;
+  const scale = width / baseWidth;
+  const height = baseHeight * scale;
   return (
-    <View style={[styles.card, { width, height }, style]}>
+    <View style={[{ width, height, overflow: 'hidden' }, style]}>
+      <View style={{ width: baseWidth, height: baseHeight, transform: [{ scale }], transformOrigin: 'top left' as any }}>
+        <View style={[styles.card, { width: baseWidth, height: baseHeight }]}> 
       {/* Top Red Title */}
       <View style={styles.topRed}>
         <Text
@@ -69,9 +74,9 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
             <View style={styles.logoPlaceholder}><Text style={styles.placeholderText}>HRCI Logo{`\n`}PNG</Text></View>
           )}
         </View>
-        <Text style={styles.jurisdiction}>ALL INDIA JURISDICTION</Text>
+  <Text style={styles.jurisdiction} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} allowFontScaling={false}>ALL INDIA JURISDICTION</Text>
   <Text style={styles.nitiLine}>REGD BY GOVT OF &quot;NITI AAYOG&quot; - UNIQUE ID: AP/2022/0324217 / AP/2022/0326782</Text>
-        <Text style={styles.identityHeading}>IDENTITY CARD</Text>
+  <Text style={styles.identityHeading} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} allowFontScaling={false}>IDENTITY CARD</Text>
         {/* Photo & Stamp */}
         <View style={styles.photoStampRow}>
           <View style={styles.photoShell}>
@@ -112,15 +117,17 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
       <View style={styles.bottomRed}>
         <Text style={styles.bottomText}>WE TAKE HELP 24×7 FROM (POLICE, CBI, VIGILANCE, NIA) & OTHER GOVT. DEPT. AGAINST CRIME & CORRUPTION.</Text>
       </View>
+        </View>
+      </View>
     </View>
   );
 };
 
 const DetailRow = ({ label, value }: { label: string; value: string }) => (
   <View style={styles.detailRow}>
-    <Text style={styles.detailLabel}>{label}</Text>
+    <Text style={styles.detailLabel} numberOfLines={1}>{label}</Text>
     <Text style={styles.colon}>:</Text>
-    <Text style={styles.detailValue}>{value}</Text>
+    <Text style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">{value}</Text>
   </View>
 );
 
