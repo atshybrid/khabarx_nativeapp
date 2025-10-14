@@ -33,8 +33,6 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   idNumber,
   contactNumber,
   validUpto,
-  issueDate,
-  zone,
   logoUri,
   photoUri,
   stampUri,
@@ -97,19 +95,13 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
           </View>
         </View>
         <Text style={styles.cellName} numberOfLines={2}>{cellName}</Text>
-        {/* Details table (dynamic rows) */}
+        {/* Details table (fixed order) */}
         <View style={styles.detailsTable}>
-          {[
-            { label: 'Name', value: memberName },
-            { label: 'Designation', value: designation },
-            zone ? { label: 'Zone', value: zone } : null,
-            { label: 'ID No', value: idNumber },
-            issueDate ? { label: 'Issue Date', value: issueDate } : null,
-            { label: 'Valid Upto', value: validUpto },
-            { label: 'Contact No', value: contactNumber },
-          ].filter(Boolean).map((row: any) => (
-            <DetailRow key={row.label} label={row.label} value={row.value} />
-          ))}
+          <DetailRow label="Name" value={memberName} />
+          <DetailRow label="Designation" value={designation} />
+          <DetailRow label="ID No" value={idNumber} />
+          <DetailRow label="Contact No" value={contactNumber} />
+          <DetailRow label="Valid Upto" value={validUpto} />
         </View>
         {/* Signature Row */}
         <View style={styles.signatureRow}>
@@ -120,7 +112,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
               <View style={[styles.authorSign, styles.authorSignPlaceholder]}><Text style={styles.placeholderTextSmall}>Author Sign{`\n`}PNG</Text></View>
             )}
           </View>
-          <Text style={styles.signatureLabel}>SIGNATURE ISSUE AUTH.</Text>
+          <Text style={styles.signatureLabel}>Signature Issue Auth.</Text>
         </View>
       </View>
       {/* Bottom Red Strip */}
@@ -166,7 +158,7 @@ const styles = StyleSheet.create({
   photoPlaceholder: { width: 312, height: 312, alignItems: 'center', justifyContent: 'center' },
   stamp: { position: 'absolute', width: 190, height: 190, borderRadius: 95, bottom: -28, right: -28, backgroundColor: '#d4d4d8', borderWidth: 4, borderColor: '#ffffff' },
   stampPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  cellName: { color: BLUE_TEXT, fontSize: 40, fontWeight: '900', marginTop: 68, textAlign: 'center', letterSpacing: 0.5 },
+  cellName: { color: BLUE_TEXT, fontSize: 40, fontWeight: '900', marginTop: 56, textAlign: 'center', letterSpacing: 0.5 },
   detailsTable: { width: '100%', marginTop: 32 },
   detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 6 },
   detailLabel: { width: 170, fontSize: 22, fontWeight: '700', color: '#111827', letterSpacing: 0.25 },
@@ -177,7 +169,7 @@ const styles = StyleSheet.create({
   authorSign: { width: 260, height: 140 },
   authorSignPlaceholder: { backgroundColor: '#d4d4d8', alignItems: 'center', justifyContent: 'center' },
   signatureLabel: { fontSize: 30, fontWeight: '900', color: BLUE_TEXT, marginLeft: 16, letterSpacing: 0.5 },
-  bottomRed: { backgroundColor: RED, paddingVertical: 18, paddingHorizontal: 20, marginTop: 42 },
+  bottomRed: { backgroundColor: RED, paddingVertical: 18, paddingHorizontal: 20, marginTop: 32 },
   bottomText: { color: '#ffffff', textAlign: 'center', fontSize: 18, fontWeight: '800', letterSpacing: 0.5, lineHeight: 24 },
 });
 
