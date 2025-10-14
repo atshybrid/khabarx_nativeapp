@@ -20,6 +20,10 @@ export interface HrciIdCardFrontProps {
   authorSignUri?: string; // Authorizing signature PNG
   style?: any;
   width?: number; // Outer width; height derives from fixed aspect ratio  (approx 1.414 like A series) but sample is more tall; we'll tune
+  /** Optional override for photo width (design coordinate space pixels). Default chosen for balance */
+  photoWidth?: number;
+  /** Optional override for photo height (design coordinate space pixels). Maintains portrait ratio */
+  photoHeight?: number;
 }
 
 const RED = '#FE0002';
@@ -39,6 +43,8 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   authorSignUri,
   style,
   width = 720,
+  photoWidth,
+  photoHeight,
 }) => {
   // Use a fixed design coordinate space then scale for width to avoid font/layout drift
   const baseWidth = 720;
@@ -57,6 +63,12 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
       </View>
     );
   }
+
+  // Dynamic sizing (design coordinate values before scale)
+  const dPhotoWidth = photoWidth ?? 132; // tuned size: large enough for clarity, leaves vertical room
+  const dPhotoHeight = photoHeight ?? 150;
+  const stampSize = Math.round(dPhotoWidth * 0.62); // proportional to photo
+  const stampOffset = Math.min(18, Math.round(stampSize * 0.18)); // keep inside bounds
 
   return (
     <View style={[{ width, height }, style]}>
@@ -100,16 +112,16 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   <Text style={styles.identityHeading} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} allowFontScaling={false}>IDENTITY CARD</Text>
         {/* Photo & Stamp */}
         <View style={styles.photoStampRow}>
-          <View style={styles.photoShell}>
+          <View style={[styles.photoShell, { width: dPhotoWidth, height: dPhotoHeight }]}> 
             {photoUri ? (
-              <Image source={{ uri: photoUri }} style={styles.photo} />
+              <Image source={{ uri: photoUri }} style={{ width: dPhotoWidth - 4, height: dPhotoHeight - 4, resizeMode: 'cover' }} />
             ) : (
-              <View style={styles.photoPlaceholder}><Text style={styles.placeholderText}>Member{`\n`}Photo</Text></View>
+              <View style={{ width: dPhotoWidth - 4, height: dPhotoHeight - 4, alignItems: 'center', justifyContent: 'center' }}><Text style={styles.placeholderText}>Member{`\n`}Photo</Text></View>
             )}
             {stampUri ? (
-              <Image source={{ uri: stampUri }} style={styles.stamp} />
+              <Image source={{ uri: stampUri }} style={{ position: 'absolute', width: stampSize, height: stampSize, borderRadius: stampSize / 2, bottom: -stampOffset, right: -stampOffset, backgroundColor: 'transparent' }} />
             ) : (
-              <View style={[styles.stamp, styles.stampPlaceholder]}><Text style={styles.placeholderTextSmall}>STAMP{`\n`}PNG</Text></View>
+              <View style={{ position: 'absolute', width: stampSize, height: stampSize, borderRadius: stampSize / 2, bottom: -stampOffset, right: -stampOffset, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' }}><Text style={styles.placeholderTextSmall}>STAMP{`\n`}PNG</Text></View>
             )}
           </View>
         </View>
@@ -172,11 +184,7 @@ const styles = StyleSheet.create({
   nitiLine: { color: RED, fontWeight: '800', fontSize: 20, textAlign: 'center', marginTop: 6, letterSpacing: 0.15, includeFontPadding: false, lineHeight: 24 },
   identityHeading: { color: RED, fontWeight: '900', fontSize: 24, marginTop: 10, letterSpacing: 0.8, lineHeight: 26 },
   photoStampRow: { marginTop: 6, marginBottom: 8 },
-  photoShell: { width: 140, height: 156, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#e5e7eb' },
-  photo: { width: 136, height: 152, resizeMode: 'cover' },
-  photoPlaceholder: { width: 136, height: 152, alignItems: 'center', justifyContent: 'center' },
-  stamp: { position: 'absolute', width: 90, height: 90, borderRadius: 45, bottom: -16, right: -16, backgroundColor: 'transparent' },
-  stampPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  photoShell: { backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#e5e7eb' },
   cellName: { color: BLUE_TEXT, fontSize: 30, fontWeight: '900', marginTop: 18, textAlign: 'center', letterSpacing: 0.5, lineHeight: 32 },
   detailsTable: { width: '100%', marginTop: 14 },
   detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 4 },
