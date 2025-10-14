@@ -5,7 +5,8 @@ import { HrciIdCardFrontExact } from '../../components/HrciIdCardFrontExact';
 export default function HrciIdCardFrontExactScreen() {
   const { width } = Dimensions.get('window');
   const horizontalPadding = 16;
-  const cardWidth = width - horizontalPadding * 2;
+  // Use full design width (720) unless screen smaller, then scale down
+  const cardWidth = Math.min(720, width - horizontalPadding * 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top','left','right','bottom']}>
@@ -14,11 +15,16 @@ export default function HrciIdCardFrontExactScreen() {
         <HrciIdCardFrontExact
           width={cardWidth}
           memberName="MRS. KONA VARALAKSHMI"
-            designation="SOUTH INDIA WOMEN PORT PRESIDENT"
-          cellName="Member Cell Name"
+          designation="SOUTH INDIA WOMEN PORT PRESIDENT"
+          cellName="ANDHRA PRADESH WOMEN CELL"
           idNumber="HRCI-IND-SI-WP-001"
           contactNumber="9603005183"
-          validUpto="MARCH 2027"
+          validUpto="31-03-2027"
+          // Provide example (these can be replaced by real URLs when integrated)
+          logoUri={undefined}
+          photoUri={undefined}
+          stampUri={undefined}
+          authorSignUri={undefined}
         />
         <View style={{ height: 60 }} />
       </ScrollView>
