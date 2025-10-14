@@ -76,7 +76,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   const stampSize = Math.round(dPhotoWidth * 0.62); // proportional to photo
   const stampOffset = Math.min(18, Math.round(stampSize * 0.18)); // keep inside bounds
 
-  const gap = signatureToStripGap ?? 2; // default tight gap
+  const gap = signatureToStripGap ?? 6; // slightly larger default gap for label visibility
   const signBg = signatureBgColor ?? 'transparent';
 
   return (
@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
   detailLabel: { width: 140, fontSize: 18, fontWeight: '700', color: '#111827', letterSpacing: 0.25 },
   colon: { width: 12, fontSize: 18, fontWeight: '700', color: '#111827' },
   detailValue: { flex: 1, fontSize: 18, fontWeight: '700', color: '#111827', lineHeight: 22 },
-  signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: 40 },
+  signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: 34 },
   signatureBox: { display: 'none' },
   authorSign: { width: 190, height: 90 },
   authorSignPlaceholder: { backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', borderWidth: 0 },
