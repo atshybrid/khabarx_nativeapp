@@ -163,13 +163,20 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   );
 };
 
-const DetailRow = ({ label, value }: { label: string; value: string }) => (
-  <View style={styles.detailRow}>
-    <Text style={styles.detailLabel} numberOfLines={1}>{label}</Text>
-    <Text style={styles.colon}>:</Text>
-    <Text style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">{value}</Text>
-  </View>
-);
+const DetailRow = ({ label, value }: { label: string; value: string }) => {
+  const isNameRow = label.trim().toLowerCase() === 'name';
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel} numberOfLines={1}>{label}</Text>
+      <Text style={styles.colon}>:</Text>
+      {isNameRow ? (
+        <Text style={styles.detailValue}>{value}</Text>
+      ) : (
+        <Text style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">{value}</Text>
+      )}
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   card: {
@@ -193,11 +200,11 @@ const styles = StyleSheet.create({
   photoStampRow: { marginTop: 6, marginBottom: 8 },
   photoShell: { backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#e5e7eb' },
   cellName: { color: BLUE_TEXT, fontSize: 30, fontWeight: '900', marginTop: 18, textAlign: 'center', letterSpacing: 0.5, lineHeight: 32 },
-  detailsTable: { marginTop: 14, alignSelf: 'center' },
+  detailsTable: { marginTop: 14, width: '100%' },
   detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 3, flexWrap: 'nowrap' },
   detailLabel: { width: 160, fontSize: 18, fontWeight: '700', color: '#111827', letterSpacing: 0.25, textAlign: 'left' },
   colon: { width: 14, fontSize: 18, fontWeight: '700', color: '#111827', textAlign: 'left' },
-  detailValue: { width: 280, fontSize: 18, fontWeight: '700', color: '#111827', lineHeight: 22, textAlign: 'left' },
+  detailValue: { flex: 1, fontSize: 18, fontWeight: '700', color: '#111827', lineHeight: 22, textAlign: 'left' },
   signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: 26 },
   signatureBox: { display: 'none' },
   authorSign: { width: 190, height: 90 },
