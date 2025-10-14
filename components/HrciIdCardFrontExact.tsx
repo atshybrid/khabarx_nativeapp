@@ -12,6 +12,8 @@ export interface HrciIdCardFrontProps {
   idNumber: string;
   contactNumber: string;
   validUpto: string; // e.g., 'MARCH 2027'
+  issueDate?: string; // Optional issue date text
+  zone?: string; // Optional zone text
   logoUri?: string; // Circular logo PNG
   photoUri?: string; // Member photo square
   stampUri?: string; // Round stamp PNG (overlaps bottom-right of photo)
@@ -31,6 +33,8 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   idNumber,
   contactNumber,
   validUpto,
+  issueDate,
+  zone,
   logoUri,
   photoUri,
   stampUri,
@@ -93,13 +97,19 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
           </View>
         </View>
         <Text style={styles.cellName} numberOfLines={2}>{cellName}</Text>
-        {/* Details table */}
+        {/* Details table (dynamic rows) */}
         <View style={styles.detailsTable}>
-          <DetailRow label="Name" value={memberName} />
-          <DetailRow label="Designation" value={designation} />
-          <DetailRow label="ID No" value={idNumber} />
-          <DetailRow label="Contact No" value={contactNumber} />
-          <DetailRow label="Valid Upto" value={validUpto} />
+          {[
+            { label: 'Name', value: memberName },
+            { label: 'Designation', value: designation },
+            zone ? { label: 'Zone', value: zone } : null,
+            { label: 'ID No', value: idNumber },
+            issueDate ? { label: 'Issue Date', value: issueDate } : null,
+            { label: 'Valid Upto', value: validUpto },
+            { label: 'Contact No', value: contactNumber },
+          ].filter(Boolean).map((row: any) => (
+            <DetailRow key={row.label} label={row.label} value={row.value} />
+          ))}
         </View>
         {/* Signature Row */}
         <View style={styles.signatureRow}>
@@ -127,7 +137,7 @@ const DetailRow = ({ label, value }: { label: string; value: string }) => (
   <View style={styles.detailRow}>
     <Text style={styles.detailLabel} numberOfLines={1}>{label}</Text>
     <Text style={styles.colon}>:</Text>
-    <Text style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">{value}</Text>
+    <Text style={styles.detailValue} numberOfLines={2} ellipsizeMode="tail">{value}</Text>
   </View>
 );
 

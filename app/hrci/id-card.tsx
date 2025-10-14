@@ -79,6 +79,8 @@ export default function HrciIdCardScreen() {
   const idNumber = profile?.id ? `HRCI-${profile.id.slice(-8).toUpperCase()}` : 'N/A';
   const contactNumber = profile?.mobileNumber || 'N/A';
   const validUpto = computeValidity();
+  const issueDate = profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short' }).toUpperCase() : undefined;
+  const zone = membership?.hrci?.zone ? membership.hrci.zone.toUpperCase() : undefined;
 
   useEffect(() => {
   const loadProfile = async () => {
@@ -216,6 +218,8 @@ export default function HrciIdCardScreen() {
                 idNumber={idNumber}
                 contactNumber={contactNumber}
                 validUpto={validUpto}
+                issueDate={issueDate}
+                zone={zone}
                 logoUri={logoUri}
                 photoUri={profile?.profilePhotoUrl}
                 stampUri={undefined /* TODO: provide round stamp asset URI */}
