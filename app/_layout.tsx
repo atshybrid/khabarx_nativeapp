@@ -1,6 +1,7 @@
 import AppLockGate from '@/components/AppLockGate';
 import Toast from '@/components/Toast';
 import { ensureFirebaseAuthAsync, isFirebaseConfigComplete, logFirebaseGoogleAlignment } from '@/services/firebaseClient';
+import { makeShadow } from '@/utils/shadow';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
@@ -134,6 +135,8 @@ function ThemedApp() {
                   header: () => <CustomHeader />,
                 }}
               />
+              {/* Hide parent header for HRCI group to avoid double app bars on nested screens */}
+              <Stack.Screen name="hrci" options={{ headerShown: false }} />
               {/* Keep previous screen attached to avoid blank screen when swiping back from article */}
               <Stack.Screen
                 name="article/[id]"
@@ -184,14 +187,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     justifyContent: 'center',
     height: 110,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    ...makeShadow(4, { opacity: 0.25, y: 2, blur: 12 }),
   },
   headerText: {
     fontSize: 18,

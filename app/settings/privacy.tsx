@@ -128,7 +128,7 @@ export default function PrivacyScreen() {
                 key={ii}
                 onPress={item.onPress as any}
                 disabled={!item.onPress}
-                style={({ pressed }) => [styles.itemRow, pressed && { backgroundColor: 'rgba(0,0,0,0.035)' }]}
+                style={({ pressed }: { pressed: boolean }) => [styles.itemRow, pressed && { backgroundColor: 'rgba(0,0,0,0.035)' }]}
               >
                 <View style={styles.itemLeft}>
                   <View style={[styles.iconWrap, { borderColor: border }]}>

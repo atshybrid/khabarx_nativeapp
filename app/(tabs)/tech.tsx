@@ -6,12 +6,14 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { afterPreferencesUpdated, getUserPreferences, logout, pickPreferenceLanguage, pickPreferenceLocation, updatePreferences, updateUserProfile, uploadMedia } from '@/services/api';
 import { loadTokens, saveTokens, softLogout } from '@/services/auth';
+import { on } from '@/services/events';
 import { requestMediaPermissionsOnly } from '@/services/permissions';
+import { makeShadow } from '@/utils/shadow';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, BackHandler, Image, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -179,6 +181,76 @@ export default function AccountScreen() {
     }
   }, [loggedIn, router]);
 
+  const handleHrciNavigation = useCallback(async () => {
+    console.log('[Tech Tab] HRCI navigation initiated');
+    
+    try {
+      // Check if user has valid HRCI authentication
+      const tokens = await loadTokens();
+      const hasValidToken = !!(tokens?.jwt);
+      const userRole = tokens?.user?.role;
+      
+      console.log('[Tech Tab] Auth check result:', {
+        hasValidToken,
+        userRole,
+        tokenExpired: tokens?.expiresAt ? Date.now() >= tokens.expiresAt : false
+      });
+      
+      // Check if token is expired
+      const isExpired = tokens?.expiresAt ? Date.now() >= tokens.expiresAt : false;
+      
+      if (hasValidToken && !isExpired && (userRole === 'MEMBER' || userRole === 'HRCI_ADMIN')) {
+        console.log('[Tech Tab] Valid HRCI auth found, navigating directly to dashboard');
+        router.push('/hrci' as any);
+      } else {
+        console.log('[Tech Tab] No valid HRCI auth, navigating to login');
+        router.push('/hrci/login' as any);
+      }
+    } catch (error) {
+      console.error('[Tech Tab] Error checking HRCI auth:', error);
+      // Fallback to login on error
+      console.log('[Tech Tab] Fallback navigation to login due to error');
+      router.push('/hrci/login' as any);
+    }
+  }, [router]);
+
+  // HRCI membership preview
+  const [hrciMembership, setHrciMembership] = useState<any | null>(null);
+  const [hrciLoading, setHrciLoading] = useState(false);
+  const hrciLoadingRef = useRef(false);
+  const loadHrciMembership = useCallback(async () => {
+    if (hrciLoadingRef.current) return; // prevent concurrent/looped fetches
+    hrciLoadingRef.current = true;
+    setHrciLoading(true);
+    try {
+      const start = Date.now();
+      const res = await loadTokens();
+      if (!res?.jwt) { setHrciMembership(null); return; }
+      const apiBase = process.env.EXPO_PUBLIC_API_BASE_URL || '';
+      const mRes = await fetch(`${apiBase}/memberships/me`, { headers: { Authorization: `Bearer ${res.jwt}` } })
+        .then(r => r.json())
+        .catch(() => null);
+      const data = mRes?.data || mRes;
+      setHrciMembership(data || null);
+      console.log('[Tech Tab] Membership preview loaded', { dur: Date.now() - start, kyc: data?.kyc?.status });
+    } catch {
+      setHrciMembership(null);
+    } finally {
+      hrciLoadingRef.current = false;
+      setHrciLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { 
+    loadHrciMembership();
+    const off = on('profile:updated', (p) => {
+      console.log('[Tech Tab] profile:updated received; refreshing profile + membership', p?.photoUrl?.slice?.(0,40));
+      refreshProfile();
+      loadHrciMembership();
+    });
+    return () => off();
+  }, [loadHrciMembership, refreshProfile]);
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: bg }]}>
       {/* Fixed app bar (does not scroll) */}
@@ -224,7 +296,7 @@ export default function AccountScreen() {
         {/* Location Card */}
         <View style={[styles.card, { backgroundColor: card, borderColor: border }]}>
           <Text style={[styles.cardTitle, { color: text }]}>Location</Text>
-          <Pressable onPress={changeLocation} accessibilityLabel="Change location" style={({ pressed }) => [styles.rowBetween, pressed && { opacity: 0.85 }] }>
+          <Pressable onPress={changeLocation} accessibilityLabel="Change location" style={({ pressed }: { pressed: boolean }) => [styles.rowBetween, pressed && { opacity: 0.85 }] }>
             <View>
               <Text style={[styles.label, { color: text }]}>{location ? location : 'Not set'}</Text>
               <Text style={[styles.helper, { color: muted }]}>Used to personalize local news</Text>
@@ -236,12 +308,44 @@ export default function AccountScreen() {
         {/* Language Card */}
         <View style={[styles.card, { backgroundColor: card, borderColor: border }]}>
           <Text style={[styles.cardTitle, { color: text }]}>Language</Text>
-          <Pressable onPress={() => setLangSheetOpen(true)} accessibilityLabel="Change language" style={({ pressed }) => [styles.rowBetween, pressed && { opacity: 0.85 }] }>
+          <Pressable onPress={() => setLangSheetOpen(true)} accessibilityLabel="Change language" style={({ pressed }: { pressed: boolean }) => [styles.rowBetween, pressed && { opacity: 0.85 }] }>
             <View>
               <Text style={[styles.label, { color: text }]}>{languageDisplay}</Text>
               <Text style={[styles.helper, { color: muted }]}>App language for headlines and UI</Text>
             </View>
             <MaterialIcons name="chevron-right" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
+          </Pressable>
+        </View>
+
+        {/* HRCI Membership */}
+        <View style={[styles.card, styles.hrciCard, { backgroundColor: card, borderColor: '#FE0002' }]}>
+          <View style={[styles.hrciHeader, { justifyContent: 'space-between', width: '100%' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <MaterialIcons name="account-balance" size={24} color="#FE0002" />
+              <Text style={[styles.cardTitle, { color: '#FE0002', marginLeft: 8 }]}>HRCI Membership</Text>
+            </View>
+            {hrciMembership?.kyc?.status === 'APPROVED' && (
+              <View style={styles.kycMiniBadge}>
+                <MaterialIcons name="check" size={14} color="#fff" />
+              </View>
+            )}
+          </View>
+          {hrciMembership ? (
+            <View style={{ marginTop: 8 }}>
+              <Text style={[styles.label, { color: text }]}>{hrciMembership?.designation?.name || 'Member'}</Text>
+              <Text style={[styles.helper, { color: muted, marginTop: 2 }]}>
+                {hrciMembership?.cell?.name || 'Cell'}{hrciMembership?.hrci?.zone ? ` • ${hrciMembership.hrci.zone}` : ''}
+              </Text>
+              <Text style={[styles.helper, { color: muted, marginTop: 2 }]}>KYC: {hrciMembership?.kyc?.status || 'PENDING'}</Text>
+            </View>
+          ) : (
+            <Text style={[styles.helper, { color: muted, marginTop: 4 }]}>
+              Human Rights Council for India - {hrciLoading ? 'Loading...' : 'Login or start onboarding'}
+            </Text>
+          )}
+          <Pressable onPress={handleHrciNavigation} style={({ pressed }) => [styles.button, styles.hrciButton, { marginTop: 12 }, pressed && { opacity: 0.95 }]}>
+            <MaterialIcons name="login" size={18} color="#fff" style={{ marginRight: 6 }} />
+            <Text style={[styles.buttonText, { color: '#fff' }]}>{hrciMembership ? 'Open Dashboard' : 'Open HRCI'}</Text>
           </Pressable>
         </View>
 
@@ -394,7 +498,7 @@ const styles = StyleSheet.create({
   backText: { color: Colors.light.primary, fontWeight: '600' },
   appBarTitle: { color: Colors.light.primary, fontSize: 16, fontWeight: '700' },
   container: { padding: 16, gap: 12 },
-  profileHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 16, borderWidth: 1, shadowColor: '#000', shadowOpacity: 0.04, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, elevation: 1 },
+  profileHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, padding: 16, borderWidth: 1, ...makeShadow(2, { opacity: 0.04, blur: 12, y: 2 }) },
   avatar: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   avatarImg: { width: 56, height: 56, borderRadius: 28 },
   avatarOverlay: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 28 },
@@ -403,7 +507,7 @@ const styles = StyleSheet.create({
   subtleText: { marginTop: 2 },
   locationChip: { marginTop: 6, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999, borderWidth: 1 },
   locationText: { color: Colors.light.primary, fontWeight: '600', fontSize: 12 },
-  card: { borderRadius: 12, padding: 16, borderWidth: 1, shadowColor: '#000', shadowOpacity: 0.04, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, elevation: 1 },
+  card: { borderRadius: 12, padding: 16, borderWidth: 1, ...makeShadow(2, { opacity: 0.04, blur: 12, y: 2 }) },
   cardTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
   input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
@@ -418,6 +522,16 @@ const styles = StyleSheet.create({
   primary: { backgroundColor: Colors.light.secondary },
   secondary: { borderWidth: 1 },
   buttonText: { fontSize: 16, fontWeight: '600' },
+  // HRCI-specific styles
+  hrciCard: { 
+    borderLeftWidth: 4, 
+    borderLeftColor: '#FE0002', 
+    backgroundColor: '#fff0f0',
+    ...makeShadow(6, { color: '254,0,2', opacity: 0.18, blur: 16, y: 4 })
+  },
+  kycMiniBadge: { backgroundColor: '#1D0DA1', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  hrciHeader: { flexDirection: 'row', alignItems: 'center' },
+  hrciButton: { backgroundColor: '#1D0DA1', ...makeShadow(6, { color: '29,13,161', opacity: 0.25, blur: 16, y: 4 }), flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   langRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: 1 },
   langRowActive: {},
   langNative: { fontSize: 18, fontWeight: '700' },

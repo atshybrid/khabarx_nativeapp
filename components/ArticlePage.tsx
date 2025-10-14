@@ -14,34 +14,48 @@ import { useVideoPlayer } from 'expo-video';
 // Removed LinearGradient (no branded card rendering now)
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { useTransliteration } from '@/hooks/useTransliteration';
+import { makeShadow, makeTextShadow } from '@/utils/shadow';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Animated,
-  Dimensions,
-  Easing,
-  Platform,
-  Share as RnShare,
-  ScrollView,
-  StyleSheet,
-  Text,
-  ToastAndroid,
-  TouchableOpacity,
-  View,
-  type ImageStyle,
-  type TextStyle,
-  type ViewStyle,
+    Animated,
+    Dimensions,
+    Easing,
+    Platform,
+    Share as RnShare,
+    ScrollView,
+    StyleSheet,
+    Text,
+    ToastAndroid,
+    TouchableOpacity,
+    View,
+    type ImageStyle,
+    type TextStyle,
+    type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Prefer static import; add runtime guard below in case native module isn't linked yet
 import { getCachedCommentsByShortNews, getCommentsByShortNews, prefetchCommentsByShortNews } from '@/services/api';
 import { on } from '@/services/events';
-import ShareLib from 'react-native-share';
-import ViewShot from 'react-native-view-shot';
-// Lightweight guard: if module didn't load (shouldn't happen after rebuild) fallbacks will kick in.
-const shareRuntime: typeof ShareLib | undefined = ShareLib || undefined;
+// Native-only modules: wrap in try/catch so web build doesn't crash if polyfill missing
+// Lazy holders for native-only modules; populated on first share attempt to satisfy lint (no top-level require)
+let ShareLib: any; // react-native-share
+let ViewShot: any; // react-native-view-shot
+const ensureNativeShareLibs = async () => {
+  if (Platform.OS === 'web') return;
+  if (!ShareLib) {
+    try { ShareLib = (await import('react-native-share')) as any; } catch {}
+  }
+  if (!ViewShot) {
+    try { const vs: any = await import('react-native-view-shot'); ViewShot = (vs as any)?.default || vs; } catch {}
+  }
+};
+const shareRuntimeGetter = () => (ShareLib && (ShareLib as any).open ? ShareLib : undefined);
+// Fallback lightweight placeholder if ViewShot not available (web or load failure)
+const ViewShotFallback: React.FC<any> = ({ children, style }) => <View style={style}>{children}</View>;
+const ResolvedViewShot: any = (ViewShot ? ViewShot : ViewShotFallback);
 
 interface ArticlePageProps {
   article: Article;
@@ -116,9 +130,9 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
     articleId: article.id,
   });
   const heroRef = useRef<ScrollView>(null);
-  const viewShotRef = useRef<ViewShot>(null);
-  const heroCaptureRef = useRef<ViewShot>(null); // wraps hero media for image capture
-  const fullShareRef = useRef<ViewShot>(null); // off-screen full article capture (hero + title + body, no engagement)
+  const viewShotRef = useRef<any>(null);
+  const heroCaptureRef = useRef<any>(null); // wraps hero media for image capture
+  const fullShareRef = useRef<any>(null); // off-screen full article capture (hero + title + body, no engagement)
   const [shareMode, setShareMode] = useState(false); // toggled briefly during capture (could show watermark if desired)
   // Transliteration for place + tagline
   // Language handling: we keep both the article's original language and the user's selected app language.
@@ -377,6 +391,10 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   // Capture full article (hero + title + body) from off-screen composition
   const capturedUri = await fullShareRef.current?.capture?.();
       if (!capturedUri) {
+        // Web fallback: try navigator.share if available
+        if (Platform.OS === 'web' && (navigator as any)?.share) {
+          try { await (navigator as any).share({ title: shareTitle, text: message }); return; } catch {}
+        }
         await RnShare.share({ title: shareTitle, message }, { dialogTitle: 'Share article' });
         return;
       }
@@ -384,8 +402,10 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
       const imgUri = capturedUri.startsWith('file://') ? capturedUri : `file://${capturedUri}`;
       // Prefer react-native-share (supports EXTRA_STREAM + EXTRA_TEXT properly on Android)
       try {
-        if (shareRuntime?.open) {
-          await shareRuntime.open({
+        await ensureNativeShareLibs();
+        const runtime = shareRuntimeGetter();
+        if (runtime?.open) {
+          await runtime.open({
           url: imgUri,
           type: 'image/jpeg',
           message,
@@ -404,7 +424,19 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
       } catch (primaryErr) {
         console.warn('[Share] react-native-share open failed, fallback to RN Share', primaryErr);
       }
-      if (Platform.OS === 'ios') {
+      if (Platform.OS === 'web') {
+        // Pure web fallback chain
+        try {
+          if ((navigator as any)?.share) {
+            await (navigator as any).share({ title: shareTitle, text: message });
+          } else {
+            await Clipboard.setStringAsync(message);
+            alert('Link copied to clipboard');
+          }
+        } catch (errWeb) {
+          console.warn('[Share:web] fallback failed', errWeb);
+        }
+      } else if (Platform.OS === 'ios') {
         await RnShare.share({ title: shareTitle, url: imgUri, message }, { dialogTitle: 'Share article' });
       } else {
         // Android fallback chain: RN Share -> expo-sharing image-only
@@ -460,7 +492,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   }, [footerBottomOffset, footerHeight, titleHeight, isSmallScreen]);
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-  <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }} style={{ flex: 1 }}>
+  <ResolvedViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }} style={{ flex: 1 }}>
       <ScrollView
         style={styles.scrollContainer}
         contentContainerStyle={styles.scrollContentContainer}
@@ -489,7 +521,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
         scrollEventThrottle={16}
       >
           {/* Hero carousel: images and optional video */}
-          <ViewShot ref={heroCaptureRef} options={{ format: 'jpg', quality: 0.9 }} style={styles.heroContainer}>
+          <ResolvedViewShot ref={heroCaptureRef} options={{ format: 'jpg', quality: 0.9 }} style={styles.heroContainer}>
             {heroSlides.length === 0 && (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ color: '#fff' }}>No media</Text>
@@ -579,7 +611,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
                 ))}
               </View>
             )}
-          </ViewShot>
+          </ResolvedViewShot>
 
           <View style={[styles.articleArea, { backgroundColor: bg }] }>
             <View
@@ -721,10 +753,10 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
       {/* No bottom promo banner; promo appears in the author area during shareMode */}
       {/* Off-screen branded card for sharing */}
       {/* Card composition removed: sharing hero image + real text caption */}
-      </ViewShot>
+  </ResolvedViewShot>
       {/* Off-screen full share composition (no engagement bar, no footer) */}
-      <View style={{ position: 'absolute', top: -99999, left: -99999 }} pointerEvents="none">
-        <ViewShot ref={fullShareRef} options={{ format: 'jpg', quality: 0.9 }}>
+  <View style={{ position: 'absolute', top: -99999, left: -99999, pointerEvents: 'none' }}>
+  <ResolvedViewShot ref={fullShareRef} options={{ format: 'jpg', quality: 0.9 }}>
           <View style={{ width, backgroundColor: bg }}>
             <View style={styles.heroContainer}>
               {heroSlides.length > 0 ? (
@@ -757,7 +789,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
               <Text style={[styles.body, { color: textColor }]}>{article.body}</Text>
             </View>
           </View>
-        </ViewShot>
+  </ResolvedViewShot>
       </View>
     </View>
   );
@@ -926,17 +958,13 @@ const styles = StyleSheet.create<Styles>({
     fontWeight: '600',
     color: '#222',
     maxWidth: 120,
-    textShadowColor: 'rgba(0,0,0,0.35)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.35)'),
   },
   roleTiny: {
     fontSize: 11,
     color: '#666',
     maxWidth: 90,
-    textShadowColor: 'rgba(0,0,0,0.25)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1.5,
+    ...makeTextShadow(0,1,1.5,'rgba(0,0,0,0.25)'),
   },
   dotSep: {
     width: 4,
@@ -948,9 +976,7 @@ const styles = StyleSheet.create<Styles>({
     fontSize: 11,
     color: '#666',
     maxWidth: 90,
-    textShadowColor: 'rgba(0,0,0,0.25)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1.5,
+    ...makeTextShadow(0,1,1.5,'rgba(0,0,0,0.25)'),
   },
   header: {
     flexDirection: 'row',
@@ -976,11 +1002,7 @@ const styles = StyleSheet.create<Styles>({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    ...makeShadow(6, { opacity: 0.35, y: 4, blur: 16 }),
   },
   avatar: {
     width: 40,
@@ -1127,9 +1149,7 @@ const styles = StyleSheet.create<Styles>({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.5)'),
     letterSpacing: 0.2,
   },
   brandPlace: {
@@ -1137,9 +1157,7 @@ const styles = StyleSheet.create<Styles>({
     fontWeight: '600',
     color: '#fff',
     marginBottom: 2,
-    textShadowColor: 'rgba(0,0,0,0.45)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.45)'),
   },
   brandTagline: {
     fontSize: 12,

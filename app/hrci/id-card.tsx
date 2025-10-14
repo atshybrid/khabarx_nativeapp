@@ -5,14 +5,13 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { HrciIdCardFrontExact } from '../../components/HrciIdCardFrontExact';
@@ -41,12 +40,8 @@ export default function HrciIdCardScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
   const [idCardData, setIdCardData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'front' | 'back'>('front');
-  const { width: screenWidth } = Dimensions.get('window');
-  const cardWidth = screenWidth - 32;
-  const cardHeight = cardWidth * 0.63; // Standard ID card ratio
   // Large exact design target width (make it scrollable if wider than screen)
-  const exactCardWidth = Math.min(860, screenWidth - 32); // scale down on small screens
+  const exactCardWidth = 860; // always design width; component scales internally if needed
 
   // Helper: derive Valid Upto (assumption: 3 year validity from KYC update or profile creation)
   const computeValidity = (): string => {
@@ -212,49 +207,25 @@ export default function HrciIdCardScreen() {
           <View style={{ width: 24 }} />
         </View>
 
-        {/* Tab Selector */}
-        <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'front' && styles.activeTab]}
-            onPress={() => setActiveTab('front')}
-          >
-            <Text style={[styles.tabText, activeTab === 'front' && styles.activeTabText]}>
-              Front
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'back' && styles.activeTab]}
-            onPress={() => setActiveTab('back')}
-          >
-            <Text style={[styles.tabText, activeTab === 'back' && styles.activeTabText]}>
-              Back
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.cardContainer}>
-            {activeTab === 'front' ? (
-              <HrciIdCardFrontExact
-                width={exactCardWidth}
-                memberName={memberName}
-                designation={designation}
-                cellName={cellName}
-                idNumber={idNumber}
-                contactNumber={contactNumber}
-                validUpto={validUpto}
-                logoUri={cardLogoUri}
-                photoUri={photoUri}
-                stampUri={stampUri}
-                authorSignUri={authorSignUri}
-                style={{
-                  ...makeShadow(18, { opacity: 0.35, blur: 40, y: 16 }),
-                  borderWidth: 0,
-                }}
-              />
-            ) : (
-              <IdCardBack profile={profile} membership={membership} width={cardWidth} height={cardHeight} />
-            )}
+            <HrciIdCardFrontExact
+              width={exactCardWidth}
+              memberName={memberName}
+              designation={designation}
+              cellName={cellName}
+              idNumber={idNumber}
+              contactNumber={contactNumber}
+              validUpto={validUpto}
+              logoUri={cardLogoUri}
+              photoUri={photoUri}
+              stampUri={stampUri}
+              authorSignUri={authorSignUri}
+              style={{
+                ...makeShadow(18, { opacity: 0.35, blur: 40, y: 16 }),
+                borderWidth: 0,
+              }}
+            />
           </View>
 
           {/* Download/Share Actions */}
@@ -281,64 +252,6 @@ export default function HrciIdCardScreen() {
 }
 
 
-function IdCardBack({ profile, membership, width, height }: { profile: Profile | null; membership: Membership | null; width: number; height: number }) {
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return 'N/A';
-    try {
-      return new Date(dateStr).toLocaleDateString('en-IN');
-    } catch {
-      return 'N/A';
-    }
-  };
-
-  return (
-    <View style={[styles.idCard, { width, height }]}>
-      {/* Address Section */}
-      <View style={styles.backSection}>
-        <Text style={styles.sectionTitle}>Contact Information</Text>
-        <View style={styles.contactInfo}>
-          <View style={styles.contactRow}>
-            <MaterialCommunityIcons name="phone" size={16} color="#6b7280" />
-            <Text style={styles.contactText}>Mobile: {profile?.mobileNumber || 'N/A'}</Text>
-          </View>
-          <View style={styles.contactRow}>
-            <MaterialCommunityIcons name="home" size={16} color="#6b7280" />
-            <Text style={styles.contactText}>
-              Address: {profile?.address ? 'On File' : 'Not Provided'}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Terms Section */}
-      <View style={styles.backSection}>
-        <Text style={styles.sectionTitle}>Terms & Conditions</Text>
-        <Text style={styles.termsText}>
-          • This card is non-transferable{'\n'}
-          • Valid for official HRCI activities only{'\n'}
-          • Report if lost or stolen{'\n'}
-          • Renewal required annually
-        </Text>
-      </View>
-
-      {/* Issue Date */}
-      <View style={styles.backSection}>
-        <Text style={styles.sectionTitle}>Issue Information</Text>
-        <View style={styles.issueInfo}>
-          <Text style={styles.issueLabel}>Issued: {formatDate(profile?.createdAt)}</Text>
-          <Text style={styles.issueLabel}>Reg. No: 4396/2022</Text>
-        </View>
-      </View>
-
-      {/* Signature */}
-      <View style={styles.signatureSection}>
-        <View style={styles.signatureLine} />
-        <Text style={styles.signatureLabel}>Authorized Signature</Text>
-      </View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
@@ -351,91 +264,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   headerTitle: { fontSize: 20, fontWeight: '800', color: '#ffffff' },
-  tabContainer: {
-    flexDirection: 'row',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 12,
-    padding: 4,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  activeTab: { backgroundColor: '#ffffff' },
-  tabText: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
-  activeTabText: { color: '#1e3a8a' },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 32 },
   cardContainer: { alignItems: 'center', marginBottom: 24 },
-  idCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    overflow: 'hidden',
-    ...makeShadow(12, { opacity: 0.25, blur: 30, y: 8 })
-  },
-  cardHeader: {
-    padding: 16,
-    alignItems: 'center',
-  },
-  orgName: { fontSize: 24, fontWeight: '900', color: '#ffffff', letterSpacing: 2 },
-  orgSubtitle: { fontSize: 10, color: '#fca5a5', textAlign: 'center', marginTop: 2 },
-  profileSection: {
-    flexDirection: 'row',
-    padding: 16,
-    flex: 1,
-  },
-  photoContainer: { marginRight: 16 },
-  profilePhoto: { width: 80, height: 80, borderRadius: 8, borderWidth: 2, borderColor: '#e5e7eb' },
-  kycBadgeOnCard: { position: 'absolute', right: -4, bottom: -4, width: 20, height: 20, borderRadius: 10, backgroundColor: '#1D0DA1', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#ffffff' },
-  photoPlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#e5e7eb',
-  },
-  profileDetails: { flex: 1, paddingTop: 4 },
-  memberName: { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 2 },
-  memberId: { fontSize: 12, fontWeight: '600', color: '#dc2626', marginBottom: 4 },
-  designation: { fontSize: 14, fontWeight: '600', color: '#FE0002', marginBottom: 8 },
-  memberInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
-  infoLabel: { fontSize: 12, color: '#6b7280', width: 40 },
-  infoValue: { fontSize: 12, fontWeight: '600', color: '#111827', flex: 1 },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-  },
-  footerText: { fontSize: 10, fontWeight: '600', color: '#1D0DA1' },
-  qrPlaceholder: {
-    width: 32,
-    height: 32,
-    backgroundColor: '#f9fafb',
-    borderRadius: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backSection: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  sectionTitle: { fontSize: 14, fontWeight: '800', color: '#111827', marginBottom: 8 },
-  contactInfo: { gap: 6 },
-  contactRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  contactText: { fontSize: 12, color: '#374151', flex: 1 },
-  termsText: { fontSize: 10, color: '#6b7280', lineHeight: 14 },
-  issueInfo: { gap: 4 },
-  issueLabel: { fontSize: 12, color: '#374151' },
-  signatureSection: { flex: 1, justifyContent: 'flex-end', padding: 16, alignItems: 'flex-end' },
-  signatureLine: { width: 120, height: 1, backgroundColor: '#d1d5db', marginBottom: 4 },
-  signatureLabel: { fontSize: 10, color: '#6b7280' },
   actionsContainer: {
     flexDirection: 'row',
     gap: 12,

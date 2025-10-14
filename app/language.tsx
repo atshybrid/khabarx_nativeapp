@@ -1,3 +1,4 @@
+import { makeShadow } from '@/utils/shadow';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -200,7 +201,7 @@ const LanguageSelectionScreen = () => {
       )}
 
       {submitting && (
-        <View style={styles.overlay} pointerEvents="auto">
+        <View style={[styles.overlay, { pointerEvents: 'auto' }]}>
           <View style={styles.overlayCard}>
             <MaterialCommunityIcons name="loading" size={22} color="#444" />
             <Text style={styles.overlayText}>Setting up your experience…</Text>
@@ -243,12 +244,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    elevation: 2, // for Android shadow
-    shadowColor: '#000', // for iOS shadow
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.41,
     height: 110, // Fixed height for all cards
+    ...makeShadow(2, { opacity: 0.2, blur: 3, y: 1 })
   },
   selectedItem: {
     // Add any style for selected item if needed, like a border
@@ -313,11 +310,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.41,
+    ...makeShadow(3, { opacity: 0.2, blur: 3, y: 1 })
   },
   overlayText: {
     marginLeft: 10,

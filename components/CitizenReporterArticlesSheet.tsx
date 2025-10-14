@@ -173,7 +173,7 @@ function CitizenReporterArticles({ visible, onClose, token }: Props) {
             <FlatList
               data={articles}
               renderItem={renderItem}
-              keyExtractor={(item, index) => `${item.id}-${index}`}
+              keyExtractor={(item: ArticleType, index: number) => `${item.id}-${index}`}
               contentContainerStyle={{ paddingBottom: 24 }}
               onEndReached={() => hasMore && fetchArticles()}
               onEndReachedThreshold={0.5}

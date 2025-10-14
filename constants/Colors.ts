@@ -4,8 +4,8 @@
  */
 
 // Brand colors
-const PRIMARY = '#032557';
-const SECONDARY = '#fa7c05';
+const PRIMARY = '#FE0002';
+const SECONDARY = '#1D0DA1';
 
 // Use primary as the tint color for both themes
 const tintColorLight = PRIMARY;

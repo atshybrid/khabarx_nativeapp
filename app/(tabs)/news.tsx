@@ -128,7 +128,7 @@ const NewsScreen = () => {
           <View style={{ flex: 1 }} />
         )}
         {__DEV__ && (
-          <View style={styles.debugOverlay} pointerEvents="none">
+          <View style={[styles.debugOverlay, { pointerEvents: 'none' }] }>
             <Text style={styles.debugText}>articles: {articles.length} | activeIndex: {activeIndex}</Text>
           </View>
         )}

@@ -3,6 +3,7 @@ import { createCitizenReporterMobile, getMpinStatus, loginWithMpin, requestOtpFo
 import { getLastMobile, saveTokens } from '@/services/auth';
 import { getDeviceIdentity } from '@/services/device';
 import { requestAppPermissions } from '@/services/permissions';
+import { makeShadow } from '@/utils/shadow';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -684,7 +685,16 @@ export default function LoginScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         {/* Animated Header overlays top */}
-        <Animated.View style={[styles.animatedHeader, { height: headerHeight, elevation: headerElevation, shadowOpacity: headerElevation.interpolate({inputRange:[0,4], outputRange:[0,0.15]}) }]}>          
+        <Animated.View style={[
+          styles.animatedHeader,
+          { height: headerHeight },
+          // Dynamic shadow intensity: interpolate opacity and apply via rgba color
+          {
+            // We approximate varying opacity by blending into shadow color via background overlay or future enhancement.
+            // For now, elevation animates; shadow already defined in style.
+            elevation: headerElevation as any
+          }
+        ]}>          
           <View style={styles.headerInner}>            
             <Animated.View style={[styles.logoCircle, { width: logoSize, height: logoSize, borderRadius: logoRadius, marginBottom: 8 }]}>              
               <Text style={styles.logoText}>K</Text>
@@ -1024,7 +1034,7 @@ export default function LoginScreen() {
       </KeyboardAvoidingView>
       {/* Congrats Overlay */}
       {showCongrats && (
-        <View style={styles.congratsOverlay} pointerEvents="none">
+        <View style={[styles.congratsOverlay, { pointerEvents: 'none' }]}>
           <View style={styles.congratsInner}>
             <LottieView source={require('@/assets/lotti/congratulation.json')} autoPlay loop={false} style={{ width: 240, height: 240 }} />
             <Text style={styles.congratsText}>Success!</Text>
@@ -1048,7 +1058,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
-    shadowColor: '#000'
+    ...makeShadow(4, { opacity: 0.08, blur: 12, y: 2 })
   },
   headerInner: {
     alignItems: 'center'
@@ -1093,11 +1103,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
-    shadowColor: Colors.light.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8
+    ...makeShadow(8, { color: Colors.light.primary, opacity: 0.3, blur: 16, y: 4 })
   },
   logoText: {
     fontSize: 28,
@@ -1127,11 +1133,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 24,
     marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 6
+    ...makeShadow(6, { opacity: 0.1, blur: 24, y: 2 })
   },
   inputSection: {
     marginBottom: 20
@@ -1224,7 +1226,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#10B981',
+    backgroundColor: '#FE0002',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12
@@ -1292,7 +1294,7 @@ const styles = StyleSheet.create({
     textAlign: 'center'
   },
   loginSuccessText: {
-    color: '#059669',
+    color: '#1D0DA1',
     fontSize: 13,
     fontWeight: '600',
     marginTop: -8,
@@ -1302,11 +1304,7 @@ const styles = StyleSheet.create({
   focusedInput: {
     borderColor: Colors.light.primary,
     backgroundColor: '#FFFFFF',
-    shadowColor: Colors.light.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 3
+    ...makeShadow(3, { color: Colors.light.primary, opacity: 0.25, blur: 8, y: 2 })
   },
   focusedMpinBox: {
     borderColor: Colors.light.secondary,
@@ -1319,15 +1317,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: Colors.light.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6
+    ...makeShadow(6, { color: Colors.light.primary, opacity: 0.3, blur: 16, y: 4 })
   },
   disabledButton: {
-    backgroundColor: '#9CA3AF',
-    shadowOpacity: 0
+    backgroundColor: '#9CA3AF'
   },
   primaryButtonText: {
     fontSize: 16,
@@ -1358,11 +1351,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
     padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 10
+    ...makeShadow(10, { opacity: 0.2, blur: 24, y: 4 })
   },
   modalTitle: {
     fontSize: 20,

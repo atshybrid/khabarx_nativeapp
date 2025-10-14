@@ -1,6 +1,7 @@
 // import { log } from '@/services/logger';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { makeShadow } from '@/utils/shadow';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
     Animated,
@@ -199,8 +200,8 @@ export default function BottomSheet({
     <Modal visible={renderVisible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <KeyboardAvoidingView behavior={Platform.select({ ios: 'padding', android: 'height', default: 'height' }) as any} style={[StyleSheet.absoluteFill, { margin: 0, padding: 0 }]}>
         {/* Backdrop */}
-        <Animated.View style={[styles.backdrop, { opacity: 1 }]} pointerEvents={backdropInteractive ? 'auto' : 'none'}>
-          <Animated.View pointerEvents="none" style={[styles.backdropFill, backdropStyle]} />
+        <Animated.View style={[styles.backdrop, { opacity: 1, pointerEvents: backdropInteractive ? 'auto' : 'none' }]}>
+          <Animated.View style={[styles.backdropFill, { pointerEvents: 'none' }, backdropStyle]} />
           <Pressable
             onPress={enableBackdropPress ? () => {
               if (Date.now() < allowBackdropAtRef.current) return;
@@ -226,11 +227,7 @@ export default function BottomSheet({
               height: sheetHeight,
               transform: [{ translateY }],
               marginBottom: Platform.OS === 'android' ? -1 : 0,
-              shadowColor: '#000',
-              shadowOpacity: shadowEnabled ? 0.15 : 0,
-              shadowRadius: shadowEnabled ? 12 : 0,
-              shadowOffset: shadowEnabled ? { width: 0, height: -6 } : { width: 0, height: 0 },
-              elevation: shadowEnabled ? 24 : 0,
+              ...(shadowEnabled ? makeShadow(24, { opacity: 0.15, blur: 24, y: -6 }) : {}),
             },
           ]}
           {...(dragEnabled ? panResponder.panHandlers : {})}

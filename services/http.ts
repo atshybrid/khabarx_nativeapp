@@ -105,9 +105,10 @@ async function clearStoredTokens() {
 export async function request<T = any>(path: string, options: { method?: HttpMethod; body?: any; headers?: Record<string, string>; timeoutMs?: number; noAuth?: boolean } = {}): Promise<T> {
   const method: HttpMethod = options.method || 'GET';
   const jwt = options.noAuth ? null : await AsyncStorage.getItem(JWT_KEY);
+  const isFormData = (typeof FormData !== 'undefined') && options.body instanceof FormData;
   const headers: Record<string, string> = {
     'Accept': 'application/json',
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers || {}),
     ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
   };
@@ -118,10 +119,18 @@ export async function request<T = any>(path: string, options: { method?: HttpMet
     if (DEBUG_HTTP) {
       console.log('[HTTP] →', method, url);
     }
+    let fetchBody: any = undefined;
+    if (options.body !== undefined && options.body !== null) {
+      if (isFormData) {
+        fetchBody = options.body; // native fetch will set boundary automatically
+      } else {
+        fetchBody = JSON.stringify(options.body);
+      }
+    }
     const res = await withTimeout(fetch(url, {
       method,
       headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      body: fetchBody,
     }), options.timeoutMs ?? TIMEOUT_MS);
     const ct = res.headers.get('content-type') || '';
     const text = await res.text();
@@ -150,6 +159,10 @@ export async function request<T = any>(path: string, options: { method?: HttpMet
     }
     // Ensure we return parsed JSON; if body isn't JSON, error out so callers can handle explicitly
     if (typeof data === 'string') {
+      // Allow non-JSON for FormData responses that may return plain text; wrap into object
+      if (isFormData) {
+        return ({ raw: data } as unknown) as T;
+      }
       throw new Error('Expected JSON response but received text');
     }
     return (data as T);

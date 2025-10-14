@@ -81,9 +81,9 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
     style={styles.nitiLine}
     numberOfLines={1}
     adjustsFontSizeToFit
-    minimumFontScale={0.7}
+    minimumFontScale={0.5}
     allowFontScaling={false}
-  >REGD BY GOVT OF &quot;NITI AAYOG&quot; -UNIQUE ID: AP/2022/0324217,AP/2022/0326782</Text>
+  >{"REGD BY GOVT OF \"NITI AAYOG\" -UNIQUE ID: AP/2022/0324217,AP/2022/0326782"}</Text>
   <Text style={styles.identityHeading} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} allowFontScaling={false}>IDENTITY CARD</Text>
         {/* Photo & Stamp */}
         <View style={styles.photoStampRow}>
@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
   placeholderText: { textAlign: 'center', color: '#111827', fontWeight: '700' },
   placeholderTextSmall: { textAlign: 'center', color: '#111827', fontSize: 12, fontWeight: '600' },
   jurisdiction: { fontSize: 32, fontWeight: '900', color: BLUE_TEXT, marginTop: 2, textAlign: 'center', letterSpacing: 0.5 },
-  nitiLine: { color: RED, fontWeight: '700', fontSize: 15, textAlign: 'center', marginTop: 12, letterSpacing: 0.2 },
+  nitiLine: { color: RED, fontWeight: '900', fontSize: 28, textAlign: 'center', marginTop: 12, letterSpacing: 0.2, includeFontPadding: false },
   identityHeading: { color: RED, fontWeight: '900', fontSize: 30, marginTop: 20, letterSpacing: 1 },
   photoStampRow: { marginTop: 12, marginBottom: 16 },
   photoShell: { width: 320, height: 320, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: '#e5e7eb' },

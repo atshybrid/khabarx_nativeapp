@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApps, initializeApp } from 'firebase/app';
 import * as AuthNS from 'firebase/auth';
-import { initializeAuth } from 'firebase/auth';
+import { browserLocalPersistence, browserSessionPersistence, initializeAuth } from 'firebase/auth';
+import { Platform } from 'react-native';
 import { FIREBASE_CONFIG } from '../config/firebase';
 
 /** Basic config completeness check (apiKey + project + appId). */
@@ -33,9 +34,26 @@ export function ensureFirebaseAuthAsync(): Promise<import('firebase/auth').Auth>
   authInitPromise = (async () => {
     if (!isFirebaseConfigComplete()) throw new Error('Firebase config incomplete');
     const app = getFirebaseApp();
-    // Always use official persistence helper; if it throws, surface error so we know root cause.
-  const persistence = (AuthNS as any).getReactNativePersistence(AsyncStorage);
-    const auth = initializeAuth(app, { persistence });
+    // Platform-specific persistence selection. On web, getReactNativePersistence does not exist.
+    let persistence: any;
+    if (Platform.OS === 'web') {
+      // Prefer durable local persistence; fall back to session if local unavailable (older browsers / SSR)
+      persistence = browserLocalPersistence;
+    } else {
+      const getPersist = (AuthNS as any)?.getReactNativePersistence;
+      if (typeof getPersist === 'function') {
+        try {
+          persistence = getPersist(AsyncStorage);
+        } catch (e) {
+          console.warn('[AUTH_INIT] getReactNativePersistence failed, falling back to in-memory', (e as any)?.message);
+        }
+      }
+      if (!persistence) {
+        // Fallback: session (will not survive app restarts) but avoids crash
+        persistence = browserSessionPersistence || undefined;
+      }
+    }
+    const auth = initializeAuth(app, persistence ? { persistence } : {});
     authSingleton = auth;
     console.log('[AUTH_INIT] initializeAuth (async) success', { appId: app.options.appId });
     return auth;

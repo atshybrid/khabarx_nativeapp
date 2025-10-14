@@ -4,6 +4,7 @@ import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { PostArticleIcon } from '@/icons';
 import { checkPostArticleAccess } from '@/services/auth';
+import { makeShadow } from '@/utils/shadow';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { usePathname, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
@@ -124,12 +125,13 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
         {
           paddingBottom: Math.max(insets.bottom, 8),
           transform: [{ translateY }],
+          // move pointerEvents into style per RN Web deprecation guidance
+          pointerEvents: shouldShow ? 'auto' : 'none',
         },
       ]}
       onLayout={(e) => setMeasuredHeight(e.nativeEvent.layout.height)}
-  pointerEvents={shouldShow ? 'auto' : 'none'}
-  accessibilityElementsHidden={!shouldShow}
-  importantForAccessibility={shouldShow ? 'yes' : 'no-hide-descendants'}
+      accessibilityElementsHidden={!shouldShow}
+      importantForAccessibility={shouldShow ? 'yes' : 'no-hide-descendants'}
     >
       <Animated.View style={[styles.shadowWrap, { transform: [{ scale: scaleRef.current }] }]}>
         <View
@@ -180,7 +182,7 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
             })}
 
             {/* Center slot placeholder - shows the Post News label to align like a tab */}
-            <View style={styles.tabItem} pointerEvents="none">
+            <View style={[styles.tabItem, { pointerEvents: 'none' }] }>
               <View style={{ height: 24 }} />
               <Text
                 style={[
@@ -250,7 +252,6 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
             style={[
               styles.fabWrap,
               {
-                // Place FAB so the label visually aligns with other tab labels
                 bottom: Math.max(insets.bottom, 8) + 14,
                 transform: [{ scale: fabScale.current }],
               },
@@ -324,14 +325,9 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    // backgroundColor themed at render time
     backgroundColor: Colors.light.secondary,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 10,
     overflow: 'hidden',
+    ...(makeShadow(8, { opacity: 0.2, y: 6, blur: 20 })),
   },
   fabPressed: { opacity: 0.92 },
   fabInner: {

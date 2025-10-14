@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { createCitizenReporterMobile, getMpinStatus, loginWithMpin } from '../services/api';
 import { gatherRegistrationContext } from '../services/contextGather';
@@ -13,7 +13,7 @@ interface Props {
 // States: idle (typing mobile), mpin (existing user w/ mpin), register (needs creation)
 type Status = 'idle' | 'mpin' | 'register';
 
-export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess }) => {
+export default function MobileLoginModal({ visible, onClose, onSuccess }: Props) {
   const [mobile, setMobile] = useState('');
   const [mpin, setMpin] = useState('');
   const [fullName, setFullName] = useState('');
@@ -293,7 +293,7 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
           maxLength={10}
           value={mobile}
           ref={mobileRef}
-          onChangeText={(t) => {
+          onChangeText={(t: string) => {
             const cleaned = t.replace(/\D/g, '');
             console.log('[MOBILE_LOGIN] Mobile input changed', { original: t, cleaned, length: cleaned.length });
             setMobile(cleaned);
@@ -399,7 +399,7 @@ export const MobileLoginModal: React.FC<Props> = ({ visible, onClose, onSuccess 
       </KeyboardAvoidingView>
     </Modal>
   );
-};
+}
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -421,4 +421,4 @@ const styles = StyleSheet.create({
   rowCenter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
 });
 
-export default MobileLoginModal;
+// (default export declared above)

@@ -118,3 +118,47 @@ Use the provided PowerShell helper: `scripts/use-jdk17.ps1` to ensure a single c
 
 ---
 Keeping builds reproducible: ensure teammates share the same major JDK and Gradle wrapper (checked into version control). Avoid installing multiple vendor JDKs with different major versions unless needed.
+
+## UI Styling Best Practices (Shadows & Text Shadows)
+
+React Native Web now deprecates the granular `shadowColor`, `shadowOpacity`, `shadowRadius`, `shadowOffset`, and text equivalents (`textShadowColor`, etc.) in favor of `boxShadow` / unified `textShadow` on web. To keep styling consistent and silence deprecation warnings, this project uses two helpers:
+
+```ts
+// utils/shadow.ts
+makeShadow(elevation: number, opts?)
+makeTextShadow(x: number, y: number, blur: number, color: string)
+```
+
+Usage:
+```ts
+const styles = StyleSheet.create({
+	card: {
+		backgroundColor: '#fff',
+		borderRadius: 12,
+		...makeShadow(6, { opacity: 0.15 })
+	},
+	title: {
+		fontSize: 18,
+		fontWeight: '600',
+		...makeTextShadow(0,1,2,'rgba(0,0,0,0.35)')
+	}
+});
+```
+
+Why:
+- Single source of truth for elevation-like styling across platforms.
+- Web automatically gets `boxShadow` / CSS `text-shadow`, native retains classic shadow props + `elevation`.
+- Easier future migration if React Native core changes shadow modeling again.
+
+Lint Enforcement:
+An ESLint custom rule (`local-rn/no-deprecated-rn-shadows`) warns on direct usage of the deprecated granular props. To intentionally bypass (rarely), you can:
+1. Use the helpers instead (preferred).
+2. If absolutely necessary (e.g., experimenting), wrap in a file listed in the rule's `allowInFiles` option (update rule config) or refactor once done.
+
+Pointer Events:
+React Native Web also deprecates prop-level `pointerEvents`. We now place `pointerEvents` inside style objects when needed: `style={[styles.x, { pointerEvents: 'none' }]}`.
+
+Notifications (Web):
+Push token listeners are guarded on web to avoid unsupported listener warnings. The setup returns early from `ensureNotificationsSetup` when `Platform.OS === 'web'`.
+
+If you introduce new UI components with shadows or text shadows, always import and use the helpers to keep consistency and avoid regressions.

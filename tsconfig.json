@@ -1,4 +1,5 @@
 {
+  "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "target": "esnext",
     "module": "esnext",
@@ -11,6 +12,8 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+  "lib": ["esnext", "dom"],
+  "types": ["react", "react-native"],
     "baseUrl": "./",
     "paths": {
       "@/*": [
@@ -43,6 +46,5 @@
     "*.config.js",
     "babel.config.js",
     "metro.config.js"
-  ],
-  "extends": "expo/tsconfig.base"
+  ]
 }

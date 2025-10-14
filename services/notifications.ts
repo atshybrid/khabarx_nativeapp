@@ -22,6 +22,29 @@ Notifications.setNotificationHandler({
 });
 
 export async function ensureNotificationsSetup(): Promise<{ status: PushStatus; expoToken?: string; deviceToken?: string }> {
+	if (Platform.OS === 'web') {
+		// Web push via expo-notifications is limited; skip listeners to avoid warnings
+		const current = await Notifications.getPermissionsAsync();
+		const status = current.status as PushStatus;
+		if (status !== 'granted') {
+			// Do not request repeatedly on web; just return current status
+			return { status };
+		}
+		// We can still attempt to fetch expo token (may be undefined on web)
+		try {
+			const projectId = (Constants as any)?.expoConfig?.extra?.eas?.projectId
+				|| (Constants as any)?.default?.expoConfig?.extra?.eas?.projectId
+				|| undefined;
+			const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } as any : undefined as any);
+			const expoToken = tokenData?.data;
+			if (expoToken) await AsyncStorage.setItem(PUSH_TOKEN_KEY, expoToken);
+			console.log('[NOTIF_WEB] setup minimal', { status, expoToken: expoToken ? `${expoToken.slice(0,12)}…` : 'none' });
+			return { status, expoToken };
+		} catch (e) {
+			console.warn('[NOTIF_WEB] token fetch failed', e instanceof Error ? e.message : e);
+			return { status };
+		}
+	}
 	try {
 		if (!initDone) {
 			if (Platform.OS === 'android') {
