@@ -24,6 +24,8 @@ export interface HrciIdCardFrontProps {
   photoWidth?: number;
   /** Optional override for photo height (design coordinate space pixels). Maintains portrait ratio */
   photoHeight?: number;
+  /** Minimum gap (design px) between signature block bottom and red strip */
+  signatureToStripGap?: number;
 }
 
 const RED = '#FE0002';
@@ -45,6 +47,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   width = 720,
   photoWidth,
   photoHeight,
+  signatureToStripGap,
 }) => {
   // Use a fixed design coordinate space then scale for width to avoid font/layout drift
   const baseWidth = 720;
@@ -69,6 +72,8 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   const dPhotoHeight = photoHeight ?? 150;
   const stampSize = Math.round(dPhotoWidth * 0.62); // proportional to photo
   const stampOffset = Math.min(18, Math.round(stampSize * 0.18)); // keep inside bounds
+
+  const gap = signatureToStripGap ?? 2; // default tight gap
 
   return (
     <View style={[{ width, height }, style]}>
@@ -144,8 +149,8 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
           )}
         </View>
       </View>
-      {/* Bottom Red Strip */}
-      <View style={styles.bottomRed}>
+  {/* Bottom Red Strip */}
+  <View style={[styles.bottomRed, { marginTop: Math.max(gap, 1) }] }>
         <Text style={styles.bottomText}>WE TAKE HELP 24×7 FROM (POLICE, CBI, VIGILANCE, NIA) & OTHER GOVT. DEPT. AGAINST CRIME & CORRUPTION.</Text>
       </View>
         </View>
@@ -195,7 +200,7 @@ const styles = StyleSheet.create({
   authorSignOverlap: { width: 200, height: 100, marginTop: -20 },
   authorSignPlaceholder: { backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' },
   signatureLabel: { fontSize: 20, fontWeight: '900', color: BLUE_TEXT, marginTop: 4, letterSpacing: 0.5, alignSelf: 'flex-end' },
-  bottomRed: { backgroundColor: RED, paddingVertical: 14, paddingHorizontal: 16, marginTop: 4 },
+  bottomRed: { backgroundColor: RED, paddingVertical: 14, paddingHorizontal: 16, marginTop: 0 },
   bottomText: { color: '#ffffff', textAlign: 'center', fontSize: 14, fontWeight: '800', letterSpacing: 0.4, lineHeight: 18 },
 });
 
