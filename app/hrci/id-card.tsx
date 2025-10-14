@@ -39,6 +39,7 @@ export default function HrciIdCardScreen() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [membership, setMembership] = useState<Membership | null>(null);
+  const [idCardData, setIdCardData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'front' | 'back'>('front');
   const { width: screenWidth } = Dimensions.get('window');
@@ -72,15 +73,39 @@ export default function HrciIdCardScreen() {
     logoUri = resolved?.uri;
   } catch {}
 
-  // Dynamic field helpers (enforce uppercase where design indicates shouting)
-  const memberName = (profile?.fullName || 'Member Name').toUpperCase();
-  const designation = (membership?.designation?.name || 'Designation').toUpperCase();
-  const cellName = (membership?.cell?.name || 'Cell Name').toUpperCase();
-  const idNumber = profile?.id ? `HRCI-${profile.id.slice(-8).toUpperCase()}` : 'N/A';
-  const contactNumber = profile?.mobileNumber || 'N/A';
-  const validUpto = computeValidity();
-  const issueDate = profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short' }).toUpperCase() : undefined;
-  const zone = membership?.hrci?.zone ? membership.hrci.zone.toUpperCase() : undefined;
+  // Fetch composite ID card data AFTER membership/profile load
+  useEffect(() => {
+    const loadIdCard = async () => {
+      try {
+        const start = Date.now();
+        const res = await request<any>(`/memberships/me/idcard`, { method: 'GET' });
+        const dur = Date.now() - start;
+        const data = res?.data || res;
+        console.log(`[ID Card] ✅ /memberships/me/idcard (${dur}ms)`, {
+          hasCard: data?.hasCard,
+          status: data?.card?.status,
+          num: data?.card?.cardNumber,
+        });
+        setIdCardData(data || null);
+      } catch (e:any) {
+        console.warn('[ID Card] ⚠️ ID card composite failed:', e?.message || e);
+      }
+    };
+    loadIdCard();
+  }, []);
+
+  const holder = idCardData?.card?.holder || {};
+  const setting = idCardData?.setting || {};
+  const memberName = (holder.fullName || profile?.fullName || 'Member Name').toUpperCase();
+  const designation = (holder.designationName || membership?.designation?.name || 'Designation').toUpperCase();
+  const cellName = (holder.cellName || membership?.cell?.name || 'Cell Name').toUpperCase();
+  const idNumber = (idCardData?.card?.cardNumber || (profile?.id ? `HRCI-${profile.id.slice(-8)}` : 'N/A')).toUpperCase();
+  const contactNumber = holder.mobileNumber || profile?.mobileNumber || 'N/A';
+  const validUpto = idCardData?.card?.expiresAt ? (() => { try { const d=new Date(idCardData.card.expiresAt); return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;} catch { return computeValidity(); } })() : computeValidity();
+  const cardLogoUri = setting.frontLogoUrl || logoUri;
+  const stampUri = setting.hrciStampUrl || undefined;
+  const authorSignUri = setting.authorSignUrl || undefined;
+  const photoUri = profile?.profilePhotoUrl;
 
   useEffect(() => {
   const loadProfile = async () => {
@@ -218,12 +243,10 @@ export default function HrciIdCardScreen() {
                 idNumber={idNumber}
                 contactNumber={contactNumber}
                 validUpto={validUpto}
-                issueDate={issueDate}
-                zone={zone}
-                logoUri={logoUri}
-                photoUri={profile?.profilePhotoUrl}
-                stampUri={undefined /* TODO: provide round stamp asset URI */}
-                authorSignUri={undefined /* TODO: provide authorizing signature asset URI */}
+                logoUri={cardLogoUri}
+                photoUri={photoUri}
+                stampUri={stampUri}
+                authorSignUri={authorSignUri}
                 style={{
                   ...makeShadow(18, { opacity: 0.35, blur: 40, y: 16 }),
                   borderWidth: 0,
