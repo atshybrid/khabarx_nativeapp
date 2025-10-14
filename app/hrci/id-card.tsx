@@ -12,6 +12,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { HrciIdCardFrontExact } from '../../components/HrciIdCardFrontExact';
@@ -40,8 +41,10 @@ export default function HrciIdCardScreen() {
   const [membership, setMembership] = useState<Membership | null>(null);
   const [idCardData, setIdCardData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  // Large exact design target width (make it scrollable if wider than screen)
-  const exactCardWidth = 860; // always design width; component scales internally if needed
+  const [activeTab, setActiveTab] = useState<'front' | 'back'>('front');
+  // Responsive width: scale down to fit mobile screens, never exceed design base (720) nor stretch too small
+  const { width: screenWidth } = useWindowDimensions();
+  const exactCardWidth = Math.max(Math.min(screenWidth - 32, 720), 320); // clamp for readability
 
   // Helper: derive Valid Upto (assumption: 3 year validity from KYC update or profile creation)
   const computeValidity = (): string => {
@@ -207,25 +210,49 @@ export default function HrciIdCardScreen() {
           <View style={{ width: 24 }} />
         </View>
 
+        {/* Tab Selector */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'front' && styles.activeTab]}
+            onPress={() => setActiveTab('front')}
+          >
+            <Text style={[styles.tabText, activeTab === 'front' && styles.activeTabText]}>Front</Text>
+          </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'back' && styles.activeTab]}
+              onPress={() => setActiveTab('back')}
+            >
+              <Text style={[styles.tabText, activeTab === 'back' && styles.activeTabText]}>Back</Text>
+            </TouchableOpacity>
+        </View>
+
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={styles.cardContainer}>
-            <HrciIdCardFrontExact
-              width={exactCardWidth}
-              memberName={memberName}
-              designation={designation}
-              cellName={cellName}
-              idNumber={idNumber}
-              contactNumber={contactNumber}
-              validUpto={validUpto}
-              logoUri={cardLogoUri}
-              photoUri={photoUri}
-              stampUri={stampUri}
-              authorSignUri={authorSignUri}
-              style={{
-                ...makeShadow(18, { opacity: 0.35, blur: 40, y: 16 }),
-                borderWidth: 0,
-              }}
-            />
+            {activeTab === 'front' ? (
+              <HrciIdCardFrontExact
+                width={exactCardWidth}
+                memberName={memberName}
+                designation={designation}
+                cellName={cellName}
+                idNumber={idNumber}
+                contactNumber={contactNumber}
+                validUpto={validUpto}
+                logoUri={cardLogoUri}
+                photoUri={photoUri}
+                stampUri={stampUri}
+                authorSignUri={authorSignUri}
+                style={{
+                  ...makeShadow(18, { opacity: 0.35, blur: 40, y: 16 }),
+                  borderWidth: 0,
+                }}
+              />
+            ) : (
+              <IdCardBack
+                width={exactCardWidth}
+                profile={profile}
+                membership={membership}
+              />
+            )}
           </View>
 
           {/* Download/Share Actions */}
@@ -264,6 +291,23 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   headerTitle: { fontSize: 20, fontWeight: '800', color: '#ffffff' },
+  tabContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 12,
+    padding: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  activeTab: { backgroundColor: '#ffffff' },
+  tabText: { fontSize: 14, fontWeight: '600', color: '#ffffff' },
+  activeTabText: { color: '#1e3a8a' },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 32 },
   cardContainer: { alignItems: 'center', marginBottom: 24 },
   actionsContainer: {
@@ -281,4 +325,71 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   actionText: { fontSize: 14, fontWeight: '600', color: '#ffffff' },
+  backCard: {
+    width: '100%',
+    borderRadius: 24,
+    backgroundColor: '#ffffff',
+    padding: 24,
+    overflow: 'hidden',
+  },
+  backHeading: { fontSize: 26, fontWeight: '900', color: '#1e3a8a', textAlign: 'center', marginBottom: 12 },
+  backSection: { marginTop: 16 },
+  backSectionTitle: { fontSize: 18, fontWeight: '800', color: '#162c58', marginBottom: 8 },
+  backText: { fontSize: 14, lineHeight: 20, color: '#374151', fontWeight: '600' },
+  backRow: { flexDirection: 'row', marginBottom: 6 },
+  backRowLabel: { width: 120, fontSize: 14, fontWeight: '700', color: '#111827' },
+  backRowValue: { flex: 1, fontSize: 14, fontWeight: '600', color: '#111827' },
+  signatureBlock: { marginTop: 32, alignItems: 'flex-end' },
+  signatureLine: { width: 180, height: 2, backgroundColor: '#111827', marginBottom: 6 },
+  signatureCaption: { fontSize: 14, fontWeight: '800', color: '#111827' },
 });
+
+function IdCardBack({ width, profile, membership }: { width: number; profile: Profile | null; membership: Membership | null }) {
+  // scale back card proportionally similar to front width (front base width = 720)
+  const baseWidth = 720;
+  const scale = width / baseWidth;
+  const issuedDate = profile?.createdAt ? new Date(profile.createdAt) : null;
+  const issuedStr = issuedDate ? issuedDate.toLocaleDateString('en-IN') : 'N/A';
+  const zone = membership?.hrci?.zone || 'N/A';
+
+  return (
+    <View style={[styles.backCard, { width, transform: [{ scale }], transformOrigin: 'top left' as any }]}>      
+      <Text style={styles.backHeading}>HRCI CARD INFORMATION</Text>
+      <View style={styles.backSection}>
+        <Text style={styles.backSectionTitle}>Member Contact</Text>
+        <View style={styles.backRow}>
+          <Text style={styles.backRowLabel}>Mobile</Text>
+          <Text style={styles.backRowValue}>{profile?.mobileNumber || 'N/A'}</Text>
+        </View>
+        <View style={styles.backRow}>
+          <Text style={styles.backRowLabel}>Zone</Text>
+          <Text style={styles.backRowValue}>{zone}</Text>
+        </View>
+      </View>
+      <View style={styles.backSection}>
+        <Text style={styles.backSectionTitle}>Terms & Conditions</Text>
+        <Text style={styles.backText}>
+          • This card is non-transferable.{"\n"}
+          • Valid only for official HRCI duties.{"\n"}
+          • Report loss/theft immediately.{"\n"}
+          • Misuse is subject to cancellation.
+        </Text>
+      </View>
+      <View style={styles.backSection}>
+        <Text style={styles.backSectionTitle}>Issue Info</Text>
+        <View style={styles.backRow}>
+          <Text style={styles.backRowLabel}>Issued</Text>
+          <Text style={styles.backRowValue}>{issuedStr}</Text>
+        </View>
+        <View style={styles.backRow}>
+          <Text style={styles.backRowLabel}>Reg. No</Text>
+          <Text style={styles.backRowValue}>4396/2022</Text>
+        </View>
+      </View>
+      <View style={styles.signatureBlock}>
+        <View style={styles.signatureLine} />
+        <Text style={styles.signatureCaption}>Authorized Signature</Text>
+      </View>
+    </View>
+  );
+}
