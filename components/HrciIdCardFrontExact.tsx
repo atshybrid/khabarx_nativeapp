@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
   detailLabel: { width: 140, fontSize: 18, fontWeight: '700', color: '#111827', letterSpacing: 0.25 },
   colon: { width: 12, fontSize: 18, fontWeight: '700', color: '#111827' },
   detailValue: { flex: 1, fontSize: 18, fontWeight: '700', color: '#111827', lineHeight: 22 },
-  signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: 24 },
+  signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: 18 },
   signatureBox: { display: 'none' },
   authorSign: { width: 190, height: 90 },
   authorSignPlaceholder: { backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', borderWidth: 0 },
