@@ -44,7 +44,15 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
     <View style={[styles.card, { width, height }, style]}>
       {/* Top Red Title */}
       <View style={styles.topRed}>
-        <Text style={styles.topRedTitle}>HUMAN RIGHTS COUNCIL FOR INDIA (HRCI)</Text>
+        <Text
+          style={styles.topRedTitle}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+          allowFontScaling={false}
+        >
+          HUMAN RIGHTS COUNCIL FOR INDIA (HRCI)
+        </Text>
       </View>
       {/* Registration Blue Band */}
       <View style={styles.blueBand}>
