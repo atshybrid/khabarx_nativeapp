@@ -45,9 +45,22 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   const baseHeight = baseWidth * 1.55;
   const scale = width / baseWidth;
   const height = baseHeight * scale;
+
+  if (width <= 0) {
+    return <View style={[{ padding: 16, backgroundColor: '#fee2e2' }, style]}><Text style={{ color: '#b91c1c', fontWeight: '700' }}>Invalid width for ID Card</Text></View>;
+  }
+
+  if (scale < 0.4) {
+    return (
+      <View style={[{ width, padding: 16, backgroundColor: '#fff5f5', borderWidth: 1, borderColor: '#fecaca' }, style]}>
+        <Text style={{ color: '#b91c1c', fontWeight: '800', textAlign: 'center' }}>Screen too small to display ID card. Rotate device or zoom.</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={[{ width, height, overflow: 'hidden' }, style]}>
-      <View style={{ width: baseWidth, height: baseHeight, transform: [{ scale }], transformOrigin: 'top left' as any }}>
+    <View style={[{ width, height }, style]}>
+      <View style={{ width: baseWidth, height: baseHeight, transform: [{ translateX: -(baseWidth * (1 - scale) / 2) }, { translateY: -(baseHeight * (1 - scale) / 2) }, { scale } ] }}>
         <View style={[styles.card, { width: baseWidth, height: baseHeight }]}> 
       {/* Top Red Title */}
       <View style={styles.topRed}>
