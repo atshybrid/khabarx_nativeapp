@@ -181,7 +181,7 @@ const styles = StyleSheet.create({
   placeholderText: { textAlign: 'center', color: '#111827', fontWeight: '700' },
   placeholderTextSmall: { textAlign: 'center', color: '#111827', fontSize: 12, fontWeight: '600' },
   jurisdiction: { fontSize: 26, fontWeight: '900', color: BLUE_TEXT, marginTop: 0, textAlign: 'center', letterSpacing: 0.5, lineHeight: 30 },
-  nitiLine: { color: RED, fontWeight: '800', fontSize: 20, textAlign: 'center', marginTop: 6, letterSpacing: 0.15, includeFontPadding: false, lineHeight: 24 },
+  nitiLine: { color: RED, fontWeight: '800', fontSize: 16, textAlign: 'center', marginTop: 6, letterSpacing: 0.15, includeFontPadding: false, lineHeight: 20 },
   identityHeading: { color: RED, fontWeight: '900', fontSize: 24, marginTop: 10, letterSpacing: 0.8, lineHeight: 26 },
   photoStampRow: { marginTop: 6, marginBottom: 8 },
   photoShell: { backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#e5e7eb' },
