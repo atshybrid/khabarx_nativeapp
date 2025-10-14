@@ -202,7 +202,8 @@ const styles = StyleSheet.create({
   signatureBox: { display: 'none' },
   authorSign: { width: 190, height: 90 },
   authorSignPlaceholder: { backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', borderWidth: 0 },
-  signatureLabel: { fontSize: 20, fontWeight: '900', color: BLUE_TEXT, marginTop: 6, letterSpacing: 0.5, alignSelf: 'flex-end' },
+  // signatureLabel marginTop set negative to allow signature image to visually overlap the label area
+  signatureLabel: { fontSize: 20, fontWeight: '900', color: BLUE_TEXT, marginTop: -14, letterSpacing: 0.5, alignSelf: 'flex-end' },
   bottomRed: { backgroundColor: RED, paddingVertical: 14, paddingHorizontal: 16, marginTop: 0 },
   bottomText: { color: '#ffffff', textAlign: 'center', fontSize: 14, fontWeight: '800', letterSpacing: 0.4, lineHeight: 18 },
 });
