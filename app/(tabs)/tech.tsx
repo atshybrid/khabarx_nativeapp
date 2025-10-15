@@ -56,27 +56,46 @@ export default function AccountScreen() {
         if (savedPhoto) setPhotoUrl(savedPhoto);
       }
 
-      // Try server preferences first
-      let prefLang: Language | null = null;
+      // Resolve language with local-first strategy to avoid "late" updates on UI
+      let hasLocalOverride = false;
+      let localLang: Language | null = null;
+      try {
+        const ll = await AsyncStorage.getItem('language_local');
+        if (ll) {
+          try {
+            const obj = JSON.parse(ll);
+            if (obj && obj.code) {
+              localLang = LANGUAGES.find(x => x.code === obj.code) || null;
+              hasLocalOverride = !!localLang;
+            }
+          } catch {}
+        }
+      } catch {}
+      if (!localLang) {
+        try {
+          const savedLang = await AsyncStorage.getItem('selectedLanguage');
+          if (savedLang) {
+            try {
+              const parsed = JSON.parse(savedLang);
+              if (parsed && typeof parsed === 'object' && parsed.code) localLang = (parsed as Language);
+              else if (typeof parsed === 'string') localLang = LANGUAGES.find(l => l.code === parsed) || null;
+            } catch {}
+          }
+        } catch {}
+      }
+      setLanguage(localLang || LANGUAGES[0]);
+
+      // Fetch server preferences in background; only apply if no local override exists
       let prefLoc: string | null = null;
       try {
         const prefs = await getUserPreferences(t?.user?.id || (t as any)?.user?._id);
-        prefLang = pickPreferenceLanguage(prefs);
+        const prefLang = pickPreferenceLanguage(prefs);
         prefLoc = pickPreferenceLocation(prefs);
+        if (prefLang && !hasLocalOverride) {
+          setLanguage(prefLang);
+          try { await AsyncStorage.setItem('selectedLanguage', JSON.stringify(prefLang)); } catch {}
+        }
       } catch {}
-      if (prefLang) {
-        setLanguage(prefLang);
-        try { await AsyncStorage.setItem('selectedLanguage', JSON.stringify(prefLang)); } catch {}
-      } else {
-        const savedLang = await AsyncStorage.getItem('selectedLanguage');
-        if (savedLang) {
-          try {
-            const parsed = JSON.parse(savedLang);
-            if (parsed && typeof parsed === 'object' && parsed.code) setLanguage(parsed as Language);
-            else if (typeof parsed === 'string') setLanguage(LANGUAGES.find(l => l.code === parsed) || LANGUAGES[0]);
-          } catch { setLanguage(LANGUAGES[0]); }
-        } else { setLanguage(LANGUAGES[0]); }
-      }
 
       setNotify((await AsyncStorage.getItem('notify')) !== '0');
       setAutoplay((await AsyncStorage.getItem('autoplay')) === '1');
@@ -122,8 +141,22 @@ export default function AccountScreen() {
   useEffect(() => { AsyncStorage.setItem('autoplay', autoplay ? '1' : '0'); }, [autoplay]);
   const persistLanguage = useCallback(async (lang: Language) => {
     setLanguage(lang);
+    // Persist commonly used key across the app
     await AsyncStorage.setItem('selectedLanguage', JSON.stringify(lang));
-  }, []);
+    // Additionally, if user is MEMBER/HRCI_ADMIN, store a dedicated local-language payload
+    try {
+      const roleUC = (role || '').toString().trim().toUpperCase();
+      if (roleUC === 'MEMBER' || roleUC === 'HRCI_ADMIN') {
+        const payload = { id: lang.id, code: lang.code, name: lang.name };
+        await AsyncStorage.multiSet([
+          ['language_local', JSON.stringify(payload)],
+          ['language_local_id', lang.id],
+          ['language_local_code', lang.code],
+          ['language_local_name', lang.name],
+        ]);
+      }
+    } catch {}
+  }, [role]);
 
   const gotoLogin = () => router.push('/auth/login');
   const doLogout = async () => {
@@ -251,6 +284,10 @@ export default function AccountScreen() {
     return () => off();
   }, [loadHrciMembership, refreshProfile]);
 
+  // Role check for hiding user header when membership is present
+  const roleUC = (role || '').toString().trim().toUpperCase();
+  const isMemberOrAdmin = roleUC === 'MEMBER' || roleUC === 'HRCI_ADMIN';
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: bg }]}>
       {/* Fixed app bar (does not scroll) */}
@@ -259,65 +296,47 @@ export default function AccountScreen() {
           <Feather name="arrow-left" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
         </Pressable>
         <Text style={[styles.appBarTitle, { color: scheme === 'dark' ? '#fff' : Colors.light.primary }]}>Account</Text>
-        <View style={{ width: 60 }} />
+        <View style={{ width: 60, alignItems: 'flex-end' }}>
+          <Pressable onPress={loggedIn ? doLogout : gotoLogin} hitSlop={8} accessibilityLabel={loggedIn ? 'Logout' : 'Sign In'}>
+            <Feather name={loggedIn ? 'log-out' : 'log-in'} size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
+          </Pressable>
+        </View>
       </View>
       <ScrollView contentContainerStyle={styles.container}>
-        <View style={[styles.profileHeader, { backgroundColor: card, borderColor: border }]}>
-          <Pressable onPress={pickAndUploadAvatar} disabled={!loggedIn || uploadingPhoto} accessibilityLabel="Change profile photo">
-            <View style={styles.avatar}>
-              {photoUrl ? (
-                <Image source={{ uri: photoUrl }} style={styles.avatarImg} />
-              ) : (
-                <Text style={[styles.avatarText, { color: scheme === 'dark' ? '#fff' : Colors.light.primary }]}>{(name || 'G').charAt(0).toUpperCase()}</Text>
-              )}
-              {uploadingPhoto ? (
-                <View style={[styles.avatarOverlay, { backgroundColor: scheme === 'dark' ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.6)' }]}>
-                  <ActivityIndicator color={Colors.light.primary} />
-                </View>
-              ) : null}
-            </View>
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.displayName, { color: text }]}>{loggedIn ? name || 'User' : 'Reader'}</Text>
-            <Text style={[styles.subtleText, { color: muted }]}>{loggedIn ? (role || 'Member') : 'Not signed in'}</Text>
+        {/* If logged-in Member/Admin: hide user header and show HRCI card first; else show header first then HRCI card */}
+        {!loggedIn || !isMemberOrAdmin ? (
+          <View style={[styles.profileHeader, { backgroundColor: card, borderColor: border }]}> 
+            <Pressable onPress={pickAndUploadAvatar} disabled={!loggedIn || uploadingPhoto} accessibilityLabel="Change profile photo"> 
+              <View style={styles.avatar}> 
+                {photoUrl ? (
+                  <Image source={{ uri: photoUrl }} style={styles.avatarImg} /> 
+                ) : (
+                  <Text style={[styles.avatarText, { color: scheme === 'dark' ? '#fff' : Colors.light.primary }]}>{(name || 'G').charAt(0).toUpperCase()}</Text> 
+                )}
+                {uploadingPhoto ? (
+                  <View style={[styles.avatarOverlay, { backgroundColor: scheme === 'dark' ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.6)' }]}> 
+                    <ActivityIndicator color={Colors.light.primary} /> 
+                  </View> 
+                ) : null}
+              </View> 
+            </Pressable> 
+            <View style={{ flex: 1 }}> 
+              <Text style={[styles.displayName, { color: text }]}>{loggedIn ? name || 'User' : 'Reader'}</Text> 
+              <Text style={[styles.subtleText, { color: muted }]}>{loggedIn ? (role || 'Member') : 'Not signed in'}</Text> 
+            </View> 
+            {loggedIn ? (
+              <Pressable onPress={doLogout} style={[styles.button, styles.secondary, { width: 100, backgroundColor: card, borderColor: border }]}> 
+                <Text style={[styles.buttonText, { color: scheme === 'dark' ? '#fff' : Colors.light.primary }]}>Logout</Text> 
+              </Pressable> 
+            ) : (
+              <Pressable onPress={gotoLogin} style={[styles.button, styles.primary, { width: 100 }]}> 
+                <Text style={[styles.buttonText, { color: '#fff' }]}>Sign In</Text> 
+              </Pressable> 
+            )} 
           </View>
-          {loggedIn ? (
-            <Pressable onPress={doLogout} style={[styles.button, styles.secondary, { width: 100, backgroundColor: card, borderColor: border }]}>
-              <Text style={[styles.buttonText, { color: scheme === 'dark' ? '#fff' : Colors.light.primary }]}>Logout</Text>
-            </Pressable>
-          ) : (
-            <Pressable onPress={gotoLogin} style={[styles.button, styles.primary, { width: 100 }]}>
-              <Text style={[styles.buttonText, { color: '#fff' }]}>Sign In</Text>
-            </Pressable>
-          )}
-        </View>
-        {/* Welcome card removed as requested */}
+        ) : null}
 
-        {/* Location Card */}
-        <View style={[styles.card, { backgroundColor: card, borderColor: border }]}>
-          <Text style={[styles.cardTitle, { color: text }]}>Location</Text>
-          <Pressable onPress={changeLocation} accessibilityLabel="Change location" style={({ pressed }: { pressed: boolean }) => [styles.rowBetween, pressed && { opacity: 0.85 }] }>
-            <View>
-              <Text style={[styles.label, { color: text }]}>{location ? location : 'Not set'}</Text>
-              <Text style={[styles.helper, { color: muted }]}>Used to personalize local news</Text>
-            </View>
-            <MaterialIcons name="chevron-right" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
-          </Pressable>
-        </View>
-
-        {/* Language Card */}
-        <View style={[styles.card, { backgroundColor: card, borderColor: border }]}>
-          <Text style={[styles.cardTitle, { color: text }]}>Language</Text>
-          <Pressable onPress={() => setLangSheetOpen(true)} accessibilityLabel="Change language" style={({ pressed }: { pressed: boolean }) => [styles.rowBetween, pressed && { opacity: 0.85 }] }>
-            <View>
-              <Text style={[styles.label, { color: text }]}>{languageDisplay}</Text>
-              <Text style={[styles.helper, { color: muted }]}>App language for headlines and UI</Text>
-            </View>
-            <MaterialIcons name="chevron-right" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
-          </Pressable>
-        </View>
-
-        {/* HRCI Membership */}
+        {/* HRCI Membership at top (always visible) */}
         <View style={[styles.card, styles.hrciCard, { backgroundColor: card, borderColor: '#FE0002' }]}>
           <View style={[styles.hrciHeader, { justifyContent: 'space-between', width: '100%' }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -348,6 +367,33 @@ export default function AccountScreen() {
             <Text style={[styles.buttonText, { color: '#fff' }]}>{hrciMembership ? 'Open Dashboard' : 'Open HRCI'}</Text>
           </Pressable>
         </View>
+        {/* Welcome card removed as requested */}
+
+        {/* Location Card */}
+        <View style={[styles.card, { backgroundColor: card, borderColor: border }]}>
+          <Text style={[styles.cardTitle, { color: text }]}>Location</Text>
+          <Pressable onPress={changeLocation} accessibilityLabel="Change location" style={({ pressed }: { pressed: boolean }) => [styles.rowBetween, pressed && { opacity: 0.85 }] }>
+            <View>
+              <Text style={[styles.label, { color: text }]}>{location ? location : 'Not set'}</Text>
+              <Text style={[styles.helper, { color: muted }]}>Used to personalize local news</Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
+          </Pressable>
+        </View>
+
+        {/* Language Card */}
+        <View style={[styles.card, { backgroundColor: card, borderColor: border }]}>
+          <Text style={[styles.cardTitle, { color: text }]}>Language</Text>
+          <Pressable onPress={() => { try { console.log('[AccountTab] Open language sheet'); } catch {} setLangSheetOpen(true); }} accessibilityLabel="Change language" style={({ pressed }: { pressed: boolean }) => [styles.rowBetween, pressed && { opacity: 0.85 }] }>
+            <View>
+              <Text style={[styles.label, { color: text }]}>{languageDisplay}</Text>
+              <Text style={[styles.helper, { color: muted }]}>App language for headlines and UI</Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
+          </Pressable>
+        </View>
+
+        {/* (Moved HRCI Membership card to top) */}
 
         {/* Other Preferences */}
         <View style={[styles.card, { backgroundColor: card, borderColor: border }]}>
@@ -457,13 +503,14 @@ export default function AccountScreen() {
             </View>
           }
         >
-          <View style={{ paddingBottom: 50 }}>
+          <ScrollView style={{ maxHeight: '100%' }} contentContainerStyle={{ paddingBottom: 50 }} keyboardShouldPersistTaps="handled">
             {LANGUAGES.map((l) => {
               const active = language?.code === l.code;
               return (
                 <Pressable
                   key={l.code}
                   onPress={async () => {
+                    try { console.log('[AccountTab] Language selected:', l.code); } catch {}
                     await persistLanguage(l);
                     try {
                       await updatePreferences({ languageId: l.id, languageCode: l.code });
@@ -484,7 +531,7 @@ export default function AccountScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
         </BottomSheet>
       </ScrollView>
     </SafeAreaView>

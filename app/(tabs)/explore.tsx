@@ -9,7 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import LottieView from 'lottie-react-native';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, BackHandler, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CitizenReporterArticlesSheet from '../../components/CitizenReporterArticlesSheet';
@@ -118,6 +118,58 @@ export default function PostCreateScreen() {
   };
   // Removed unused uploadingRef
   const router = useRouter();
+
+  // Load language preferences (local-first), mapping id/code/name
+  const loadLanguagePrefs = useCallback(async () => {
+    let effLangId: string | undefined;
+    let effLangCode: string | undefined;
+    let effLangName: string | undefined;
+    let langs: any[] | null = null;
+    try { langs = await getLanguages(); } catch { langs = null; }
+    // Prefer local override for member/admin if present
+    try {
+      const ll = await AsyncStorage.getItem('language_local');
+      if (ll) {
+        try {
+          const obj = JSON.parse(ll);
+          effLangId = obj?.id;
+          effLangCode = obj?.code;
+          effLangName = obj?.name;
+        } catch {}
+      }
+    } catch {}
+    // Merge/override with selectedLanguage if some fields missing
+    try {
+      const langJson = await AsyncStorage.getItem('selectedLanguage');
+      if (langJson) {
+        try {
+          const lang = JSON.parse(langJson);
+          effLangId = effLangId || (lang?.id as string | undefined);
+          effLangCode = effLangCode || ((lang?.code || lang?.slug) as string | undefined);
+          effLangName = effLangName || ((lang?.nativeName || lang?.name) as string | undefined);
+        } catch {}
+      }
+    } catch {}
+    // If needed, map code<->id using languages list
+    if ((!effLangId || !effLangCode) && langs && langs.length) {
+      if (!effLangId && effLangCode) {
+        const found = langs.find((l: any) => String(l.code).toLowerCase() === String(effLangCode).toLowerCase());
+        if (found) {
+          effLangId = String(found.id);
+          effLangName = effLangName || found.nativeName || found.name;
+        }
+      } else if (effLangId && !effLangCode) {
+        const found = langs.find((l: any) => String(l.id) === String(effLangId));
+        if (found) {
+          effLangCode = String(found.code);
+          effLangName = effLangName || found.nativeName || found.name;
+        }
+      }
+    }
+    if (effLangName) setLanguageName(effLangName);
+    if (effLangId) setLanguageId(effLangId);
+    if (effLangCode) setLanguageCode(effLangCode);
+  }, []);
   const { setTabBarVisible } = useTabBarVisibility();
   const [perms, setPerms] = useState<PermissionStatus | null>(null);
   const [role, setRole] = useState<string>('Guest');
@@ -193,6 +245,7 @@ export default function PostCreateScreen() {
 
   useEffect(() => {
     (async () => {
+      await loadLanguagePrefs();
       // derive selected language display from storage and normalize id/code pair
       let effLangId: string | undefined;
       let effLangCode: string | undefined;
@@ -275,7 +328,16 @@ export default function PostCreateScreen() {
       } catch {}
       setAuthLoaded(true);
     })();
-  }, [googleMode, webClientId]);
+  }, [googleMode, webClientId, loadLanguagePrefs]);
+
+  // Reload language prefs when returning to this screen
+  useFocusEffect(
+    React.useCallback(() => {
+      let cancelled = false;
+      (async () => { if (!cancelled) await loadLanguagePrefs(); })();
+      return () => { cancelled = true; };
+    }, [loadLanguagePrefs])
+  );
 
   // Refetch categories whenever languageId changes (e.g., after login or language selection sync)
   useEffect(() => {
@@ -487,13 +549,21 @@ export default function PostCreateScreen() {
       const effectivePerms = await checkLocationAndPerms();
       if (!effectivePerms || !effectivePerms.coordsDetailed) return;
       const cd = effectivePerms.coordsDetailed;
+      // Derive role for posting short news
+      let postRole: 'CITIZEN_REPORTER' | 'MEMBER' | 'HRCI_ADMIN' = 'CITIZEN_REPORTER';
+      try {
+        const t = await loadTokens();
+        const r = (t?.user?.role || '').toString().trim().toUpperCase();
+        if (r === 'MEMBER' || r === 'HRCI_ADMIN' || r === 'CITIZEN_REPORTER') postRole = r as any;
+      } catch {}
+
       const payload = {
   title: titleTx.value.trim(),
   content: contentTx.value.trim(),
         languageId: langIdEff!,
         categoryId: localCategoryId!,
         mediaUrls: uploadedUrls.length ? uploadedUrls : undefined,
-        role: 'CITIZEN_REPORTER' as const,
+        role: postRole,
         location: {
           latitude: cd.latitude,
           longitude: cd.longitude,

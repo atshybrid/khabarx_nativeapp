@@ -3,9 +3,10 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     Alert,
+    Animated,
     Image,
     RefreshControl,
     ScrollView,
@@ -348,10 +349,68 @@ export default function HrciDashboard() {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="dark" />
-        <View style={styles.loadingContainer}>
-          <MaterialCommunityIcons name="loading" size={32} color="#FE0002" />
-          <Text style={styles.loadingText}>Loading your dashboard...</Text>
-        </View>
+        <ScrollView contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+          {/* Header Skeleton */}
+          <LinearGradient colors={["#FE0002", "#1D0DA1"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.header}>
+            <View style={styles.headerContent}>
+              <View style={styles.headerTop}>
+                <SkeletonBox style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                <Text style={styles.headerTitle}>HRCI Dashboard</Text>
+                <SkeletonBox style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+              </View>
+              <View style={styles.profileCard}>
+                <View style={styles.profileTopRow}>
+                  <SkeletonBox style={{ width: 80, height: 80, borderRadius: 40 }} />
+                  <View style={{ flex: 1, marginLeft: 16 }}>
+                    <SkeletonBox style={{ height: 18, borderRadius: 6, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.7)' }} />
+                    <SkeletonBox style={{ height: 14, borderRadius: 6, width: '70%', backgroundColor: 'rgba(255,255,255,0.6)' }} />
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', marginTop: 16, gap: 12 }}>
+                  <SkeletonBox style={{ flex: 1, height: 44, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.3)' }} />
+                  <SkeletonBox style={{ flex: 1, height: 44, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.3)' }} />
+                </View>
+              </View>
+            </View>
+          </LinearGradient>
+
+          {/* Stats Skeleton */}
+          <View style={{ paddingHorizontal: 16, marginTop: -24 }}>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <SkeletonBox style={{ flex: 1, height: 90, borderRadius: 12 }} />
+              <SkeletonBox style={{ flex: 1, height: 90, borderRadius: 12 }} />
+            </View>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+              <SkeletonBox style={{ flex: 1, height: 90, borderRadius: 12 }} />
+              <SkeletonBox style={{ flex: 1, height: 90, borderRadius: 12 }} />
+            </View>
+          </View>
+
+          {/* Quick Actions Skeleton */}
+          <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
+            <SkeletonBox style={{ height: 22, width: 160, borderRadius: 6, marginBottom: 12 }} />
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <SkeletonBox style={{ flex: 1, height: 60, borderRadius: 12 }} />
+              <SkeletonBox style={{ flex: 1, height: 60, borderRadius: 12 }} />
+              <SkeletonBox style={{ flex: 1, height: 60, borderRadius: 12 }} />
+            </View>
+          </View>
+
+          {/* Recent Activity Skeleton */}
+          <View style={{ paddingHorizontal: 16, marginTop: 24 }}>
+            <SkeletonBox style={{ height: 22, width: 180, borderRadius: 6, marginBottom: 12 }} />
+            {[...Array(5)].map((_, i) => (
+              <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                <SkeletonBox style={{ width: 40, height: 40, borderRadius: 8, marginRight: 12 }} />
+                <View style={{ flex: 1 }}>
+                  <SkeletonBox style={{ height: 14, borderRadius: 6, marginBottom: 6 }} />
+                  <SkeletonBox style={{ height: 12, borderRadius: 6, width: '70%' }} />
+                </View>
+                <SkeletonBox style={{ width: 60, height: 28, borderRadius: 8, marginLeft: 12 }} />
+              </View>
+            ))}
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -554,6 +613,25 @@ export default function HrciDashboard() {
 
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+// Reusable pulsing skeleton block
+function SkeletonBox({ style }: { style?: any }) {
+  const opacity = useRef(new Animated.Value(0.6));
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity.current, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity.current, { toValue: 0.6, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+
+  return (
+    <Animated.View style={[{ backgroundColor: '#e5e7eb' }, style, { opacity: opacity.current }]} />
   );
 }
 

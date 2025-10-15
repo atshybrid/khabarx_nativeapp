@@ -142,9 +142,11 @@ export async function checkPostArticleAccess(): Promise<{
     const hasToken = !!tokens?.jwt;
     
     // Check role
-    const role = tokens?.user?.role;
-    const hasValidRole = role === 'CITIZEN_REPORTER';
-    const isGuest = !hasToken || role === 'Guest' || !role;
+    const roleRaw = (tokens?.user?.role || '').toString().trim();
+    const roleUC = roleRaw.toUpperCase();
+    // Allow CITIZEN_REPORTER, MEMBER and HRCI_ADMIN to post news
+    const hasValidRole = roleUC === 'CITIZEN_REPORTER' || roleUC === 'MEMBER' || roleUC === 'HRCI_ADMIN';
+  const isGuest = !hasToken || roleUC === 'GUEST' || !roleRaw;
     
     // If guest user, definitely redirect to login
     if (isGuest) {
@@ -172,7 +174,7 @@ export async function checkPostArticleAccess(): Promise<{
     if (!hasValidRole) {
       return {
         canAccess: false,
-        reason: 'Insufficient permissions - CITIZEN_REPORTER role required',
+        reason: 'Insufficient permissions - Reporter, Member or HRCI Admin role required',
         isGuest: false,
         hasToken,
         hasValidRole: false

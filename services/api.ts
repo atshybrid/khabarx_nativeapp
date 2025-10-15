@@ -233,20 +233,62 @@ export async function afterPreferencesUpdated(opts: { languageIdChanged?: string
   }
 }
 
+// Resolve effective language from storage/tokens with local-first priority
+export async function resolveEffectiveLanguage(): Promise<{ id?: string; code?: string; name?: string }> {
+  let id: string | undefined;
+  let code: string | undefined;
+  let name: string | undefined;
+  // 1) Prefer local override (set for MEMBER/HRCI_ADMIN)
+  try {
+    const ll = await AsyncStorage.getItem('language_local');
+    if (ll) {
+      try { const obj = JSON.parse(ll); id = obj?.id || id; code = obj?.code || code; name = obj?.name || name; } catch {}
+    }
+  } catch {}
+  // 2) Merge with selectedLanguage
+  try {
+    const raw = await AsyncStorage.getItem('selectedLanguage');
+    if (raw) {
+      try {
+        const obj = JSON.parse(raw);
+        id = id || obj?.id; code = code || (obj?.code || obj?.slug); name = name || (obj?.nativeName || obj?.name);
+      } catch {}
+    }
+  } catch {}
+  // 3) If missing either piece, map via languages list or tokens
+  try {
+    const list = await getLanguages();
+    if (!id && code) {
+      const found = list.find(l => String(l.code).toLowerCase() === String(code).toLowerCase());
+      if (found) { id = String(found.id); name = name || found.nativeName || found.name; }
+    } else if (id && !code) {
+      const found = list.find(l => String(l.id) === String(id));
+      if (found) { code = String(found.code); name = name || found.nativeName || found.name; }
+    }
+  } catch {}
+  // 4) tokens fallback if still missing id
+  if (!id) {
+    try {
+      const t = await loadTokens();
+      if (t?.languageId) {
+        id = t.languageId;
+        try {
+          const list = await getLanguages();
+          const found = list.find(l => String(l.id) === String(id));
+          if (found) { code = code || String(found.code); name = name || found.nativeName || found.name; }
+        } catch {}
+      }
+    } catch {}
+  }
+  return { id, code, name };
+}
+
 export async function refreshLanguageDependentCaches(langCode?: string) {
   try {
     let code = langCode;
     if (!code) {
-      // Try from selectedLanguage in storage
-      const raw = await AsyncStorage.getItem('selectedLanguage');
-      if (raw) {
-        try {
-          const j = JSON.parse(raw);
-          code = j?.code || (typeof j === 'string' ? j : undefined);
-        } catch {
-          code = raw;
-        }
-      }
+      const eff = await resolveEffectiveLanguage();
+      code = eff.code;
     }
     // Default to English if still missing
     code = code || 'en';
@@ -283,17 +325,13 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
     }
 
     // Build cache key for offline support
-    const key = `news_cache:${lang}:${category || 'all'}`;
+  const key = `news_cache:${lang}:${category || 'all'}`;
     // Correct endpoint: /shortnews with limit and optional cursor
-    // Resolve languageId (required by public endpoint)
+    // Resolve languageId (required by public endpoint) via centralized resolver
     let languageId: string | undefined;
     try {
-      const t = await loadTokens();
-      languageId = t?.languageId;
-      if (!languageId) {
-        const raw = await AsyncStorage.getItem('selectedLanguage');
-        languageId = raw ? (JSON.parse(raw)?.id as string | undefined) : undefined;
-      }
+      const eff = await resolveEffectiveLanguage();
+      languageId = eff.id;
     } catch {}
     const params = new URLSearchParams({ limit: '10' });
     if (languageId) params.set('languageId', languageId);
@@ -1338,11 +1376,14 @@ const CATEGORIES_CACHE_KEY = (langId: string) => `categories_cache:${langId}`;
 
 
 export async function getCategories(languageId?: string): Promise<CategoryItem[]> {
-  // Always use English for categories as per backend expectation
-  // Ignore any provided languageId or selected language; force 'en'
-  let langId: string | undefined = 'en';
-  // Normalize if a language code was passed accidentally
+  // Resolve the effective language consistently across app
+  let langId: string | undefined = languageId;
   try {
+    if (!langId) {
+      const eff = await resolveEffectiveLanguage();
+      langId = eff.id;
+    }
+    // If code was passed by mistake, map to id
     if (langId && !/^cmf/i.test(String(langId))) {
       const list = await getLanguages();
       const found = list.find(l => (l.code || '').toLowerCase() === String(langId).toLowerCase());
@@ -1352,7 +1393,6 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
       }
     }
   } catch {}
-  // If we don't have a language yet, return empty (or cached fallback from any lang if needed)
   if (!langId) {
     try { console.warn('[CAT] getCategories: no languageId resolved'); } catch {}
     return [];
@@ -1740,7 +1780,7 @@ export type CreateShortNewsInput = {
     address?: string | null;
     source?: 'gps' | 'network' | 'fused' | 'manual' | 'unknown' | string;
   };
-  role?: 'CITIZEN_REPORTER';
+  role?: 'CITIZEN_REPORTER' | 'MEMBER' | 'HRCI_ADMIN';
 };
 export type CreateShortNewsResponse = { id: string; url?: string; raw?: any };
 // --- Idempotency & duplicate prevention helpers ---
@@ -1825,6 +1865,19 @@ export async function createShortNews(input: CreateShortNewsInput): Promise<Crea
       try { console.log('[API] createShortNews dedupe: recent submission found for', idemKey); } catch {}
       return recent.res;
     }
+    // Decide effective role: prefer authenticated user's role when allowed
+    let effectiveRole: 'CITIZEN_REPORTER' | 'MEMBER' | 'HRCI_ADMIN' = 'CITIZEN_REPORTER';
+    try {
+      const t = await loadTokens();
+      const roleUC = (t?.user?.role || '').toString().trim().toUpperCase();
+      if (roleUC === 'CITIZEN_REPORTER' || roleUC === 'MEMBER' || roleUC === 'HRCI_ADMIN') {
+        effectiveRole = roleUC as any;
+      } else if (input.role) {
+        const inUC = input.role.toString().trim().toUpperCase();
+        if (inUC === 'CITIZEN_REPORTER' || inUC === 'MEMBER' || inUC === 'HRCI_ADMIN') effectiveRole = inUC as any;
+      }
+    } catch {}
+
     const payload: any = {
       title: input.title,
       content: input.content,
@@ -1836,14 +1889,14 @@ export async function createShortNews(input: CreateShortNewsInput): Promise<Crea
       imageUrls: input.mediaUrls,
       media: Array.isArray(input.mediaUrls) ? input.mediaUrls.map(u => ({ url: u, type: 'image' })) : undefined,
       category: input.categoryId,
-      location: input.location,
+  location: input.location,
       // Some backends expect top-level coordinates; include redundantly for compatibility
       latitude: input.location?.latitude,
       longitude: input.location?.longitude,
       lat: input.location?.latitude,
       lng: input.location?.longitude,
       accuracy: input.location?.accuracyMeters,
-      role: input.role || 'CITIZEN_REPORTER',
+      role: effectiveRole,
     };
     // Provide idempotency key to backend too (header and body), best-effort
     payload.idempotencyKey = idemKey;

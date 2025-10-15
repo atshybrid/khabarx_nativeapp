@@ -28,6 +28,8 @@ export interface HrciIdCardFrontProps {
   signatureToStripGap?: number;
   /** Optional background color behind signature image (defaults transparent) */
   signatureBgColor?: string;
+  /** Optional bottom offset (design px) to lift signature overlay above details/footer */
+  signatureBottomOffset?: number;
 }
 
 const RED = '#FE0002';
@@ -51,7 +53,9 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   photoHeight,
   signatureToStripGap,
   signatureBgColor,
+  signatureBottomOffset,
 }) => {
+  const [footerHeight, setFooterHeight] = React.useState(0);
   // Use a fixed design coordinate space then scale for width to avoid font/layout drift
   const baseWidth = 720;
   const baseHeight = baseWidth * 1.42; // slightly tighter
@@ -71,17 +75,22 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   }
 
   // Dynamic sizing (design coordinate values before scale)
-  const dPhotoWidth = photoWidth ?? 132; // tuned size: large enough for clarity, leaves vertical room
-  const dPhotoHeight = photoHeight ?? 150;
+  const dPhotoWidth = photoWidth ?? 190; // further enlarged default for stronger presence
+  const dPhotoHeight = photoHeight ?? 215; // maintain portrait ratio
   const stampSize = Math.round(dPhotoWidth * 0.62); // proportional to photo
   const stampOffset = Math.min(18, Math.round(stampSize * 0.18)); // keep inside bounds
 
-  const gap = signatureToStripGap ?? 10; // increased default gap to raise label further from red strip
+  const gap = signatureToStripGap ?? 1; // minimal default gap so footer stays tight
   const signBg = signatureBgColor ?? 'transparent';
+  const signBottom = signatureBottomOffset ?? 44; // lift signature overlay higher by default
+  // Use measured footer height when available; fallback to 54 (14+25+14)
+  const measuredFooter = footerHeight > 0 ? footerHeight : 54;
+  const footerSafeBottom = Math.max(gap, 1) + measuredFooter;
+  const cardSignBottom = Math.max(signBottom, footerSafeBottom);
 
   return (
     <View style={[{ width, height }, style]}>
-      <View style={{ width: baseWidth, height: baseHeight, transform: [{ translateX: -(baseWidth * (1 - scale) / 2) }, { translateY: -(baseHeight * (1 - scale) / 2) }, { scale } ] }}>
+      <View style={{ width: baseWidth, height: baseHeight, overflow: 'visible', transform: [{ translateX: -(baseWidth * (1 - scale) / 2) }, { translateY: -(baseHeight * (1 - scale) / 2) }, { scale } ] }}>
   <View style={[styles.card, { width: baseWidth, height: baseHeight }]}> 
       {/* Top Red Title */}
       <View style={styles.topRed}>
@@ -135,16 +144,34 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
           </View>
         </View>
   <Text style={styles.cellName} numberOfLines={2}>{cellName}</Text>
-        {/* Details table (fixed order) */}
-        <View style={styles.detailsTable}>
-          <DetailRow label="Name" value={memberName} />
-          <DetailRow label="Designation" value={designation} />
-          <DetailRow label="ID No" value={idNumber} />
-          <DetailRow label="Contact No" value={contactNumber} />
-          <DetailRow label="Valid Upto" value={validUpto} />
+        {/* Details Area */}
+        <View style={styles.detailsArea}>
+          {/* Details table (fixed order) */}
+          <View style={styles.detailsTable}>
+            <DetailRow label="Name" value={memberName} />
+            <DetailRow label="Designation" value={designation} />
+            <DetailRow label="ID No" value={idNumber} />
+            <DetailRow label="Contact No" value={contactNumber} />
+            <DetailRow label="Valid Upto" value={validUpto} />
+          </View>
         </View>
-        {/* Signature Row */}
-        <View style={styles.signatureRow}>
+      </View>
+  {/* Bottom Red Strip */}
+  <View style={[styles.bottomRed, { marginTop: Math.max(gap, 1) }] } onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
+        <Text
+          style={styles.bottomText}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.6}
+          allowFontScaling={false}
+          ellipsizeMode="clip"
+        >
+          {"We take help 24x7 From (Police, CBI, Vigilance, NIA) & other Govt. Dept. against crime & corruption."}
+        </Text>
+      </View>
+      {/* Signature Overlay anchored to card (always above footer) */}
+      <View style={[styles.signatureOverlay, { right: 28, bottom: cardSignBottom }]} pointerEvents="box-none">
+        <View style={styles.signatureContainer}>
           {authorSignUri ? (
             <Image source={{ uri: authorSignUri }} style={[styles.authorSign, { backgroundColor: signBg }]} resizeMode="contain" />
           ) : (
@@ -153,10 +180,6 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
           <Text style={styles.signatureLabel}>Signature Issue Auth.</Text>
         </View>
       </View>
-  {/* Bottom Red Strip */}
-  <View style={[styles.bottomRed, { marginTop: Math.max(gap, 1) }] }>
-        <Text style={styles.bottomText}>WE TAKE HELP 24×7 FROM (POLICE, CBI, VIGILANCE, NIA) & OTHER GOVT. DEPT. AGAINST CRIME & CORRUPTION.</Text>
-      </View>
         </View>
       </View>
     </View>
@@ -164,13 +187,25 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
 };
 
 const DetailRow = ({ label, value }: { label: string; value: string }) => {
-  const isNameRow = label.trim().toLowerCase() === 'name';
+  const l = label.trim().toLowerCase();
+  const isNameRow = l === 'name';
+  const isDesignationRow = l === 'designation';
+  const autoFit = isNameRow || isDesignationRow;
+
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel} numberOfLines={1}>{label}</Text>
       <Text style={styles.colon}>:</Text>
-      {isNameRow ? (
-        <Text style={styles.detailValue}>{value}</Text>
+      {autoFit ? (
+        <Text
+          style={styles.detailValue}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+          allowFontScaling={false}
+        >
+          {value}
+        </Text>
       ) : (
         <Text style={styles.detailValue} numberOfLines={1} ellipsizeMode="tail">{value}</Text>
       )}
@@ -183,15 +218,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderColor: '#e5e7eb',
     borderWidth: 1,
+    overflow: 'visible',
   },
   topRed: { backgroundColor: RED, paddingVertical: 12, paddingHorizontal: 16 },
   topRedTitle: { color: '#fff', fontSize: 30, fontWeight: '900', textAlign: 'center', letterSpacing: 0.5 },
   blueBand: { backgroundColor: BLUE, paddingVertical: 14, paddingHorizontal: 20 },
   regLine: { color: '#ffffff', fontSize: 20, fontWeight: '700', textAlign: 'center', lineHeight: 26, letterSpacing: 0.5 },
-  bodySection: { flex: 1, alignItems: 'center', paddingTop: 12, paddingHorizontal: 28 },
+  bodySection: { flex: 1, alignItems: 'center', paddingTop: 12, paddingHorizontal: 28, position: 'relative', zIndex: 5, elevation: 2, overflow: 'visible' },
   logoWrapper: { marginBottom: 12 },
-  logo: { width: 0.19 * 720, height: 0.19 * 720, borderRadius: 0.095 * 720, resizeMode: 'cover', borderWidth: 4, borderColor: '#ffffff' },
-  logoPlaceholder: { width: 0.2 * 720, height: 0.2 * 720, borderRadius: 0.1 * 720, backgroundColor: '#d4d4d8', alignItems: 'center', justifyContent: 'center' },
+  logo: { width: 0.22 * 720, height: 0.22 * 720, borderRadius: 0.11 * 720, resizeMode: 'cover', borderWidth: 4, borderColor: '#ffffff' },
+  logoPlaceholder: { width: 0.23 * 720, height: 0.23 * 720, borderRadius: 0.115 * 720, backgroundColor: '#d4d4d8', alignItems: 'center', justifyContent: 'center' },
   placeholderText: { textAlign: 'center', color: '#111827', fontWeight: '700' },
   placeholderTextSmall: { textAlign: 'center', color: '#111827', fontSize: 12, fontWeight: '600' },
   jurisdiction: { fontSize: 26, fontWeight: '900', color: BLUE_TEXT, marginTop: 0, textAlign: 'center', letterSpacing: 0.5, lineHeight: 30 },
@@ -200,19 +236,22 @@ const styles = StyleSheet.create({
   photoStampRow: { marginTop: 6, marginBottom: 8 },
   photoShell: { backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#e5e7eb' },
   cellName: { color: BLUE_TEXT, fontSize: 30, fontWeight: '900', marginTop: 18, textAlign: 'center', letterSpacing: 0.5, lineHeight: 32 },
-  detailsTable: { marginTop: 14, alignSelf: 'center' },
-  detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 3, flexWrap: 'nowrap' },
-  detailLabel: { width: 160, fontSize: 18, fontWeight: '700', color: '#111827', letterSpacing: 0.25, textAlign: 'left' },
-  colon: { width: 14, fontSize: 18, fontWeight: '700', color: '#111827', textAlign: 'center' },
-  detailValue: { width: 320, fontSize: 18, fontWeight: '700', color: '#111827', lineHeight: 22, textAlign: 'left' },
-  signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: 26 },
+  detailsArea: { position: 'relative', width: '100%', overflow: 'visible' },
+  detailsTable: { marginTop: 14, alignSelf: 'center', position: 'relative', zIndex: 1 },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 2, flexWrap: 'nowrap' },
+  detailLabel: { width: 160, fontSize: 20, fontWeight: '700', color: '#111827', letterSpacing: 0.25, textAlign: 'left', lineHeight: 30 },
+  colon: { width: 14, fontSize: 20, fontWeight: '700', color: '#111827', textAlign: 'center', lineHeight: 30 },
+  detailValue: { width: 320, fontSize: 20, fontWeight: '700', color: '#111827', lineHeight: 30, textAlign: 'left' },
+  signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: 'auto', marginTop: 0, position: 'absolute', right: 0, bottom: 12, zIndex: 20, elevation: 8 },
+  signatureOverlay: { position: 'absolute', alignItems: 'flex-end', zIndex: 999, elevation: 12 },
+  signatureContainer: { flexDirection: 'column', alignItems: 'flex-end' },
   signatureBox: { display: 'none' },
-  authorSign: { width: 190, height: 90 },
+  authorSign: { width: 190, height: 90, position: 'relative', zIndex: 1000, elevation: 12 },
   authorSignPlaceholder: { backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center', borderWidth: 0 },
-  // signatureLabel marginTop set negative to allow signature image to visually overlap the label area
-  signatureLabel: { fontSize: 20, fontWeight: '900', color: BLUE_TEXT, marginTop: -14, letterSpacing: 0.5, alignSelf: 'flex-end' },
-  bottomRed: { backgroundColor: RED, paddingVertical: 14, paddingHorizontal: 16, marginTop: 0 },
-  bottomText: { color: '#ffffff', textAlign: 'center', fontSize: 14, fontWeight: '800', letterSpacing: 0.4, lineHeight: 18 },
+  // signatureLabel overlays on top of the signature image slightly
+  signatureLabel: { fontSize: 20, fontWeight: '900', color: BLUE_TEXT, marginTop: -16, letterSpacing: 0.5, alignSelf: 'flex-end', position: 'relative', zIndex: 1002, elevation: 14 },
+  bottomRed: { backgroundColor: RED, paddingVertical: 14, paddingHorizontal: 16, marginTop: 0, position: 'relative', zIndex: 1, elevation: 1 },
+  bottomText: { color: '#ffffff', textAlign: 'center', fontSize: 14, fontWeight: '800', letterSpacing: 0.2, lineHeight: 22, marginHorizontal: 40 },
 });
 
 export default HrciIdCardFrontExact;

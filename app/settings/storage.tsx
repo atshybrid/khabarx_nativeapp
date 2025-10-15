@@ -71,7 +71,13 @@ export default function StorageScreen() {
       setClearing(true);
       // Clear only app caches, not auth or preferences. Simplified: nuke select keys.
       const keys = await AsyncStorage.getAllKeys();
-      const keep = new Set<string>(['jwt','refreshToken','jwtExpiresAt','authLanguageId','authUserJSON','selectedLanguage','profile_location','profile_location_obj','last_login_mobile','pref_dl_wifi_only','pref_dl_quality','pref_theme','pref_font_scale','pref_reading_mode']);
+      const keep = new Set<string>([
+        'jwt','refreshToken','jwtExpiresAt','authLanguageId','authUserJSON',
+        'selectedLanguage',
+        // preserve local language overrides for member/admin
+        'language_local','language_local_id','language_local_code','language_local_name',
+        'profile_location','profile_location_obj','last_login_mobile',
+        'pref_dl_wifi_only','pref_dl_quality','pref_theme','pref_font_scale','pref_reading_mode']);
       const toRemove = keys.filter(k => !keep.has(k) && !k.startsWith('expo') && !k.startsWith('RNAsyncStorageProvider'));
       if (toRemove.length) await AsyncStorage.multiRemove(toRemove);
       // Optionally clear cache directory contents
