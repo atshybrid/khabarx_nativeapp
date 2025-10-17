@@ -24,7 +24,27 @@ type AvailRes = {
     levelAggregate?: any;
   } 
 };
-type OrderRes = { success?: boolean; data?: { order: { orderId: string; amount: number; currency: string; provider: string | null; providerOrderId?: string | null; providerKeyId?: string | null; } } };
+type OrderRes = { 
+  success?: boolean; 
+  data?: { 
+    order: { 
+      orderId: string; 
+      amount: number; 
+      currency: string; 
+      provider: string | null; 
+      providerOrderId?: string | null; 
+      providerKeyId?: string | null;
+      breakdown?: {
+        baseAmount: number;
+        discountAmount: number;
+        discountPercent: number | null;
+        appliedType: string | null;
+        finalAmount: number;
+        note: string | null;
+      } | null;
+    } 
+  } 
+};
 
 export default function HrciAvailabilityScreen() {
   const router = useRouter();
@@ -148,13 +168,16 @@ export default function HrciAvailabilityScreen() {
       const res = await request<OrderRes>(`/memberships/payfirst/orders`, { method: 'POST', body });
       const order = res?.data?.order as any;
       if (!order?.orderId) throw new Error('Order not created');
+      // Prefer finalAmount from breakdown when present
+      const effectiveAmount: number = Number(order?.breakdown?.finalAmount ?? order?.amount ?? 0);
       const payOrderObj = {
         orderId: order.orderId,
-        amount: Number(order.amount || 0),
+        amount: effectiveAmount,
         currency: order.currency || 'INR',
         provider: order.provider || null,
         providerOrderId: order.providerOrderId || null,
         providerKeyId: order.providerKeyId || null,
+        breakdown: order?.breakdown ?? null,
         createdAt: Date.now()
       };
       setPayOrder(payOrderObj);
@@ -173,13 +196,15 @@ export default function HrciAvailabilityScreen() {
               const options: any = {
                 key: order.providerKeyId,
                 order_id: order.providerOrderId,
+                // Ensure the checkout shows the final amount (paise)
+                amount: effectiveAmount,
                 name: 'Membership Contribution',
                 description: `${designationName || String(designationCode)} • ${cellName || ''} • ${String(level)}`.replace(/\s+•\s+/g, ' • ').trim(),
                 theme: { color: '#FE0002' },
                 prefill: {},
                 retry: { enabled: true, max_count: 1 },
               };
-              console.log('[Razorpay] Opening checkout with options:', options);
+              console.log('[Razorpay] Opening checkout with options:', { ...options, key: '***', order_id: options.order_id });
               const result = await checkoutAPI.open(options);
               console.log('[Razorpay] Payment result:', result);
               

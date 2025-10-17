@@ -10,6 +10,15 @@ export interface HrciPayOrder {
   provider: string | null;
   providerOrderId?: string | null;
   providerKeyId?: string | null;
+  // Optional pricing breakdown for diagnostics
+  breakdown?: {
+    baseAmount: number;
+    discountAmount: number;
+    discountPercent: number | null;
+    appliedType: string | null;
+    finalAmount: number;
+    note: string | null;
+  } | null;
   createdAt?: number; // local creation time (ms)
   paidAt?: string | null; // server ISO timestamp (if already paid)
   restoredFrom?: string; // metadata for diagnostics (e.g., 'pendingRegistration')
