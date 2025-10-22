@@ -579,17 +579,31 @@ export default function HrciDashboard() {
         <View style={styles.actionsContainer}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
-            {/* Show KYC prompt if member/admin does not have verified KYC */}
+            {/* KYC card logic: show Pending status, block submit page; hide when verified */}
             {(() => {
               const statusRaw = String(membership?.kyc?.status || '').toUpperCase();
               const hasKycFlag = membership?.kyc?.hasKyc === true;
               const kycOk = hasKycFlag || (statusRaw === 'APPROVED' || statusRaw === 'VERIFIED');
-              if (kycOk) return null;
+              if (kycOk) return null; // Verified: no card
+
+              // Pending: show status and don't navigate to submit
+              if (statusRaw === 'PENDING' || statusRaw === 'SUBMITTED') {
+                return (
+                  <ActionCard
+                    title="KYC Pending"
+                    subtitle="Under verification"
+                    icon="shield-sync"
+                    onPress={() => Alert.alert('KYC Pending', 'Your KYC is under verification. You will be notified once it is approved.')}
+                  />
+                );
+              }
+
+              // Rejected or not started: allow completing KYC
               return (
                 <ActionCard
                   title="Complete KYC"
-                  subtitle="Verify to unlock features"
-                  icon="shield-check"
+                  subtitle={statusRaw === 'REJECTED' ? 'Rejected — resubmit details' : 'Verify to unlock features'}
+                  icon={statusRaw === 'REJECTED' ? 'shield-alert' : 'shield-check'}
                   onPress={() => router.push('/hrci/kyc/complete' as any)}
                 />
               );

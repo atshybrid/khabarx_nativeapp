@@ -1,12 +1,15 @@
 import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/context/AuthContextNew';
+import { request } from '@/services/http';
 import { submitKYC, uploadKYCDocument } from '@/services/kyc';
 import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import LottieView from 'lottie-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     Image,
     KeyboardAvoidingView,
@@ -28,6 +31,7 @@ interface DocumentUpload {
 }
 
 export default function KYCCompletionScreen() {
+  const { tokens } = useAuth();
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(1); // 1: Documents, 2: Details, 3: Review, 4: Success
   
@@ -39,10 +43,38 @@ export default function KYCCompletionScreen() {
   // Form states
   const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [panNumber, setPanNumber] = useState('');
-  const [membershipId, setMembershipId] = useState(''); // This should come from auth context
+  const [membershipId, setMembershipId] = useState(''); // set from auth/membership API automatically
   
   // Upload states
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
+
+  // Resolve membershipId from JWT tokens first, then fallback to /memberships/me
+  useEffect(() => {
+    let mounted = true;
+    const derive = async () => {
+      // Try from token payload
+      const fromToken = (tokens as any)?.user?.membershipId
+        || (tokens as any)?.user?.membership?.id
+        || (tokens as any)?.user?.membership_id
+        || '';
+      if (fromToken) {
+        if (mounted) setMembershipId(String(fromToken));
+        return;
+      }
+      // Fallback: fetch membership profile
+      try {
+        const res = await request<any>('/memberships/me' as any, { method: 'GET' });
+        const data = (res as any)?.data || res;
+        const mid = data?.id || data?.membershipId || data?.membership?.id;
+        if (mid && mounted) setMembershipId(String(mid));
+      } catch {
+        // Soft fail; UI will block submit if missing
+        try { console.warn('[KYC] Could not resolve membershipId from API'); } catch {}
+      }
+    };
+    derive();
+    return () => { mounted = false; };
+  }, [tokens]);
 
   const formatAadhaar = (text: string) => {
     const cleaned = text.replace(/\D/g, '');
@@ -189,7 +221,7 @@ export default function KYCCompletionScreen() {
   };
 
   const canProceedToStep3 = () => {
-    return validateAadhaar(aadhaarNumber) && validatePAN(panNumber) && membershipId.trim();
+    return validateAadhaar(aadhaarNumber) && validatePAN(panNumber) && Boolean(membershipId.trim());
   };
 
   const handleSubmit = async () => {
@@ -207,7 +239,7 @@ export default function KYCCompletionScreen() {
       setLoading(true);
       
       await submitKYC({
-        membershipId: membershipId.trim(),
+  membershipId: membershipId.trim(),
         aadhaarNumber: aadhaarNumber.replace(/\D/g, ''),
         aadhaarFrontUrl: aadhaarFront.uploadedUrl,
         aadhaarBackUrl: aadhaarBack.uploadedUrl,
@@ -338,13 +370,11 @@ export default function KYCCompletionScreen() {
       <View style={styles.formContainer}>
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Membership ID</Text>
-          <TextInput
-            style={styles.textInput}
-            value={membershipId}
-            onChangeText={setMembershipId}
-            placeholder="Enter your membership ID"
-            placeholderTextColor="#9CA3AF"
-          />
+          <View style={[styles.textInput, { justifyContent: 'center' }]}> 
+            <Text style={{ color: '#111', fontSize: 16 }} numberOfLines={1}>
+              {membershipId ? membershipId : 'Fetching…'}
+            </Text>
+          </View>
         </View>
 
         <View style={styles.inputGroup}>
@@ -457,7 +487,10 @@ export default function KYCCompletionScreen() {
           disabled={loading}
         >
           {loading ? (
-            <LottieView source={require('@/assets/lotti/hrci_loader_svg.json')} autoPlay loop style={{ width: 20, height: 20 }} />
+            <>
+              <ActivityIndicator color="#fff" size="small" />
+              <Text style={styles.primaryBtnText}>Submitting…</Text>
+            </>
           ) : (
             <>
               <Text style={styles.primaryBtnText}>Submit KYC</Text>
