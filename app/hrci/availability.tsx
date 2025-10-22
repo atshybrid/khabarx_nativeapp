@@ -4,7 +4,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
@@ -58,6 +58,28 @@ export default function HrciAvailabilityScreen() {
   const [validityDays, setValidityDays] = useState<number | null>(null);
   const { setPayOrder, setRazorpayResult } = useHrciOnboarding();
   const [confirming, setConfirming] = useState(false);
+  // Pre-created order to display discount breakdown on the screen
+  const [preOrder, setPreOrder] = useState<null | {
+    orderId: string;
+    amount: number;
+    currency: string;
+    provider: string | null;
+    providerOrderId?: string | null;
+    providerKeyId?: string | null;
+    breakdown?: {
+      baseAmount: number;
+      discountAmount: number;
+      discountPercent: number | null;
+      appliedType: string | null;
+      finalAmount: number;
+      note: string | null;
+    } | null;
+    createdAt: number;
+  }>(null);
+  const [preLoading, setPreLoading] = useState(false);
+  const preTriedRef = useRef(false);
+
+  const fmtINRPaise = (amtPaise: number) => `₹ ${(amtPaise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 0 })}`;
 
   useEffect(() => {
     (async () => {
@@ -146,8 +168,143 @@ export default function HrciAvailabilityScreen() {
     });
   }, [loading, remaining, error, fee, validityDays, canProceed]);
 
+  // Pre-create order to fetch discount breakdown and show on screen
+  useEffect(() => {
+    const run = async () => {
+      if (!canProceed) return;
+      if (preTriedRef.current || preLoading || preOrder) return;
+      preTriedRef.current = true;
+      setPreLoading(true);
+      try {
+        const body: any = {
+          mobileNumber: String(mobileNumber || ''),
+          cell: cellCode || cellId,
+          designationCode,
+          level,
+        };
+        if (level === 'ZONE' && geo.zone) body.zone = geo.zone;
+        else if (level === 'STATE' && geo.hrcStateId) body.hrcStateId = geo.hrcStateId;
+        else if (level === 'DISTRICT' && geo.hrcDistrictId) body.hrcDistrictId = geo.hrcDistrictId;
+        else if (level === 'MANDAL' && geo.hrcMandalId) body.hrcMandalId = geo.hrcMandalId;
+
+        const res = await request<OrderRes>(`/memberships/payfirst/orders`, { method: 'POST', body });
+        const order = res?.data?.order as any;
+        if (order?.orderId) {
+          const pre = {
+            orderId: order.orderId,
+            amount: Number(order?.breakdown?.finalAmount ?? order?.amount ?? 0),
+            currency: order.currency || 'INR',
+            provider: order.provider || null,
+            providerOrderId: order.providerOrderId || null,
+            providerKeyId: order.providerKeyId || null,
+            breakdown: order?.breakdown ?? null,
+            createdAt: Date.now(),
+          };
+          setPreOrder(pre);
+          // Don't open checkout here; we'll show it on Proceed
+        }
+      } catch {
+        // Soft-fail; user can still proceed and we'll create order then
+        console.warn('[HRCI Availability] Pre-create order failed');
+      } finally {
+        setPreLoading(false);
+      }
+    };
+    run();
+  }, [canProceed, mobileNumber, cellCode, cellId, designationCode, level, geo, preLoading, preOrder]);
+
   const createOrder = async () => {
     try {
+      // If we already have a pre-created order with breakdown, reuse it
+      if (preOrder && preOrder.provider === 'razorpay' && preOrder.providerOrderId && preOrder.providerKeyId) {
+        const order = preOrder;
+        const effectiveAmount = order.amount;
+        const breakdown = order.breakdown ?? null;
+        const fmtINR = fmtINRPaise;
+        // Persist and continue to Razorpay
+        setPayOrder(order);
+        try { await persistPayOrder(order as any); } catch {}
+        // Optional: show breakdown dialog before payment
+        if (breakdown && typeof breakdown.finalAmount === 'number') {
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const baseTxt = typeof breakdown.baseAmount === 'number' ? fmtINR(breakdown.baseAmount) : null;
+              const discPct = breakdown.discountPercent != null ? `${breakdown.discountPercent}%` : null;
+              const discAmt = typeof breakdown.discountAmount === 'number' ? fmtINR(breakdown.discountAmount) : null;
+              const finalTxt = fmtINR(breakdown.finalAmount);
+              const lines = [
+                baseTxt ? `Base amount: ${baseTxt}` : null,
+                discPct || discAmt ? `Discount: ${[discPct, discAmt].filter(Boolean).join(' • ')}` : null,
+                `You pay: ${finalTxt}`,
+              ].filter(Boolean).join('\n');
+              Alert.alert('Price breakdown', lines, [
+                { text: 'Cancel', style: 'cancel', onPress: () => reject(new Error('Payment cancelled')) },
+                { text: 'Pay now', style: 'default', onPress: () => resolve() },
+              ], { cancelable: true });
+            });
+          } catch {
+            return; // cancelled
+          }
+        }
+        if (Platform.OS !== 'web') {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const RazorpayCheckout = require('react-native-razorpay');
+            const checkoutAPI = RazorpayCheckout.default || RazorpayCheckout;
+            if (checkoutAPI && typeof checkoutAPI.open === 'function') {
+              const options: any = {
+                key: order.providerKeyId,
+                order_id: order.providerOrderId,
+                amount: effectiveAmount,
+                name: 'Membership Contribution',
+                description: `${designationName || String(designationCode)} • ${cellName || ''} • ${String(level)}`.replace(/\s+•\s+/g, ' • ').trim(),
+                theme: { color: '#FE0002' },
+                prefill: {},
+                retry: { enabled: true, max_count: 1 },
+              };
+              const result = await checkoutAPI.open(options);
+              if (result && result.razorpay_order_id && result.razorpay_payment_id && result.razorpay_signature) {
+                setRazorpayResult({
+                  razorpay_order_id: result.razorpay_order_id,
+                  razorpay_payment_id: result.razorpay_payment_id,
+                  razorpay_signature: result.razorpay_signature,
+                });
+                setConfirming(true);
+                try {
+                  await request<any>(`/memberships/payfirst/confirm`, {
+                    method: 'POST',
+                    body: {
+                      orderId: order.orderId,
+                      status: 'SUCCESS',
+                      provider: order.provider,
+                      razorpay_order_id: result.razorpay_order_id,
+                      razorpay_payment_id: result.razorpay_payment_id,
+                      razorpay_signature: result.razorpay_signature,
+                    },
+                  });
+                } catch (e:any) {
+                  console.warn('[Payfirst] confirm success failed', e?.message);
+                } finally {
+                  setConfirming(false);
+                }
+              }
+            } else {
+              Alert.alert('Razorpay Setup Issue', 'The Razorpay module is not properly configured. Please rebuild the development client with the correct native modules.');
+            }
+          } catch {
+            setConfirming(true);
+            try {
+              await request<any>(`/memberships/payfirst/confirm`, { method: 'POST', body: { orderId: order.orderId, status: 'FAILED', provider: order.provider } });
+            } catch {}
+            finally { setConfirming(false); }
+            Alert.alert('Payment Setup Required', 'Razorpay is not available in this build. Please rebuild the development client to enable payments.');
+          }
+        } else {
+          Alert.alert('Not supported on web', 'Payment is not supported in web builds. Please use the mobile app.');
+        }
+        router.replace('/hrci/register' as any);
+        return;
+      }
       // Build body based on level as per API specification
       const body: any = {
         mobileNumber: String(mobileNumber || ''),
@@ -173,7 +330,7 @@ export default function HrciAvailabilityScreen() {
       const effectiveAmount: number = Number(order?.breakdown?.finalAmount ?? order?.amount ?? 0);
       // Build a human-readable price breakdown (if available)
       const breakdown = order?.breakdown ?? null;
-      const fmtINR = (amt: number) => `₹ ${(amt / 100).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 0 })}`;
+  const fmtINR = fmtINRPaise;
       const payOrderObj = {
         orderId: order.orderId,
         amount: effectiveAmount,
@@ -393,6 +550,39 @@ export default function HrciAvailabilityScreen() {
             )}
           </View>
         </View>
+
+        {/* Price Breakdown (from pre-created order) */}
+        {preOrder?.breakdown && (
+          <View style={[styles.summaryCard, { marginTop: 16 }]}> 
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="cash-check" size={24} color="#FE0002" />
+              <Text style={styles.cardTitle}>Price Breakdown</Text>
+            </View>
+            <View style={styles.breakdownRow}>
+              <Text style={styles.breakdownLabel}>Base amount</Text>
+              <Text style={styles.breakdownValue}>{fmtINRPaise(preOrder.breakdown!.baseAmount)}</Text>
+            </View>
+            {(typeof preOrder.breakdown!.discountPercent === 'number' || typeof preOrder.breakdown!.discountAmount === 'number') && (
+              <View style={styles.breakdownRow}>
+                <Text style={styles.breakdownLabel}>Discount</Text>
+                <Text style={[styles.breakdownValue, { color: '#16a34a' }]}>
+                  {[
+                    preOrder.breakdown!.discountPercent != null ? `${preOrder.breakdown!.discountPercent}%` : null,
+                    typeof preOrder.breakdown!.discountAmount === 'number' ? fmtINRPaise(preOrder.breakdown!.discountAmount) : null,
+                  ].filter(Boolean).join(' • ')}
+                </Text>
+              </View>
+            )}
+            <View style={styles.breakdownDivider} />
+            <View style={styles.breakdownRow}>
+              <Text style={[styles.breakdownLabel, { fontWeight: '800', color: '#0f172a' }]}>You pay</Text>
+              <Text style={[styles.breakdownValue, { fontWeight: '800', color: '#0f172a' }]}>{fmtINRPaise(preOrder.breakdown!.finalAmount)}</Text>
+            </View>
+            {preOrder.breakdown?.note ? (
+              <Text style={styles.breakdownNote}>{preOrder.breakdown?.note}</Text>
+            ) : null}
+          </View>
+        )}
       </View>
 
       {/* Fixed Bottom Action */}
@@ -557,6 +747,12 @@ const styles = StyleSheet.create({
   },
   detailLabel: { fontSize: 14, color: '#64748b', fontWeight: '600' },
   detailValue: { fontSize: 14, color: '#1e293b', fontWeight: '700', flex: 1, textAlign: 'right' },
+  // Price breakdown styles
+  breakdownRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  breakdownLabel: { fontSize: 14, color: '#64748b', fontWeight: '600' },
+  breakdownValue: { fontSize: 16, color: '#1e293b', fontWeight: '700' },
+  breakdownDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 8 },
+  breakdownNote: { marginTop: 8, fontSize: 12, color: '#64748b' },
 });
 
 // Helper component for detail items
