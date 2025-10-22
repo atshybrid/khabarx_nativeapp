@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
 import { persistPayOrder } from '../../services/hrciPayment';
@@ -15,7 +15,6 @@ type AvailRes = {
   success?: boolean; 
   data?: { 
     designation?: { capacity: number; used: number; remaining: number; fee?: number; validityDays?: number };
-    // Direct properties (new API structure)
     capacity?: number;
     used?: number;
     remaining?: number; 
@@ -58,10 +57,9 @@ export default function HrciAvailabilityScreen() {
   const [validityDays, setValidityDays] = useState<number | null>(null);
   const { setPayOrder, setRazorpayResult } = useHrciOnboarding();
   const [confirming, setConfirming] = useState(false);
-  // Pre-created order to display discount breakdown on the screen
   const [preOrder, setPreOrder] = useState<null | {
     orderId: string;
-    amount: number;
+    amount: number; // rupees for UI
     currency: string;
     provider: string | null;
     providerOrderId?: string | null;
@@ -79,20 +77,13 @@ export default function HrciAvailabilityScreen() {
   const [preLoading, setPreLoading] = useState(false);
   const preTriedRef = useRef(false);
 
-  // Backend returns amounts in rupees; UI shows rupees; Razorpay expects paise
+  // UI shows rupees; Razorpay expects paise
   const fmtINR = (amtRupees: number) => `₹ ${Number(amtRupees || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
+  // Availability check
   useEffect(() => {
     (async () => {
       try {
-        console.log('[HRCI Availability] Starting availability check...');
-        console.log('[HRCI Availability] Input params:', {
-          cellId,
-          designationCode, 
-          level,
-          geo
-        });
-
         const q = new URLSearchParams({
           cell: String(cellId),
           designationCode: String(designationCode),
@@ -103,45 +94,19 @@ export default function HrciAvailabilityScreen() {
         if (geo.hrcStateId) q.set('hrcStateId', String(geo.hrcStateId));
         if (geo.hrcDistrictId) q.set('hrcDistrictId', String(geo.hrcDistrictId));
         if (geo.hrcMandalId) q.set('hrcMandalId', String(geo.hrcMandalId));
-        
-        // Add includeAggregate parameter that was missing
         q.set('includeAggregate', 'true');
-        
-        const apiUrl = `/memberships/public/availability?${q.toString()}`;
-        console.log('[HRCI Availability] API URL:', apiUrl);
-        
-        const apiStartTime = Date.now();
-        const res = await request<AvailRes>(`/memberships/public/availability?${q.toString()}`);
-        const apiDuration = Date.now() - apiStartTime;
-        
-        console.log('[HRCI Availability] API completed in', apiDuration + 'ms');
-        console.log('[HRCI Availability] Raw API response:', res);
 
-        // Check both possible response structures
+        const res = await request<AvailRes>(`/memberships/public/availability?${q.toString()}`);
         const remainingSeats = res?.data?.designation?.remaining ?? res?.data?.remaining ?? null;
         const feeAmount = res?.data?.designation?.fee ?? res?.data?.fee ?? null;
         const validity = res?.data?.designation?.validityDays ?? res?.data?.validityDays ?? null;
-        
-        console.log('[HRCI Availability] Processed data:', {
-          remainingSeats,
-          feeAmount,
-          validity,
-          dataStructure: res?.data ? Object.keys(res.data) : 'no data'
-        });
-
         setRemaining(remainingSeats);
         setFee(feeAmount);
         setValidityDays(validity);
       } catch (e: any) {
-        console.error('[HRCI Availability] API call failed:', {
-          message: e?.message,
-          status: e?.status,
-          stack: e?.stack
-        });
         setError(e?.message || 'Failed to check availability');
       } finally {
         setLoading(false);
-        console.log('[HRCI Availability] Check completed');
       }
     })();
   }, [level, cellId, designationCode, geo]);
@@ -227,21 +192,28 @@ export default function HrciAvailabilityScreen() {
         setPayOrder(order);
         try { await persistPayOrder(order as any); } catch {}
         if (Platform.OS !== 'web') {
+          // First, ensure SDK exists; if require fails, show setup alert
+          let checkoutAPI: any;
           try {
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             const RazorpayCheckout = require('react-native-razorpay');
-            const checkoutAPI = RazorpayCheckout.default || RazorpayCheckout;
-            if (checkoutAPI && typeof checkoutAPI.open === 'function') {
-              const options: any = {
-                key: order.providerKeyId,
-                order_id: order.providerOrderId,
-                amount: amountPaise,
-                name: 'Membership Contribution',
-                description: `${designationName || String(designationCode)} • ${cellName || ''} • ${String(level)}`.replace(/\s+•\s+/g, ' • ').trim(),
-                theme: { color: '#FE0002' },
-                prefill: {},
-                retry: { enabled: true, max_count: 1 },
-              };
+            checkoutAPI = RazorpayCheckout.default || RazorpayCheckout;
+          } catch {
+            Alert.alert('Payment Setup Required', 'Razorpay is not available in this build. Please rebuild the development client to enable payments.');
+            return;
+          }
+          if (checkoutAPI && typeof checkoutAPI.open === 'function') {
+            const options: any = {
+              key: order.providerKeyId,
+              order_id: order.providerOrderId,
+              amount: amountPaise,
+              name: 'Membership Contribution',
+              description: `${designationName || String(designationCode)} • ${cellName || ''} • ${String(level)}`.replace(/\s+•\s+/g, ' • ').trim(),
+              theme: { color: '#FE0002' },
+              prefill: {},
+              retry: { enabled: true, max_count: 1 },
+            };
+            try {
               const result = await checkoutAPI.open(options);
               if (result && result.razorpay_order_id && result.razorpay_payment_id && result.razorpay_signature) {
                 setRazorpayResult({
@@ -270,16 +242,21 @@ export default function HrciAvailabilityScreen() {
                   setConfirming(false);
                 }
               }
-            } else {
-              Alert.alert('Razorpay Setup Issue', 'The Razorpay module is not properly configured. Please rebuild the development client with the correct native modules.');
+            } catch (err: any) {
+              // User cancelled or an error occurred in checkout. Do not show setup alert.
+              const msg = String(err?.description || err?.error || err?.message || '').toLowerCase();
+              const isCancelled = err?.code === 0 || msg.includes('cancel');
+              setConfirming(true);
+              try {
+                await request<any>(`/memberships/payfirst/confirm`, { method: 'POST', body: { orderId: order.orderId, status: isCancelled ? 'FAILED' : 'FAILED', provider: order.provider } });
+              } catch {}
+              finally { setConfirming(false); }
+              if (!isCancelled) {
+                Alert.alert('Payment Failed', 'Could not complete the payment. Please try again.');
+              }
             }
-          } catch {
-            setConfirming(true);
-            try {
-              await request<any>(`/memberships/payfirst/confirm`, { method: 'POST', body: { orderId: order.orderId, status: 'FAILED', provider: order.provider } });
-            } catch {}
-            finally { setConfirming(false); }
-            Alert.alert('Payment Setup Required', 'Razorpay is not available in this build. Please rebuild the development client to enable payments.');
+          } else {
+            Alert.alert('Razorpay Setup Issue', 'The Razorpay module is not properly configured. Please rebuild the development client with the correct native modules.');
           }
         } else {
           Alert.alert('Not supported on web', 'Payment is not supported in web builds. Please use the mobile app.');
@@ -328,29 +305,31 @@ export default function HrciAvailabilityScreen() {
   if (order.provider === 'razorpay' && order.providerOrderId && order.providerKeyId) {
         // Open Razorpay Checkout (guarded dynamic require so build doesn't break if SDK isn't installed)
         if (Platform.OS !== 'web') {
+          // First, ensure SDK exists; if require fails, show setup alert
+          let checkoutAPI: any;
           try {
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             const RazorpayCheckout = require('react-native-razorpay');
-            console.log('[Razorpay] Module loaded:', !!RazorpayCheckout, 'default export:', typeof RazorpayCheckout.default, 'open method:', typeof RazorpayCheckout?.open);
-            
-            // Try both default export and direct export
-            const checkoutAPI = RazorpayCheckout.default || RazorpayCheckout;
-            if (checkoutAPI && typeof checkoutAPI.open === 'function') {
-              const options: any = {
-                key: order.providerKeyId,
-                order_id: order.providerOrderId,
-                // IMPORTANT: Pass final amount in paise to Razorpay
-                amount: amountPaise,
-                name: 'Membership Contribution',
-                description: `${designationName || String(designationCode)} • ${cellName || ''} • ${String(level)}`.replace(/\s+•\s+/g, ' • ').trim(),
-                theme: { color: '#FE0002' },
-                prefill: {},
-                retry: { enabled: true, max_count: 1 },
-              };
-              console.log('[Razorpay] Opening checkout with options:', { ...options, key: '***', order_id: options.order_id });
+            checkoutAPI = RazorpayCheckout.default || RazorpayCheckout;
+          } catch (err: any) {
+            console.warn('[Razorpay] require failed:', err?.message);
+            Alert.alert('Payment Setup Required', 'Razorpay is not available in this build. Please rebuild the development client to enable payments.');
+            return;
+          }
+          if (checkoutAPI && typeof checkoutAPI.open === 'function') {
+            const options: any = {
+              key: order.providerKeyId,
+              order_id: order.providerOrderId,
+              // IMPORTANT: Pass final amount in paise to Razorpay
+              amount: amountPaise,
+              name: 'Membership Contribution',
+              description: `${designationName || String(designationCode)} • ${cellName || ''} • ${String(level)}`.replace(/\s+•\s+/g, ' • ').trim(),
+              theme: { color: '#FE0002' },
+              prefill: {},
+              retry: { enabled: true, max_count: 1 },
+            };
+            try {
               const result = await checkoutAPI.open(options);
-              console.log('[Razorpay] Payment result:', result);
-              
               // result has: razorpay_order_id, razorpay_payment_id, razorpay_signature
               if (result && result.razorpay_order_id && result.razorpay_payment_id && result.razorpay_signature) {
                 setRazorpayResult({
@@ -380,29 +359,24 @@ export default function HrciAvailabilityScreen() {
                   setConfirming(false);
                 }
               }
-            } else {
-              console.warn('[Razorpay] Module found but open method unavailable. Module:', RazorpayCheckout);
-              Alert.alert('Razorpay Setup Issue', 'The Razorpay module is not properly configured. Please rebuild the development client with the correct native modules.');
+            } catch (err: any) {
+              // User cancelled or an error occurred in checkout. Do not show setup alert.
+              const msg = String(err?.description || err?.error || err?.message || '').toLowerCase();
+              const isCancelled = err?.code === 0 || msg.includes('cancel');
+              setConfirming(true);
+              try {
+                await request<any>(`/memberships/payfirst/confirm`, {
+                  method: 'POST',
+                  body: { orderId: order.orderId, status: isCancelled ? 'FAILED' : 'FAILED', provider: order.provider },
+                });
+              } catch {}
+              finally { setConfirming(false); }
+              if (!isCancelled) {
+                Alert.alert('Payment Failed', 'Could not complete the payment. Please try again.');
+              }
             }
-          } catch (err: any) {
-            console.warn('[Razorpay] SDK not available or failed to open checkout:', err);
-            // Attempt to confirm failed/cancelled attempts as FAILED
-            setConfirming(true);
-            try {
-              await request<any>(`/memberships/payfirst/confirm`, {
-                method: 'POST',
-                body: {
-                  orderId: order.orderId,
-                  status: 'FAILED',
-                  provider: order.provider,
-                },
-              });
-            } catch (e:any) {
-              console.warn('[Payfirst] confirm failed (FAILED status)', e?.message);
-            } finally {
-              setConfirming(false);
-            }
-            Alert.alert('Payment Setup Required', 'Razorpay is not available in this build. Please rebuild the development client to enable payments.');
+          } else {
+            Alert.alert('Razorpay Setup Issue', 'The Razorpay module is not properly configured. Please rebuild the development client with the correct native modules.');
           }
         } else {
           // Web: skip opening checkout and continue to details
@@ -510,6 +484,28 @@ export default function HrciAvailabilityScreen() {
                   <Text style={styles.statLabel}>Contribution Amount</Text>
                   <Text style={[styles.statValue, { fontSize: 28, color: '#1D0DA1' }]}>{fmtINR(preOrder.breakdown.finalAmount)}</Text>
                 </View>
+                {!!preOrder.breakdown?.note && (
+                  <Text style={styles.breakdownNote}>{preOrder.breakdown.note}</Text>
+                )}
+              </>
+            ) : preLoading ? (
+              <>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Base Amount</Text>
+                  <View style={styles.skeletonLarge} />
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Discount</Text>
+                  <View style={styles.skeletonMedium} />
+                </View>
+                <View style={{ height: 1, backgroundColor: '#f1f5f9', marginVertical: 8 }} />
+                <View style={[styles.statItem, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+                  <Text style={styles.statLabel}>Contribution Amount</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <ActivityIndicator size="small" color="#1D0DA1" />
+                    <Text style={{ color: '#334155', fontWeight: '700' }}>Calculating discount…</Text>
+                  </View>
+                </View>
               </>
             ) : (
               <>
@@ -544,7 +540,16 @@ export default function HrciAvailabilityScreen() {
         {canProceed ? (
           <TouchableOpacity style={styles.proceedBtn} onPress={createOrder}>
             <MaterialCommunityIcons name="credit-card-outline" size={20} color="#ffffff" />
-            <Text style={styles.proceedBtnText}>Proceed to Contribution</Text>
+            {preOrder?.breakdown ? (
+              <Text style={styles.proceedBtnText}>Proceed • {fmtINR(preOrder.breakdown.finalAmount)}</Text>
+            ) : preLoading ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <ActivityIndicator size="small" color="#ffffff" />
+                <Text style={styles.proceedBtnText}>Calculating discount…</Text>
+              </View>
+            ) : (
+              <Text style={styles.proceedBtnText}>Proceed to Contribution</Text>
+            )}
           </TouchableOpacity>
         ) : (
           <TouchableOpacity style={styles.changeBtn} onPress={() => router.back()}>
@@ -701,6 +706,9 @@ const styles = StyleSheet.create({
   breakdownValue: { fontSize: 16, color: '#1e293b', fontWeight: '700' },
   breakdownDivider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 8 },
   breakdownNote: { marginTop: 8, fontSize: 12, color: '#64748b' },
+  // Skeletons
+  skeletonLarge: { height: 28, borderRadius: 6, backgroundColor: '#f1f5f9', width: 140 },
+  skeletonMedium: { height: 20, borderRadius: 6, backgroundColor: '#f1f5f9', width: 120 },
 });
 
 // Helper component for detail items
