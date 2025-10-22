@@ -79,7 +79,8 @@ export default function HrciAvailabilityScreen() {
   const [preLoading, setPreLoading] = useState(false);
   const preTriedRef = useRef(false);
 
-  const fmtINRPaise = (amtPaise: number) => `₹ ${(amtPaise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 0 })}`;
+  // Backend returns amounts in rupees; UI shows rupees; Razorpay expects paise
+  const fmtINR = (amtRupees: number) => `₹ ${Number(amtRupees || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
   useEffect(() => {
     (async () => {
@@ -192,6 +193,7 @@ export default function HrciAvailabilityScreen() {
         if (order?.orderId) {
           const pre = {
             orderId: order.orderId,
+            // store rupees for UI
             amount: Number(order?.breakdown?.finalAmount ?? order?.amount ?? 0),
             currency: order.currency || 'INR',
             provider: order.provider || null,
@@ -218,34 +220,12 @@ export default function HrciAvailabilityScreen() {
       // If we already have a pre-created order with breakdown, reuse it
       if (preOrder && preOrder.provider === 'razorpay' && preOrder.providerOrderId && preOrder.providerKeyId) {
         const order = preOrder;
-        const effectiveAmount = order.amount;
-        const breakdown = order.breakdown ?? null;
-        const fmtINR = fmtINRPaise;
-        // Persist and continue to Razorpay
+        // rupees to paise for Razorpay
+        const finalRupees = Number(order.breakdown?.finalAmount ?? order.amount ?? 0);
+        const amountPaise = Math.round(finalRupees * 100);
+  // Persist and continue to Razorpay
         setPayOrder(order);
         try { await persistPayOrder(order as any); } catch {}
-        // Optional: show breakdown dialog before payment
-        if (breakdown && typeof breakdown.finalAmount === 'number') {
-          try {
-            await new Promise<void>((resolve, reject) => {
-              const baseTxt = typeof breakdown.baseAmount === 'number' ? fmtINR(breakdown.baseAmount) : null;
-              const discPct = breakdown.discountPercent != null ? `${breakdown.discountPercent}%` : null;
-              const discAmt = typeof breakdown.discountAmount === 'number' ? fmtINR(breakdown.discountAmount) : null;
-              const finalTxt = fmtINR(breakdown.finalAmount);
-              const lines = [
-                baseTxt ? `Base amount: ${baseTxt}` : null,
-                discPct || discAmt ? `Discount: ${[discPct, discAmt].filter(Boolean).join(' • ')}` : null,
-                `You pay: ${finalTxt}`,
-              ].filter(Boolean).join('\n');
-              Alert.alert('Price breakdown', lines, [
-                { text: 'Cancel', style: 'cancel', onPress: () => reject(new Error('Payment cancelled')) },
-                { text: 'Pay now', style: 'default', onPress: () => resolve() },
-              ], { cancelable: true });
-            });
-          } catch {
-            return; // cancelled
-          }
-        }
         if (Platform.OS !== 'web') {
           try {
             // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -255,7 +235,7 @@ export default function HrciAvailabilityScreen() {
               const options: any = {
                 key: order.providerKeyId,
                 order_id: order.providerOrderId,
-                amount: effectiveAmount,
+                amount: amountPaise,
                 name: 'Membership Contribution',
                 description: `${designationName || String(designationCode)} • ${cellName || ''} • ${String(level)}`.replace(/\s+•\s+/g, ' • ').trim(),
                 theme: { color: '#FE0002' },
@@ -326,14 +306,14 @@ export default function HrciAvailabilityScreen() {
       const res = await request<OrderRes>(`/memberships/payfirst/orders`, { method: 'POST', body });
       const order = res?.data?.order as any;
       if (!order?.orderId) throw new Error('Order not created');
-      // Prefer finalAmount from breakdown when present
-      const effectiveAmount: number = Number(order?.breakdown?.finalAmount ?? order?.amount ?? 0);
+      // Prefer finalAmount from breakdown when present (rupees)
+      const finalRupees: number = Number(order?.breakdown?.finalAmount ?? order?.amount ?? 0);
+      const amountPaise = Math.round(finalRupees * 100);
       // Build a human-readable price breakdown (if available)
       const breakdown = order?.breakdown ?? null;
-  const fmtINR = fmtINRPaise;
       const payOrderObj = {
         orderId: order.orderId,
-        amount: effectiveAmount,
+        amount: finalRupees,
         currency: order.currency || 'INR',
         provider: order.provider || null,
         providerOrderId: order.providerOrderId || null,
@@ -344,34 +324,6 @@ export default function HrciAvailabilityScreen() {
       setPayOrder(payOrderObj);
   try { await persistPayOrder(payOrderObj); } catch {}
   if (order.provider === 'razorpay' && order.providerOrderId && order.providerKeyId) {
-        // If we have a breakdown, show a quick confirmation with discount details before opening checkout
-        if (breakdown && typeof breakdown.finalAmount === 'number') {
-          try {
-            await new Promise<void>((resolve, reject) => {
-              const baseTxt = typeof breakdown.baseAmount === 'number' ? fmtINR(breakdown.baseAmount) : null;
-              const discPct = breakdown.discountPercent != null ? `${breakdown.discountPercent}%` : null;
-              const discAmt = typeof breakdown.discountAmount === 'number' ? fmtINR(breakdown.discountAmount) : null;
-              const finalTxt = fmtINR(breakdown.finalAmount);
-              const lines = [
-                baseTxt ? `Base amount: ${baseTxt}` : null,
-                discPct || discAmt ? `Discount: ${[discPct, discAmt].filter(Boolean).join(' • ')}` : null,
-                `You pay: ${finalTxt}`,
-              ].filter(Boolean).join('\n');
-              Alert.alert(
-                'Price breakdown',
-                lines,
-                [
-                  { text: 'Cancel', style: 'cancel', onPress: () => reject(new Error('Payment cancelled')) },
-                  { text: 'Pay now', style: 'default', onPress: () => resolve() },
-                ],
-                { cancelable: true }
-              );
-            });
-          } catch {
-            // User cancelled from breakdown dialog; stop here
-            return;
-          }
-        }
         // Open Razorpay Checkout (guarded dynamic require so build doesn't break if SDK isn't installed)
         if (Platform.OS !== 'web') {
           try {
@@ -385,8 +337,8 @@ export default function HrciAvailabilityScreen() {
               const options: any = {
                 key: order.providerKeyId,
                 order_id: order.providerOrderId,
-                // IMPORTANT: Pass only the final amount (in paise) to Razorpay
-                amount: effectiveAmount,
+                // IMPORTANT: Pass final amount in paise to Razorpay
+                amount: amountPaise,
                 name: 'Membership Contribution',
                 description: `${designationName || String(designationCode)} • ${cellName || ''} • ${String(level)}`.replace(/\s+•\s+/g, ' • ').trim(),
                 theme: { color: '#FE0002' },
@@ -495,7 +447,7 @@ export default function HrciAvailabilityScreen() {
         <Text style={styles.heading}>Seat Availability</Text>
       </View>
 
-      {/* Content */}
+  {/* Content */}
       <View style={styles.contentContainer}>
         {/* Membership Details Card */}
         <View style={styles.membershipCard}>
@@ -535,13 +487,37 @@ export default function HrciAvailabilityScreen() {
           )}
 
           <View style={styles.statsRow}>
-            {typeof fee === 'number' && (
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Contribution Amount</Text>
-                <Text style={styles.statValue}>₹ {fee.toLocaleString()}</Text>
-              </View>
+            {preOrder?.breakdown ? (
+              <>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Contribution Amount</Text>
+                  <Text style={styles.statValue}>{fmtINR(preOrder.breakdown.finalAmount)}</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Base Amount</Text>
+                  <Text style={styles.statValue}>{fmtINR(preOrder.breakdown.baseAmount)}</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Discount</Text>
+                  <Text style={[styles.statValue, { color: '#16a34a' }]}>
+                    {[
+                      preOrder.breakdown.discountPercent != null ? `${preOrder.breakdown.discountPercent}%` : null,
+                      typeof preOrder.breakdown.discountAmount === 'number' ? fmtINR(preOrder.breakdown.discountAmount) : null,
+                    ].filter(Boolean).join(' • ')}
+                  </Text>
+                </View>
+              </>
+            ) : (
+              <>
+                {typeof fee === 'number' && (
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Contribution Amount</Text>
+                    <Text style={styles.statValue}>₹ {fee.toLocaleString()}</Text>
+                  </View>
+                )}
+              </>
             )}
-            
+
             {typeof validityDays === 'number' && (
               <View style={styles.statItem}>
                 <Text style={styles.statLabel}>Validity</Text>
@@ -560,7 +536,7 @@ export default function HrciAvailabilityScreen() {
             </View>
             <View style={styles.breakdownRow}>
               <Text style={styles.breakdownLabel}>Base amount</Text>
-              <Text style={styles.breakdownValue}>{fmtINRPaise(preOrder.breakdown!.baseAmount)}</Text>
+              <Text style={styles.breakdownValue}>{fmtINR(preOrder.breakdown!.baseAmount)}</Text>
             </View>
             {(typeof preOrder.breakdown!.discountPercent === 'number' || typeof preOrder.breakdown!.discountAmount === 'number') && (
               <View style={styles.breakdownRow}>
@@ -568,7 +544,7 @@ export default function HrciAvailabilityScreen() {
                 <Text style={[styles.breakdownValue, { color: '#16a34a' }]}>
                   {[
                     preOrder.breakdown!.discountPercent != null ? `${preOrder.breakdown!.discountPercent}%` : null,
-                    typeof preOrder.breakdown!.discountAmount === 'number' ? fmtINRPaise(preOrder.breakdown!.discountAmount) : null,
+                    typeof preOrder.breakdown!.discountAmount === 'number' ? fmtINR(preOrder.breakdown!.discountAmount) : null,
                   ].filter(Boolean).join(' • ')}
                 </Text>
               </View>
@@ -576,7 +552,7 @@ export default function HrciAvailabilityScreen() {
             <View style={styles.breakdownDivider} />
             <View style={styles.breakdownRow}>
               <Text style={[styles.breakdownLabel, { fontWeight: '800', color: '#0f172a' }]}>You pay</Text>
-              <Text style={[styles.breakdownValue, { fontWeight: '800', color: '#0f172a' }]}>{fmtINRPaise(preOrder.breakdown!.finalAmount)}</Text>
+              <Text style={[styles.breakdownValue, { fontWeight: '800', color: '#0f172a' }]}>{fmtINR(preOrder.breakdown!.finalAmount)}</Text>
             </View>
             {preOrder.breakdown?.note ? (
               <Text style={styles.breakdownNote}>{preOrder.breakdown?.note}</Text>
