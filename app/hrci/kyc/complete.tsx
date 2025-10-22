@@ -256,7 +256,7 @@ export default function KYCCompletionScreen() {
         {uploadingDoc === docType ? (
           <LottieView source={require('@/assets/lotti/hrci_loader_svg.json')} autoPlay loop style={{ width: 24, height: 24 }} />
         ) : document?.uploadedUrl ? (
-          <MaterialCommunityIcons name="check-circle" size={24} color={Colors.light.primary} />
+          <MaterialCommunityIcons name="check-circle" size={24} color="#10b981" />
         ) : (
           <MaterialCommunityIcons name="camera" size={24} color="#9CA3AF" />
         )}
@@ -264,9 +264,15 @@ export default function KYCCompletionScreen() {
       
       {document && (
         <View style={styles.docPreview}>
-          <Image source={{ uri: document.uri }} style={styles.docImage} />
-          <Text style={styles.docStatus}>
-            {uploadingDoc === docType ? 'Uploading...' : 
+          <Image
+            source={{ uri: document.uri }}
+            style={[
+              styles.docImage,
+              document.uploadedUrl ? { borderColor: '#10b981', borderWidth: 2 } : null
+            ]}
+          />
+          <Text style={[styles.docStatus, uploadingDoc === docType ? { color: '#ffffff' } : null]}>
+            {uploadingDoc === docType ? 'Uploading...' :
              document.uploadedUrl ? 'Uploaded Successfully' : 'Upload Pending'}
           </Text>
         </View>
@@ -641,7 +647,7 @@ const styles = StyleSheet.create({
     ...makeShadow(2, { opacity: 0.1, blur: 8, y: 2 }),
   },
   docCardComplete: {
-    borderColor: Colors.light.primary,
+    borderColor: '#10b981',
     backgroundColor: '#f0fdf4',
   },
   docCardHeader: {
