@@ -262,6 +262,8 @@ export default function HrciAvailabilityScreen() {
                       razorpay_signature: result.razorpay_signature,
                     },
                   });
+                  // Navigate to registration only on successful payment
+                  router.replace('/hrci/register' as any);
                 } catch (e:any) {
                   console.warn('[Payfirst] confirm success failed', e?.message);
                 } finally {
@@ -282,8 +284,8 @@ export default function HrciAvailabilityScreen() {
         } else {
           Alert.alert('Not supported on web', 'Payment is not supported in web builds. Please use the mobile app.');
         }
-        router.replace('/hrci/register' as any);
-        return;
+  // Do not navigate on cancel/failure; stay here
+  return;
       }
       // Build body based on level as per API specification
       const body: any = {
@@ -370,6 +372,8 @@ export default function HrciAvailabilityScreen() {
                       razorpay_signature: result.razorpay_signature,
                     },
                   });
+                  // Navigate only on successful payment
+                  router.replace('/hrci/register' as any);
                 } catch (e:any) {
                   console.warn('[Payfirst] confirm success failed', e?.message);
                 } finally {
@@ -404,9 +408,8 @@ export default function HrciAvailabilityScreen() {
           // Web: skip opening checkout and continue to details
           Alert.alert('Not supported on web', 'Payment is not supported in web builds. Please use the mobile app.');
         }
-      }
-      // Proceed to registration after confirming payment status
-      router.replace('/hrci/register' as any);
+  }
+  // Only navigate on success (handled above); otherwise remain here
     } catch (e: any) {
       Alert.alert('Order Failed', e?.message || 'Could not create order. Please try again.');
     }
@@ -490,10 +493,6 @@ export default function HrciAvailabilityScreen() {
             {preOrder?.breakdown ? (
               <>
                 <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Contribution Amount</Text>
-                  <Text style={styles.statValue}>{fmtINR(preOrder.breakdown.finalAmount)}</Text>
-                </View>
-                <View style={styles.statItem}>
                   <Text style={styles.statLabel}>Base Amount</Text>
                   <Text style={styles.statValue}>{fmtINR(preOrder.breakdown.baseAmount)}</Text>
                 </View>
@@ -505,6 +504,11 @@ export default function HrciAvailabilityScreen() {
                       typeof preOrder.breakdown.discountAmount === 'number' ? fmtINR(preOrder.breakdown.discountAmount) : null,
                     ].filter(Boolean).join(' • ')}
                   </Text>
+                </View>
+                <View style={{ height: 1, backgroundColor: '#f1f5f9', marginVertical: 8 }} />
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Contribution Amount</Text>
+                  <Text style={[styles.statValue, { fontSize: 28, color: '#1D0DA1' }]}>{fmtINR(preOrder.breakdown.finalAmount)}</Text>
                 </View>
               </>
             ) : (
@@ -527,38 +531,6 @@ export default function HrciAvailabilityScreen() {
           </View>
         </View>
 
-        {/* Price Breakdown (from pre-created order) */}
-        {preOrder?.breakdown && (
-          <View style={[styles.summaryCard, { marginTop: 16 }]}> 
-            <View style={styles.cardHeader}>
-              <MaterialCommunityIcons name="cash-check" size={24} color="#FE0002" />
-              <Text style={styles.cardTitle}>Price Breakdown</Text>
-            </View>
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Base amount</Text>
-              <Text style={styles.breakdownValue}>{fmtINR(preOrder.breakdown!.baseAmount)}</Text>
-            </View>
-            {(typeof preOrder.breakdown!.discountPercent === 'number' || typeof preOrder.breakdown!.discountAmount === 'number') && (
-              <View style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>Discount</Text>
-                <Text style={[styles.breakdownValue, { color: '#16a34a' }]}>
-                  {[
-                    preOrder.breakdown!.discountPercent != null ? `${preOrder.breakdown!.discountPercent}%` : null,
-                    typeof preOrder.breakdown!.discountAmount === 'number' ? fmtINR(preOrder.breakdown!.discountAmount) : null,
-                  ].filter(Boolean).join(' • ')}
-                </Text>
-              </View>
-            )}
-            <View style={styles.breakdownDivider} />
-            <View style={styles.breakdownRow}>
-              <Text style={[styles.breakdownLabel, { fontWeight: '800', color: '#0f172a' }]}>You pay</Text>
-              <Text style={[styles.breakdownValue, { fontWeight: '800', color: '#0f172a' }]}>{fmtINR(preOrder.breakdown!.finalAmount)}</Text>
-            </View>
-            {preOrder.breakdown?.note ? (
-              <Text style={styles.breakdownNote}>{preOrder.breakdown?.note}</Text>
-            ) : null}
-          </View>
-        )}
       </View>
 
       {/* Fixed Bottom Action */}
