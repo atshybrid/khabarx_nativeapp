@@ -579,6 +579,21 @@ export default function HrciDashboard() {
         <View style={styles.actionsContainer}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
+            {/* Show KYC prompt if member/admin does not have verified KYC */}
+            {(() => {
+              const statusRaw = String(membership?.kyc?.status || '').toUpperCase();
+              const hasKycFlag = membership?.kyc?.hasKyc === true;
+              const kycOk = hasKycFlag || (statusRaw === 'APPROVED' || statusRaw === 'VERIFIED');
+              if (kycOk) return null;
+              return (
+                <ActionCard
+                  title="Complete KYC"
+                  subtitle="Verify to unlock features"
+                  icon="shield-check"
+                  onPress={() => router.push('/hrci/kyc/complete' as any)}
+                />
+              );
+            })()}
             <ActionCard
               title="New Case"
               subtitle="File a new case"
