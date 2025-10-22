@@ -3,14 +3,19 @@ import { ArticleSkeleton } from '@/components/ui/ArticleSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useCategory } from '@/context/CategoryContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import AnimatedAd from '../../components/AnimatedAd';
 // import { sampleArticles } from '@/data/sample-articles';
-import { getNews } from '@/services/api';
-import type { Article } from '@/types';
+import { getNewsFeed, resolveEffectiveLanguage } from '@/services/api';
+import type { FeedItem } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import LottieView from 'lottie-react-native';
-import { useEffect, useRef, useState } from 'react';
-import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { LayoutChangeEvent, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSharedValue, withSpring } from 'react-native-reanimated';
+const NEWS_SAFE_MODE = (() => {
+  const raw = String(process.env.EXPO_PUBLIC_NEWS_SAFE_MODE ?? '').toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+})();
 
 const NewsScreen = () => {
   const colorScheme = useColorScheme();
@@ -20,7 +25,7 @@ const NewsScreen = () => {
   }, []);
   const [activeIndex, setActiveIndex] = useState(0);
   const activeIndexShared = useSharedValue(0);
-  const [articles, setArticles] = useState<Article[]>([]);
+  const [items, setItems] = useState<FeedItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const { selectedCategory } = useCategory();
@@ -31,54 +36,58 @@ const NewsScreen = () => {
     if (h && Math.abs(h - lastHeightRef.current) > 1) {
       lastHeightRef.current = h;
       setPageHeight(h);
+      if (__DEV__) {
+        try { console.log('[News] pageHeight set', h); } catch {}
+      }
     }
   };
 
-  useEffect(() => {
-    const map: Record<string, string> = {
-      top: 'Top',
-      india: 'India',
-      world: 'World',
-      business: 'Business',
-      tech: 'Technology',
-      sports: 'Sports',
-      ent: 'Entertainment',
-    };
-    // Treat "Top" as the default, i.e. no filter
-    const mapped = selectedCategory ? (map[selectedCategory] || selectedCategory) : undefined;
-    const filterKey = mapped && mapped.toLowerCase() === 'top' ? undefined : mapped;
-    (async () => {
-      setLoading(true);
-      setError(null);
+  const loadNews = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const stored = await AsyncStorage.getItem('selectedLanguage');
+      const lang = stored ? JSON.parse(stored)?.code ?? 'en' : 'en';
       try {
-        const stored = await AsyncStorage.getItem('selectedLanguage');
-        const lang = stored ? JSON.parse(stored)?.code ?? 'en' : 'en';
-        const list = await getNews(lang, filterKey || undefined);
-        const safe = Array.isArray(list) ? list : [];
-        // If API doesn't filter by category, filter client-side as a fallback
-        let filtered = filterKey
-          ? safe.filter((a) => (a.category || '').toLowerCase().includes(filterKey.toLowerCase()))
-          : safe;
-        // Avoid an empty UI: if nothing matches the filter, show the full list
-        if (filterKey && filtered.length === 0) {
-          console.warn('[News] No items matched category filter, showing all');
-          filtered = safe;
-        }
-        setArticles(filtered);
-        console.log('[News] articles loaded:', filtered.length);
-      } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          console.warn('Failed to load news', msg);
-          setError(msg || 'Failed to load news');
-        setArticles([]);
-      } finally {
-        setLoading(false);
+        const eff = await resolveEffectiveLanguage();
+        console.log('[News] language debug', { storedCode: lang, effId: eff.id, effCode: eff.code, effName: eff.name });
+      } catch {}
+      const map: Record<string, string> = {
+        top: 'Top',
+        india: 'India',
+        world: 'World',
+        business: 'Business',
+        tech: 'Technology',
+        sports: 'Sports',
+        ent: 'Entertainment',
+      };
+      const mapped = selectedCategory ? (map[selectedCategory] || selectedCategory) : undefined;
+      const filterKey = mapped && mapped.toLowerCase() === 'top' ? undefined : mapped;
+      const feed = await getNewsFeed(lang, filterKey || undefined);
+      const safeItems = Array.isArray(feed.items) ? feed.items : [];
+      setItems(safeItems);
+      if (__DEV__) {
+        try {
+          const first = safeItems.length ? safeItems[0] : null;
+          console.log('[News] feed loaded:', safeItems.length, 'first kind:', first?.type);
+        } catch {}
       }
-    })();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('Failed to load news', msg);
+  setError(msg || 'Failed to load news');
+  setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }, [selectedCategory]);
 
+  useEffect(() => {
+    loadNews();
+  }, [loadNews]);
+
   const handleSwipeUp = () => {
-  if (activeIndex < articles.length - 1) {
+  if (activeIndex < items.length - 1) {
       const newIndex = activeIndex + 1;
       setActiveIndex(newIndex);
       activeIndexShared.value = withSpring(newIndex);
@@ -111,25 +120,70 @@ const NewsScreen = () => {
         {loading && (
           <ArticleSkeleton />
         )}
-        {!loading && !error && articles.map((article, index) => (
-          <AnimatedArticle
-            key={article.id}
-            article={article}
-            index={index}
-            activeIndex={activeIndexShared}
-            onSwipeUp={handleSwipeUp}
-            onSwipeDown={handleSwipeDown}
-            totalArticles={articles.length}
-            forceVisible={index === 0}
-            pageHeight={pageHeight}
-          />
+        {!loading && !error && !NEWS_SAFE_MODE && items.map((it, index) => (
+          it.type === 'news' ? (
+            <AnimatedArticle
+              key={`news_${it.article.id || 'item'}_${index}`}
+              article={it.article}
+              index={index}
+              activeIndex={activeIndexShared}
+              onSwipeUp={handleSwipeUp}
+              onSwipeDown={handleSwipeDown}
+              totalArticles={items.length}
+              forceVisible={index === 0}
+              pageHeight={pageHeight}
+            />
+          ) : (
+            <AnimatedAd
+              key={`ad_${it.ad.id || 'item'}_${index}`}
+              ad={it.ad}
+              index={index}
+              activeIndex={activeIndexShared}
+              onSwipeUp={handleSwipeUp}
+              onSwipeDown={handleSwipeDown}
+              totalItems={items.length}
+              forceVisible={index === 0}
+              pageHeight={pageHeight}
+            />
+          )
         ))}
+        {!loading && !error && NEWS_SAFE_MODE && (
+          <View style={{ flex: 1, padding: 16, gap: 16 }}>
+            {items.map((it, i) => (
+              it.type === 'news' ? (
+                <View key={`${it.article.id}_${i}`} style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, borderRadius: 10, padding: 12 }}>
+                  <Text style={{ color: theme.text, fontSize: 18, fontWeight: '700' }} numberOfLines={2}>{it.article.title || 'Untitled'}</Text>
+                  {it.article.body ? (<Text style={{ color: theme.text, opacity: 0.85, marginTop: 6 }} numberOfLines={3}>{it.article.body}</Text>) : null}
+                  <Text style={{ color: theme.text, opacity: 0.6, marginTop: 8, fontSize: 12 }}>{it.article.category || 'General'}</Text>
+                </View>
+              ) : (
+                <View key={`ad_${it.ad.id}_${i}`} style={{ borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border, borderRadius: 10, padding: 12, alignItems:'center', justifyContent:'center' }}>
+                  <Text style={{ color: theme.text, fontSize: 12, opacity: 0.7, marginBottom: 8 }}>Sponsored</Text>
+                  <Text style={{ color: theme.text, fontSize: 16, fontWeight: '700' }} numberOfLines={1}>{it.ad.title || 'Ad'}</Text>
+                </View>
+              )
+            ))}
+          </View>
+        )}
+        {!loading && !error && items.length === 0 && (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <Text style={{ color: theme.text, opacity: 0.85, marginBottom: 12 }}>No news available.</Text>
+            <TouchableOpacity onPress={loadNews} style={{ backgroundColor: theme.tint, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}>
+              <Text style={{ color: '#fff', fontWeight: '600' }}>Reload</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {!loading && error && (
-          <View style={{ flex: 1 }} />
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <Text style={{ color: theme.text, opacity: 0.8, marginBottom: 12 }}>Couldn’t load news ({error}).</Text>
+            <TouchableOpacity onPress={loadNews} style={{ backgroundColor: theme.tint, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}>
+              <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         )}
         {__DEV__ && (
           <View style={[styles.debugOverlay, { pointerEvents: 'none' }] }>
-            <Text style={styles.debugText}>articles: {articles.length} | activeIndex: {activeIndex}</Text>
+            <Text style={styles.debugText}>items: {items.length} | activeIndex: {activeIndex} | safeMode: {String(NEWS_SAFE_MODE)}</Text>
           </View>
         )}
       </View>
@@ -140,6 +194,7 @@ const NewsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    position: 'relative',
     // background is set from theme inline
   },
   debugOverlay: {

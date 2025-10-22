@@ -1,3 +1,4 @@
+import { Loader } from '@/components/ui/Loader';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { updateUserProfile, uploadMedia } from '@/services/api';
@@ -6,7 +7,7 @@ import { requestMediaPermissionsOnly } from '@/services/permissions';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme();
@@ -81,7 +82,7 @@ export default function ProfileScreen() {
               )}
               {uploading ? (
                 <View style={styles.avatarOverlay}>
-                  <ActivityIndicator color={theme.primary} />
+                  <Loader size={24} />
                 </View>
               ) : null}
             </View>

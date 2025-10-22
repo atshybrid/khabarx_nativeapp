@@ -18,9 +18,21 @@ const FALLBACK_DEV_URL = `http://${defaultHost}:3000`;
 const isDev = __DEV__ === true;
 
 // Resolve final base URL with sensible precedence
-const BASE_URL =
-  EXPLICIT_URL ||
-  (isDev ? (DEV_URL || FALLBACK_DEV_URL) : (PROD_URL || FALLBACK_DEV_URL));
+// Default to the live API if nothing is configured to avoid local 404s like "resource not found"
+const PROD_DEFAULT_URL = 'https://app.hrcitodaynews.in/api/v1';
+// Allow forcing production API even in dev (and override any EXPLICIT_URL/DEV_URL)
+const FORCE_PROD = (() => {
+  const raw = String(process.env.EXPO_PUBLIC_FORCE_PROD ?? process.env.EXPO_PUBLIC_USE_PROD_IN_DEV ?? '').toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+})();
+const BASE_URL = FORCE_PROD
+  ? (PROD_URL || PROD_DEFAULT_URL)
+  : (
+    EXPLICIT_URL ||
+    (isDev
+      ? (DEV_URL || PROD_URL || PROD_DEFAULT_URL || FALLBACK_DEV_URL)
+      : (PROD_URL || PROD_DEFAULT_URL || FALLBACK_DEV_URL))
+    );
 
 export function getBaseUrl() {
   return BASE_URL;
@@ -33,7 +45,7 @@ const DEBUG_HTTP = (() => {
 })();
 const TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_HTTP_TIMEOUT_MS || '30000');
 if (DEBUG_HTTP) {
-  console.log('[HTTP] BASE_URL =', BASE_URL, '| DEV =', isDev);
+  console.log('[HTTP] BASE_URL =', BASE_URL, '| DEV =', isDev, '| FORCE_PROD =', FORCE_PROD);
 }
 
 export class HttpError extends Error {

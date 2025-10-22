@@ -1,10 +1,11 @@
 
-import { useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, ScrollView } from 'react-native';
 import ArticleDetailCard from '@/components/ui/ArticleDetailCard';
-import { Article } from '@/types';
+import { Loader } from '@/components/ui/Loader';
 import { getArticleById } from '@/services/api';
+import { Article } from '@/types';
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 
 export default function ArticleDetailScreen() {
@@ -33,7 +34,11 @@ export default function ArticleDetailScreen() {
   }, [id]);
 
   if (loading) {
-    return <ActivityIndicator size="large" style={styles.center} />;
+    return (
+      <View style={styles.center}>
+        <Loader size={96} />
+      </View>
+    );
   }
 
   if (error) {

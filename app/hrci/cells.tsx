@@ -1,9 +1,11 @@
+import { Loader } from '@/components/ui/Loader';
+import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
 import { request } from '../../services/http';
@@ -69,7 +71,7 @@ export default function HrciCellsScreen() {
     });
   }, [cells, query, filter]);
 
-  if (loading) return <View style={styles.center}><ActivityIndicator /></View>;
+  if (loading) return <View style={styles.center}><Loader size={64} /></View>;
   if (error) {
     return (
       <View style={styles.center}>
@@ -161,7 +163,7 @@ const styles = StyleSheet.create({
   errorText: { color: '#EF4444', marginBottom: 12, fontWeight: '700' },
   retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#111827', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   retryText: { color: '#fff', fontWeight: '800' },
-  card: { backgroundColor: '#fff', padding: 16, borderRadius: 14, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 2, borderWidth: 1, borderColor: '#eef0f4' },
+  card: { backgroundColor: '#fff', padding: 16, borderRadius: 14, elevation: 2, borderWidth: 1, borderColor: '#eef0f4', ...makeShadow(6, { opacity: 0.06, blur: 20, y: 6 }) },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   badge: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1D0DA1', alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontWeight: '800' },

@@ -1,6 +1,7 @@
+import { Loader } from '@/components/ui/Loader';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { createCitizenReporterMobile, getMpinStatus, loginWithMpin } from '../services/api';
 import { gatherRegistrationContext } from '../services/contextGather';
 
@@ -308,7 +309,7 @@ export default function MobileLoginModal({ visible, onClose, onSuccess }: Props)
         )}
         {loading && mobile.length === 10 && (
           <View style={{ marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <ActivityIndicator size="small" />
+            <Loader size={20} />
             <Text style={{ fontSize: 12, color: '#475569' }}>Checking…</Text>
           </View>
         )}
@@ -337,8 +338,8 @@ export default function MobileLoginModal({ visible, onClose, onSuccess }: Props)
             <TouchableOpacity style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]} onPress={doLogin} disabled={loading}>
               {loading ? (
                 <View style={styles.rowCenter}>
-                  <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.primaryText}>Logging in…</Text>
+                  <Loader size={20} />
+                  <Text style={[styles.primaryText, { marginLeft: 8 }]}>Logging in…</Text>
                 </View>
               ) : (
                 <Text style={styles.primaryText}>Login</Text>
@@ -372,8 +373,8 @@ export default function MobileLoginModal({ visible, onClose, onSuccess }: Props)
             <TouchableOpacity style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]} onPress={doRegister} disabled={loading}>
               {loading ? (
                 <View style={styles.rowCenter}>
-                  <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.primaryText}>Creating…</Text>
+                  <Loader size={20} />
+                  <Text style={[styles.primaryText, { marginLeft: 8 }]}>Creating…</Text>
                 </View>
               ) : (
                 <Text style={styles.primaryText}>Create & Login</Text>

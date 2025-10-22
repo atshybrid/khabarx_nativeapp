@@ -918,11 +918,11 @@ async function onShareTwoImages(
     const backUri = ensureFileUri(backUriRaw);
 
     if (frontUri && backUri) {
-      // Try to require react-native-share at runtime (only if available in Dev Client)
+      // Dynamically import react-native-share at runtime (only if available in Dev Client)
       let RNShare: any = null;
       try {
-        const mod = require('react-native-share');
-        RNShare = mod?.default ?? mod;
+        const mod = await import('react-native-share');
+        RNShare = (mod as any)?.default ?? mod;
       } catch {}
 
       if (RNShare?.open) {

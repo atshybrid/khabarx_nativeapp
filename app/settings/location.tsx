@@ -1,10 +1,11 @@
+import { Loader } from '@/components/ui/Loader';
 import { Colors } from '@/constants/Colors';
 import { afterPreferencesUpdated, updatePreferences } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 
 type PickedLocation = { name: string; lat: number; lng: number } | null;
@@ -187,7 +188,7 @@ export default function LocationPickerScreen() {
         <WebView ref={webRef} source={{ html }} onMessage={onMessage} originWhitelist={["*"]} javaScriptEnabled domStorageEnabled />
         <View style={styles.floatingBar}>
           <Pressable onPress={useCurrentLocation} style={styles.gpsBtn}>
-            {loadingGPS ? <ActivityIndicator color="#fff" /> : <Text style={styles.gpsTxt}>Use current location</Text>}
+            {loadingGPS ? <Loader size={20} /> : <Text style={styles.gpsTxt}>Use current location</Text>}
           </Pressable>
           <View style={styles.selWrap}>
             <Text numberOfLines={2} style={styles.selTxt}>{selected?.name || 'Tap map or search a place'}</Text>

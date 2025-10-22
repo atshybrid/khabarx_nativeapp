@@ -1,6 +1,8 @@
+import { Loader } from '@/components/ui/Loader';
+import { makeShadow } from '@/utils/shadow';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { loginWithMpin } from '../../services/api';
 import { saveTokens } from '../../services/auth';
 
@@ -56,7 +58,7 @@ export default function HrciMpinScreen() {
           ))}
         </View>
         <TouchableOpacity style={[styles.cta, !(mobile && /^\d{4}$/.test(mpin)) && styles.ctaDisabled]} disabled={loading || !(mobile && /^\d{4}$/.test(mpin))} onPress={submit}>
-          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaText}>Login</Text>}
+          {loading ? <Loader size={20} /> : <Text style={styles.ctaText}>Login</Text>}
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -65,7 +67,7 @@ export default function HrciMpinScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f7fb', padding: 20, justifyContent: 'center' },
-  card: { backgroundColor: '#fff', borderRadius: 16, padding: 16, gap: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 1 },
+  card: { backgroundColor: '#fff', borderRadius: 16, padding: 16, gap: 12, elevation: 1, ...makeShadow(4, { opacity: 0.05, blur: 16, y: 4 }) },
   title: { fontSize: 20, fontWeight: '700', color: '#0b132b' },
   sub: { fontSize: 12, color: '#6b7280' },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },

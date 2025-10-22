@@ -37,7 +37,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Prefer static import; add runtime guard below in case native module isn't linked yet
-import { getCachedCommentsByShortNews, getCommentsByShortNews, prefetchCommentsByShortNews } from '@/services/api';
+import { getCachedCommentsByShortNews, getCommentsByShortNews, prefetchCommentsByShortNews, resolveEffectiveLanguage } from '@/services/api';
 import { on } from '@/services/events';
 // Native-only modules: wrap in try/catch so web build doesn't crash if polyfill missing
 // Lazy holders for native-only modules; populated on first share attempt to satisfy lint (no top-level require)
@@ -56,6 +56,11 @@ const shareRuntimeGetter = () => (ShareLib && (ShareLib as any).open ? ShareLib 
 // Fallback lightweight placeholder if ViewShot not available (web or load failure)
 const ViewShotFallback: React.FC<any> = ({ children, style }) => <View style={style}>{children}</View>;
 const ResolvedViewShot: any = (ViewShot ? ViewShot : ViewShotFallback);
+// Optional navigation/logging debug flag
+const NAV_DEBUG = (() => {
+  const raw = String(process.env.EXPO_PUBLIC_NAV_DEBUG ?? '').toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+})();
 
 interface ArticlePageProps {
   article: Article;
@@ -135,56 +140,35 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   const fullShareRef = useRef<any>(null); // off-screen full article capture (hero + title + body, no engagement)
   const [shareMode, setShareMode] = useState(false); // toggled briefly during capture (could show watermark if desired)
   // Transliteration for place + tagline
-  // Language handling: we keep both the article's original language and the user's selected app language.
-  // resolvedLang is what we use for branding/translation (user preference wins).
-  const [articleLang] = useState<string | undefined>((article as any)?.languageCode);
+  // Language handling: prefer languageId, derive code only for transliteration/labels.
   const [resolvedLang, setResolvedLang] = useState<string | undefined>(undefined);
   const placeTx = useTransliteration({ languageCode: resolvedLang, enabled: true, mode: 'immediate', debounceMs: 120 });
   const [brandLine, setBrandLine] = useState('');
   const [userPlace, setUserPlace] = useState('');
 
   const lang = resolvedLang || 'en';
-  // Load selected language from storage; override article language if present.
+  // Resolve effective language via API helper: prefer languageId, map to code only for transliteration.
   useEffect(() => {
     let mounted = true;
-    const normalize = (c?: string): string | undefined => {
-      if (!c) return undefined;
-      const k = String(c).toLowerCase();
-      const map: Record<string,string> = {
-        'te': 'te', 'telugu': 'te', 'te-in': 'te', 'te_in': 'te',
-        'hi': 'hi', 'hindi': 'hi',
-        'bn': 'bn', 'bengali': 'bn',
-        'ta': 'ta', 'tamil': 'ta',
-        'kn': 'kn', 'kannada': 'kn',
-        'ml': 'ml', 'malayalam': 'ml',
-        'en': 'en', 'english': 'en'
-      };
-      return map[k] || undefined;
-    };
     (async () => {
-      let selCode: string | undefined;
       try {
-        const raw = await AsyncStorage.getItem('selectedLanguage');
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            const candidates = [parsed?.id, parsed?.code, parsed?.lang, parsed?.languageCode, parsed?.value];
-            for (const c of candidates) {
-              const norm = normalize(c);
-              if (norm) { selCode = norm; break; }
-            }
-          } catch {}
+        const eff = await resolveEffectiveLanguage();
+        const langId = eff.id;
+        const langCode = eff.code || 'en';
+        if (!mounted) return;
+        setResolvedLang(langCode);
+        if (__DEV__ && NAV_DEBUG) {
+          console.log('[BrandLang] languageId ->', langId, 'code ->', langCode);
         }
-      } catch {}
-      if (!mounted) return;
-      const finalLang = selCode || normalize(articleLang) || 'en';
-      setResolvedLang(finalLang);
-      if (__DEV__) {
-        console.log('[BrandLang] selected raw ->', selCode, 'articleLang ->', articleLang, 'resolved ->', finalLang);
+      } catch {
+        if (!mounted) return;
+        setResolvedLang('en');
+        if (__DEV__ && NAV_DEBUG) {
+          console.log('[BrandLang] languageId -> (unknown) code -> en');
+        }
       }
     })();
     return () => { mounted = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [article?.id]);
   const tPart = React.useCallback(<K extends keyof typeof GLOBAL_TAG_PARTS>(k: K) => GLOBAL_TAG_PARTS[k][lang as keyof typeof GLOBAL_TAG_PARTS[K]] || GLOBAL_TAG_PARTS[k].en, [lang, GLOBAL_TAG_PARTS]);
   // Load user place from storage; fallback to article author place if none
@@ -276,6 +260,10 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   const [footerHeight, setFooterHeight] = useState(0);
   const [titleHeight, setTitleHeight] = useState(0);
   const [maxBodyLines, setMaxBodyLines] = useState<number | undefined>(undefined);
+  const displayBody = useMemo(() => {
+    const txt = (article.body && article.body.trim()) || (article.summary && article.summary.trim()) || '';
+    return txt;
+  }, [article.body, article.summary]);
   // Toggle for right-side rail (now disabled; engagement is in footer)
   const SHOW_RIGHT_RAIL = false;
   // Comments count hidden on rail (icons only); keep logic minimal
@@ -487,17 +475,19 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
     const remainingForBody = Math.max(0, available - titleHeight);
     const lines = Math.floor(remainingForBody / lineHeight);
     // Guard against negative or excessively large counts
-    const clamped = Math.max(0, Math.min(lines, 18));
+    let clamped = Math.max(0, Math.min(lines, 18));
+    // Ensure we show at least a few lines if there is text content
+    if (displayBody && clamped < 3) clamped = 3;
     setMaxBodyLines(clamped);
-  }, [footerBottomOffset, footerHeight, titleHeight, isSmallScreen]);
+  }, [footerBottomOffset, footerHeight, titleHeight, isSmallScreen, displayBody]);
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
   <ResolvedViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }} style={{ flex: 1 }}>
       <ScrollView
         style={styles.scrollContainer}
-        contentContainerStyle={styles.scrollContentContainer}
+        contentContainerStyle={[styles.scrollContentContainer, { paddingTop: insets.top }]}
         scrollEnabled={false}
-        onScrollBeginDrag={() => { console.log('[Article] onScrollBeginDrag -> hide'); hide(); setTabBarVisible(false); }}
+        onScrollBeginDrag={() => { if (NAV_DEBUG) console.log('[Article] onScrollBeginDrag -> hide'); hide(); setTabBarVisible(false); }}
         onScroll={(e) => {
           const now = Date.now();
           const y = e.nativeEvent.contentOffset.y;
@@ -628,7 +618,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
                 lastTouchYRef.current = y;
                 // If visible and user slightly swipes up, hide immediately
                 if (isTabBarVisible && dy < -2) {
-                  console.log('[Article] small upward glide -> hide');
+                  if (NAV_DEBUG) console.log('[Article] small upward glide -> hide');
                   hide();
                   setTabBarVisible(false);
                 }
@@ -660,12 +650,12 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
               >
                 {article.title}
               </Text>
-              <Text style={[
+              <Text style={[ 
                 styles.body,
                 { color: textColor, letterSpacing: 0.1, textAlign: 'left' },
                 isSmallScreen ? { fontSize: 17, lineHeight: 26 } : { fontSize: 19, lineHeight: 30 },
               ]} numberOfLines={maxBodyLines || undefined} ellipsizeMode="tail">
-                {article.body}
+                {displayBody}
               </Text>
               {/* Gallery moved to top hero; no inline gallery here */}
             </View>
@@ -699,7 +689,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
             )}
           </View>
       </ScrollView>
-  <View style={[styles.footerContainer, { bottom: footerBottomOffset, backgroundColor: card }]} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
+  <View style={[styles.footerContainer, { bottom: 0, paddingBottom: footerBottomOffset, backgroundColor: card }]} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
         <View style={[styles.footerInfo, { borderTopColor: border }]}>
           <View style={styles.footerLeft}>
             <Feather name="clock" size={14} color={muted} />

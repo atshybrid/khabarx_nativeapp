@@ -1,8 +1,9 @@
+import { Loader } from '@/components/ui/Loader';
 import { makeShadow } from '@/utils/shadow';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Image, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
+import { Alert, Dimensions, Image, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, Vibration, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HrciLevel, useHrciOnboarding } from '../../context/HrciOnboardingContext';
 import { loginWithMpin } from '../../services/api';
@@ -570,7 +571,7 @@ export default function HrciLoginScreen() {
           onPress={ctaOnPress}
         >
           {(loading || checking) ? (
-            <ActivityIndicator color="#fff" />
+            <Loader size={20} />
           ) : (
             <Text style={styles.footerBtnText}>{ctaLabel}</Text>
           )}

@@ -1,11 +1,11 @@
-
-import { getLanguages, getNews } from '@/services/api';
+import { getLanguages, getMockMode, getNews, setMockMode } from '@/services/api';
 import { clearTokens, isExpired, loadTokens, refreshTokens, Tokens } from '@/services/auth';
+import { getBaseUrl } from '@/services/http';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import * as ExpoSplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 
 export default function SplashScreen() {
 
@@ -14,6 +14,15 @@ export default function SplashScreen() {
       try {
         const start = Date.now();
         console.log('[BOOT] Splash start');
+        // Ensure mock mode is disabled per requirement to always show real data
+        try {
+          const mock = await getMockMode();
+          if (mock) {
+            console.warn('[BOOT] Mock mode detected → disabling');
+            await setMockMode(false);
+          }
+        } catch {}
+        try { console.log('[BOOT] API BASE_URL', getBaseUrl()); } catch {}
         let tokens: Tokens | null = await loadTokens();
         console.log('[BOOT] Tokens loaded', {
           jwtPresent: Boolean(tokens?.jwt),
@@ -55,30 +64,24 @@ export default function SplashScreen() {
         };
 
         if (tokens) {
-          // If tokens exist, ensure guest flag reflects actual role
+          // If tokens exist, proceed to app regardless of news probe; warm up in background
           try {
             const role = tokens.user?.role || (await AsyncStorage.getItem('profile_role'));
             if (role && role !== 'Guest') {
-              // legacy guest flag removal: no-op
+              // no-op: role info only for logs/analytics
             }
           } catch {}
-          // Authenticated: ensure the API is reachable for shortnews BEFORE hiding splash
-          console.log('[BOOT] Authenticated → probing /shortnews before navigating');
+          console.log('[BOOT] Authenticated → warm up /shortnews in background and navigate');
           try {
             const stored = await AsyncStorage.getItem('selectedLanguage');
             const lang = stored ? (JSON.parse(stored)?.code ?? 'en') : 'en';
-            await getNews(lang); // will throw if API fails or non-JSON
-            console.log('[BOOT] Shortnews reachable');
-            await ensureMinSplash();
-            try { await ExpoSplashScreen.hideAsync(); } catch {}
-            router.replace('/news');
-            return;
-          } catch (e: any) {
-            console.warn('[BOOT] Shortnews probe failed, keeping splash', e?.message || e);
-            Alert.alert('Network issue', 'Unable to reach news service. Please check internet and try again.');
-            // Optionally retry later; for now, stay on splash to avoid mock data
-            return;
-          }
+            // Best-effort warmup (non-blocking)
+            getNews(lang).catch((e) => console.warn('[BOOT] Warmup shortnews failed (ignored)', e?.message || e));
+          } catch {}
+          await ensureMinSplash();
+          try { await ExpoSplashScreen.hideAsync(); } catch {}
+          router.replace('/news');
+          return;
         }
         // No tokens case: check if language already chosen
         let storedLanguage: any = null;
@@ -87,8 +90,8 @@ export default function SplashScreen() {
           if (langRaw) storedLanguage = JSON.parse(langRaw);
         } catch {}
         if (storedLanguage?.id || storedLanguage?.code) {
-          // Language chosen but no auth tokens: allow anonymous reading (no guest token).
-          console.log('[BOOT] Language selected, no auth tokens → proceed anonymous to news');
+          // Language chosen but no auth tokens: proceed anonymous to news
+          console.log('[BOOT] Language selected, no auth tokens → warm up in background and navigate');
           try {
             const code = storedLanguage.code || 'en';
             // Best-effort warmup (non-fatal)

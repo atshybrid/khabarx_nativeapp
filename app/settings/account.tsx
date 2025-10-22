@@ -2,7 +2,7 @@ import SettingsRow from '@/components/settings/SettingsRow';
 import { Colors } from '@/constants/Colors';
 import { LANGUAGES } from '@/constants/languages';
 import { getUserPreferences, pickPreferenceLanguage, pickPreferenceLocation } from '@/services/api';
-import { checkPostArticleAccess, isCitizenReporter, loadTokens, softLogout } from '@/services/auth';
+import { checkPostArticleAccess, isCitizenReporter, loadTokens, logoutAndClearProfile } from '@/services/auth';
 import { on } from '@/services/events';
 import { getMembershipProfile, MembershipProfileData } from '@/services/membership';
 import { Feather } from '@expo/vector-icons';
@@ -159,7 +159,17 @@ export default function AccountScreen() {
         <Pressable
           onPress={async () => {
             if (loggedIn) {
-              await softLogout();
+              try {
+                await logoutAndClearProfile();
+              } catch {}
+              // Reset local UI state
+              try {
+                setMp(null);
+                setTokenRole('');
+                setLocExpanded(false);
+                setPhotoVersion(0);
+              } catch {}
+              // Navigate to language (existing behavior)
               router.replace('/language');
             } else {
               router.push('/auth/login');
@@ -218,7 +228,10 @@ export default function AccountScreen() {
             const validUpto = mp?.card?.expiresAt
               ? (() => { try { const d=new Date(mp.card!.expiresAt!); return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;} catch { return ''; } })()
               : '';
-            const photoUri = mp?.user?.profile?.profilePhotoUrl || undefined;
+            const basePhoto = mp?.user?.profile?.profilePhotoUrl || '';
+            const photoUri = basePhoto
+              ? `${basePhoto}${basePhoto.includes('?') ? '&' : '?' }v=${photoVersion}`
+              : undefined;
 
             return (
               <View style={styles.profileCard}>

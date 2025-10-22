@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApps, initializeApp } from 'firebase/app';
 import * as AuthNS from 'firebase/auth';
-import { browserLocalPersistence, browserSessionPersistence, initializeAuth } from 'firebase/auth';
+import { browserLocalPersistence, initializeAuth } from 'firebase/auth';
 import { Platform } from 'react-native';
 import { FIREBASE_CONFIG } from '../config/firebase';
 
@@ -48,10 +48,7 @@ export function ensureFirebaseAuthAsync(): Promise<import('firebase/auth').Auth>
           console.warn('[AUTH_INIT] getReactNativePersistence failed, falling back to in-memory', (e as any)?.message);
         }
       }
-      if (!persistence) {
-        // Fallback: session (will not survive app restarts) but avoids crash
-        persistence = browserSessionPersistence || undefined;
-      }
+      // If persistence could not be created, let Firebase use in-memory persistence on native
     }
     const auth = initializeAuth(app, persistence ? { persistence } : {});
     authSingleton = auth;
@@ -83,8 +80,6 @@ export function logFirebaseGoogleAlignment(debug?: boolean) {
   }
 }
 
-// Convenience eager init (safe – will no-op on failure and lazy path will retry).
-// Fire an eager async init (not awaited) to warm up early; errors are logged silently.
-if (isFirebaseConfigComplete()) {
-  ensureFirebaseAuthAsync().catch(e => console.log('[AUTH_INIT] Eager async init failed', e?.message));
-}
+// Note: Avoid eager init at module load to prevent timing issues where the
+// Auth component may not be registered yet on some RN versions. Initialization
+// is triggered from app/_layout.tsx after the app is mounted.

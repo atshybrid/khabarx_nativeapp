@@ -1,3 +1,4 @@
+import { Loader } from '@/components/ui/Loader';
 import { Colors } from '@/constants/Colors';
 import { createCitizenReporterMobile, getMpinStatus, loginWithMpin, requestOtpForMpinReset, setNewMpin, verifyOtpForMpinReset } from '@/services/api';
 import { getLastMobile, saveTokens } from '@/services/auth';
@@ -9,7 +10,7 @@ import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Keyboard, KeyboardAvoidingView, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Animated, Dimensions, Keyboard, KeyboardAvoidingView, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
@@ -744,7 +745,7 @@ export default function LoginScreen() {
               </View>
               {checking && (
                 <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color={Colors.light.secondary} />
+                  <Loader size={20} />
                   <Text style={styles.loadingText}>Verifying mobile number...</Text>
                 </View>
               )}
@@ -921,7 +922,7 @@ export default function LoginScreen() {
               
               {loadingContext && (
                 <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color={Colors.light.secondary} />
+                  <Loader size={20} />
                   <Text style={styles.loadingText}>Setting up your account...</Text>
                 </View>
               )}

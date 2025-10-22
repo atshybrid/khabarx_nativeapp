@@ -1,3 +1,4 @@
+import { Loader } from '@/components/ui/Loader';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import type { CategoryItem } from '@/services/api';
@@ -5,7 +6,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import BottomSheet from './BottomSheet';
 
 export type LiteCategory = { id: string; name: string; slug?: string; iconUrl?: string | null };
@@ -233,7 +234,7 @@ export default function CategoryPicker({ categories, value, onChange, label = 'C
       >
         {list.length === 0 ? (
           <View style={styles.loading}>
-            <ActivityIndicator />
+            <Loader size={48} />
           </View>
         ) : (
           <ScrollView contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="always">

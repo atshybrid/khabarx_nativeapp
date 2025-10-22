@@ -116,12 +116,15 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialState);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const lastScheduledExpiryRef = useRef<number | undefined>(undefined);
   const lastBackgroundTime = useRef<number>(0);
   // Ref to hold latest refresh function to avoid cyclic deps in scheduleTokenRefresh
   const doRefreshTokenRef = useRef<(() => Promise<boolean>) | undefined>(undefined);
+  // Ref to call the scheduler without adding it to effect deps
+  const scheduleRef = useRef<(expiresAt?: number) => void>(() => {});
 
   // Clear any existing timeout
-  const clearRefreshTimeout = useCallback(() => {
+  const clearRefreshTimeout = useCallback((): void => {
     if (refreshTimeoutRef.current) {
       clearTimeout(refreshTimeoutRef.current);
       refreshTimeoutRef.current = undefined;
@@ -129,22 +132,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Schedule token refresh
-  const scheduleTokenRefresh = useCallback((expiresAt?: number) => {
+  const scheduleTokenRefresh = useCallback((expiresAt?: number): void => {
+    // If no expiry provided, cancel any scheduled refresh
+    if (!expiresAt) {
+      clearRefreshTimeout();
+      lastScheduledExpiryRef.current = undefined;
+      return;
+    }
+
+    // Skip rescheduling if we already scheduled for the same expiry and timer is active
+    if (lastScheduledExpiryRef.current === expiresAt && refreshTimeoutRef.current) {
+      return;
+    }
+
+    // Replace any existing timer and schedule a new one
     clearRefreshTimeout();
-    
-    if (!expiresAt) return;
-    
+    lastScheduledExpiryRef.current = expiresAt;
+
     // Refresh token 5 minutes before expiry
     const refreshTime = expiresAt - (5 * 60 * 1000);
     const delay = Math.max(0, refreshTime - Date.now());
-    
+
     if (delay > 0) {
       refreshTimeoutRef.current = setTimeout(() => {
         console.log('[AUTH] Scheduled token refresh triggered');
         // Call latest version via ref to avoid useCallback cyclic deps
         doRefreshTokenRef.current?.();
       }, delay);
-      
+
       console.log(`[AUTH] Token refresh scheduled in ${Math.round(delay / 1000)}s`);
     }
   }, [clearRefreshTimeout]);
@@ -203,27 +218,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     doRefreshTokenRef.current = doRefreshToken;
   }, [doRefreshToken]);
 
+  // Keep schedule ref in sync with latest implementation
+  useEffect(() => {
+    scheduleRef.current = scheduleTokenRefresh;
+  }, [scheduleTokenRefresh]);
+
   // Initialize auth state
   useEffect(() => {
+    let mounted = true;
     const initializeAuth = async () => {
       try {
         dispatch({ type: 'LOADING', payload: true });
-        
+
         const tokens = await loadTokens();
         if (!tokens) {
-          dispatch({ type: 'LOADING', payload: false });
+          if (mounted) dispatch({ type: 'LOADING', payload: false });
           return;
         }
 
         // Check if token is expired
         if (isExpired(tokens.expiresAt)) {
           console.log('[AUTH] Token expired, attempting refresh');
-          const refreshSuccess = await doRefreshToken();
-          if (!refreshSuccess) {
+          const ok = await doRefreshTokenRef.current?.();
+          if (!ok) {
             // refreshToken handles logout internally now
             return;
           }
-          return; // refreshToken will update the state
+          return; // refresh will update state
         }
 
         // Token is valid, set authenticated state
@@ -234,24 +255,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ...tokens.user,
         };
 
-        dispatch({
-          type: 'LOGIN_SUCCESS',
-          payload: { tokens, user },
-        });
-
-        // Schedule refresh for valid token
-        scheduleTokenRefresh(tokens.expiresAt);
-        
+        if (mounted) {
+          dispatch({ type: 'LOGIN_SUCCESS', payload: { tokens, user } });
+          scheduleRef.current?.(tokens.expiresAt);
+        }
       } catch (error) {
         console.error('[AUTH] Initialization failed:', error);
         const authError = AuthErrorHandler.handle(error, 'auth_initialization');
-        dispatch({ type: 'LOGIN_ERROR', payload: authError.userMessage });
+        if (mounted) dispatch({ type: 'LOGIN_ERROR', payload: authError.userMessage });
         await clearTokens();
       }
     };
 
     initializeAuth();
-  }, [doRefreshToken, scheduleTokenRefresh]);
+    return () => { mounted = false; };
+  }, []);
 
   // (moved below isTokenExpired/logout definitions)
 

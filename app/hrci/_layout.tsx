@@ -17,6 +17,10 @@ export default function HrciLayout() {
         <Stack.Screen name="geo" />
         <Stack.Screen name="availability" />
         <Stack.Screen name="register" />
+        <Stack.Screen name="cases/index" />
+        <Stack.Screen name="cases/new" />
+        <Stack.Screen name="admin/cases" />
+    <Stack.Screen name="cases/[id]" />
       </Stack>
     </HrciOnboardingProvider>
   );

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { emit } from './events';
 import { request } from './http';
 
 export type Tokens = {
@@ -58,6 +59,49 @@ export async function softLogout(preserveKeys: string[] = [] , mobileNumber?: st
   // Optionally re-persist keys requested if they were inadvertently removed (none by default now)
   if (preserveKeys.length) {
     // No-op placeholder for future extension
+  }
+}
+
+// Centralized helper: attempt remote logout (best-effort), clear auth tokens and
+// cached profile fields, preserve last mobile for faster re-login, and notify UI.
+// Returns true when local cleanup completed (regardless of remote call success).
+export async function logoutAndClearProfile(opts: {
+  mobileNumberHint?: string | null;
+  extraKeysToClear?: string[];
+} = {}): Promise<boolean> {
+  try {
+    const jwt = await AsyncStorage.getItem('jwt');
+    const mobile = opts.mobileNumberHint
+      || (await AsyncStorage.getItem('profile_mobile'))
+      || (await AsyncStorage.getItem('last_login_mobile'))
+      || undefined;
+
+    // Best-effort remote logout if we have a JWT
+    if (jwt) {
+      try { await request('/auth/logout', { method: 'POST', body: {} }); } catch {}
+    }
+
+    // Clear tokens while preserving last mobile
+    await softLogout([], mobile);
+
+    // Remove common cached profile fields so UI resets everywhere
+    const baseKeys = [
+      'profile_name',
+      'profile_role',
+      'profile_photo_url',
+      'profile_location',
+      'profile_location_obj',
+    ];
+    const keys = opts.extraKeysToClear && opts.extraKeysToClear.length
+      ? [...baseKeys, ...opts.extraKeysToClear]
+      : baseKeys;
+    try { await AsyncStorage.multiRemove(keys); } catch {}
+
+    // Broadcast update for listeners to refresh
+    try { emit('profile:updated', { photoUrl: '' }); } catch {}
+    return true;
+  } catch {
+    return false;
   }
 }
 

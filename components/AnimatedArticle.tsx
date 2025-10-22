@@ -85,7 +85,8 @@ const AnimatedArticle: React.FC<AnimatedArticleProps> = ({
 const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'white',
+    // Use transparent so the page below controls its theme-aware background
+    backgroundColor: 'transparent',
   overflow: 'hidden',
   },
 });

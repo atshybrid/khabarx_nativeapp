@@ -30,3 +30,18 @@ export interface Article {
   metaTitle?: string;
   metaDescription?: string;
 }
+
+// Ad item for mixed feed
+export interface AdItem {
+  id: string;
+  title?: string;
+  mediaType?: string; // 'IMAGE' | 'VIDEO' | others
+  mediaUrls: string[]; // support single or multiple
+  posterUrl?: string;
+  clickUrl?: string;
+  languageId?: string;
+}
+
+export type FeedItem =
+  | { type: 'news'; article: Article }
+  | { type: 'ad'; ad: AdItem };

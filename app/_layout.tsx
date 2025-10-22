@@ -13,7 +13,7 @@ import { Platform, StyleSheet, Text, View } from 'react-native';
 // removed duplicate react-native import (merged above)
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
-import { AuthProvider } from '../context/AuthContext';
+import { AuthProvider } from '../context/AuthContextNew';
 import { ThemeProviderLocal, useThemePref } from '../context/ThemeContext';
 import { UiPrefsProvider } from '../context/UiPrefsContext';
 import { useColorScheme } from '../hooks/useColorScheme';

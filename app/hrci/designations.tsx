@@ -1,9 +1,11 @@
+import { Loader } from '@/components/ui/Loader';
+import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
 import { request } from '../../services/http';
@@ -55,7 +57,7 @@ export default function HrciDesignationsScreen() {
     return items.filter(i => !q || i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q));
   }, [items, query]);
 
-  if (loading) return <View style={styles.center}><ActivityIndicator /></View>;
+  if (loading) return <View style={styles.center}><Loader size={64} /></View>;
   if (error) {
     return (
       <View style={styles.center}>
@@ -130,7 +132,7 @@ const styles = StyleSheet.create({
   errorText: { color: '#EF4444', marginBottom: 12, fontWeight: '700' },
   retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#111827', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   retryText: { color: '#fff', fontWeight: '800' },
-  card: { backgroundColor: '#fff', padding: 16, borderRadius: 14, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 2, borderWidth: 1, borderColor: '#eef0f4' },
+  card: { backgroundColor: '#fff', padding: 16, borderRadius: 14, elevation: 2, borderWidth: 1, borderColor: '#eef0f4', ...makeShadow(6, { opacity: 0.06, blur: 20, y: 6 }) },
   title: { fontSize: 16, fontWeight: '800', color: '#111827' },
   sub: { color: '#6b7280', marginTop: 2, textTransform: 'capitalize' },
   searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F3F4F6', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },

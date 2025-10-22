@@ -1,10 +1,11 @@
+import { Loader } from '@/components/ui/Loader';
 import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
 import { persistPayOrder } from '../../services/hrciPayment';
@@ -275,7 +276,7 @@ export default function HrciAvailabilityScreen() {
     <SafeAreaView style={styles.loadingContainer} edges={['top','left','right','bottom']}>
       <StatusBar style="dark" backgroundColor="#f8fafc" />
       <View style={styles.loadingContent}>
-        <ActivityIndicator size="large" color="#FE0002" />
+  <Loader size={96} />
         <Text style={styles.loadingText}>Checking availability...</Text>
       </View>
     </SafeAreaView>
@@ -386,7 +387,7 @@ export default function HrciAvailabilityScreen() {
       {confirming && (
         <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
           <View style={{ alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-            <ActivityIndicator size="large" color="#ffffff" />
+            <Loader size={56} />
             <Text style={{ marginTop: 12, color: '#ffffff', fontWeight: '700' }}>Confirming payment…</Text>
           </View>
         </View>

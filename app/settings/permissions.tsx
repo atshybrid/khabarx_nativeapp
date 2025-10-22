@@ -1,8 +1,9 @@
+import { Loader } from '@/components/ui/Loader';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { getCachedPermissions, requestAppPermissions, type PermissionStatus } from '@/services/permissions';
 import { Feather } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function PermissionsScreen() {
   const bg = useThemeColor({}, 'background');
@@ -66,7 +67,7 @@ export default function PermissionsScreen() {
 
         {loading && (
           <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-            <ActivityIndicator />
+            <Loader size={48} />
           </View>
         )}
 

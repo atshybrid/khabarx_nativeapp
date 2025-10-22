@@ -3,8 +3,7 @@ module.exports = function (api) {
   return {
     presets: ['babel-preset-expo'],
     plugins: [
-      // Expo Router auto import / file-based routing
-      'expo-router/babel',
+      // Note: 'expo-router/babel' plugin is no longer required on SDK 50+ and can be removed
       [
         'module-resolver',
         {

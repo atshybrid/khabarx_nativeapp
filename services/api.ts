@@ -2,7 +2,7 @@
 import { LANGUAGES, Language } from '@/constants/languages';
 // Session semantics simplified: no more automatic guest bootstrap. Reading news is anonymous.
 // Authenticated actions require a real jwt issued via MPIN / registration flows.
-import { Article } from '@/types';
+import { AdItem, Article, FeedItem } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
@@ -12,28 +12,55 @@ import { HttpError, getBaseUrl, request } from './http';
 
 // ---- Mock Mode (ON/OFF) ----
 // Env override: EXPO_PUBLIC_FORCE_MOCK=true|1|on
+// Global disable: EXPO_PUBLIC_DISABLE_MOCK=true|1|on (wins over FORCE_MOCK)
+const DISABLE_MOCK = (() => {
+  const raw = String(process.env.EXPO_PUBLIC_DISABLE_MOCK ?? '').toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+})();
 const FORCE_MOCK = (() => {
   const raw = String(process.env.EXPO_PUBLIC_FORCE_MOCK ?? '').toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
 })();
 const MOCK_MODE_KEY = 'force_mock_mode';
 let mockModeCache: boolean | null = null;
+let mockModeReason: 'env' | 'storage' | null = null;
+let disableMockWarned = false; // ensure we don't spam the console when DISABLE_MOCK is on
 
 export async function getMockMode(): Promise<boolean> {
+  if (DISABLE_MOCK) {
+    if (!disableMockWarned) {
+      try { console.warn('[API] Mock mode forcibly disabled via EXPO_PUBLIC_DISABLE_MOCK'); } catch {}
+      disableMockWarned = true;
+    }
+    return false;
+  }
   if (mockModeCache !== null) return mockModeCache || FORCE_MOCK;
   const v = await AsyncStorage.getItem(MOCK_MODE_KEY);
   mockModeCache = v === '1' || v === 'true' || v === 'on';
-  return mockModeCache || FORCE_MOCK;
+  const enabled = (mockModeCache || FORCE_MOCK) === true;
+  mockModeReason = FORCE_MOCK ? 'env' : (mockModeCache ? 'storage' : null);
+  if (enabled) {
+    try { console.warn('[API] Mock mode enabled', { reason: mockModeReason }); } catch {}
+  }
+  return enabled;
 }
 
 export async function setMockMode(enabled: boolean) {
   mockModeCache = enabled;
   await AsyncStorage.setItem(MOCK_MODE_KEY, enabled ? '1' : '0');
+  mockModeReason = enabled ? 'storage' : null;
+  try { console.warn('[API] setMockMode', { enabled }); } catch {}
 }
 
 // API debug flag (mirrors EXPO_PUBLIC_HTTP_DEBUG)
 const DEBUG_API = (() => {
   const raw = String(process.env.EXPO_PUBLIC_HTTP_DEBUG ?? '').toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+})();
+
+// Extra verbose logging of /shortnews responses (set EXPO_PUBLIC_LOG_SHORTNEWS=1 to enable)
+const LOG_SHORTNEWS = (() => {
+  const raw = String(process.env.EXPO_PUBLIC_LOG_SHORTNEWS ?? '').toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
 })();
 
@@ -317,10 +344,105 @@ const mockArticles: Article[] = [
   // ... other mock articles
 ];
 
+// Normalize a single news object into Article
+function normalizeArticleFromAny(a: any): Article {
+  const tsBase = Date.now();
+  const toPlainText = (input: any): string => {
+    if (input == null) return '';
+    try { return String(input).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); } catch { return ''; }
+  };
+  let jsonLd: any = a?.jsonLd || a?.jsonld || a?.jsonLD;
+  if (jsonLd && typeof jsonLd === 'string') {
+    try { jsonLd = JSON.parse(jsonLd); } catch {}
+  }
+  const collectUrls = (input: any): string[] => {
+    const urls: string[] = [];
+    const push = (u?: string) => {
+      if (!u || typeof u !== 'string') return;
+      const trimmed = u.trim();
+      if (!trimmed) return;
+      if (/^(https?:)?\/\//i.test(trimmed) || /^data:/i.test(trimmed)) urls.push(trimmed);
+    };
+    const fromObj = (o: any) => { if (!o || typeof o !== 'object') return; push(o.url || o.src || o.source || o.imageUrl || o.original || o.secure_url || o.secureUrl || o.contentUrl); };
+    const walk = (val: any) => { if (!val) return; if (typeof val === 'string') push(val); else if (Array.isArray(val)) val.forEach(walk); else if (typeof val === 'object') fromObj(val); };
+    walk(input); return urls;
+  };
+  const primaryImage: string | undefined = a.primaryImageUrl
+    || a.primaryImage || a.featuredImage || a.image || a.imageUrl || a.thumbnail || (() => { const arr = collectUrls(jsonLd?.image); return arr[0]; })();
+  const primaryVideo: string | undefined = a.primaryVideoUrl || a.videoUrl || a.video || jsonLd?.video?.contentUrl;
+  const jsonLdImages: string[] = collectUrls(jsonLd?.image);
+  const mediaUrls: string[] = collectUrls(a?.mediaUrls);
+  const imageUrlsField: string[] = collectUrls(a?.imageUrls || a?.images || a?.gallery || a?.photos);
+  const seen = new Set<string>(); const allImages: string[] = [];
+  const add = (u?: string) => { if (u && !seen.has(u)) { seen.add(u); allImages.push(u); } };
+  add(primaryImage); [jsonLdImages, mediaUrls, imageUrlsField].forEach(arr => arr.forEach(add));
+  const imagesArr: string[] | undefined = allImages.length ? allImages : undefined;
+  const publisherLogo = jsonLd?.publisher?.logo?.url || (a.publisher?.logo?.url);
+  const publisherName = jsonLd?.publisher?.name || a.publisher?.name;
+  let genId = String(a.id ?? a._id ?? a.guid ?? a.slug ?? a.canonicalUrl ?? a.url ?? a.permalink ?? '');
+  if (!genId) {
+    const seed = `${a.title || ''}|${a.createdAt || a.publishDate || a.publishedAt || ''}`;
+    genId = seed && seed.length ? String(Math.abs(seed.split('').reduce((h: number, c: string) => ((h << 5) - h) + c.charCodeAt(0), 0))) : '';
+  }
+  if (!genId) genId = `${tsBase}`;
+  const rawAuthor = a.author || {};
+  const authorFullName = a.authorFullName || rawAuthor.fullName || a.authorName || rawAuthor.name || '';
+  const authorProfilePhoto = a.authorProfilePhotoUrl || rawAuthor.profilePhotoUrl || rawAuthor.avatar || '';
+  const authorRoleName = a.authorRoleName || rawAuthor.roleName || a.roleName || null;
+  const authorPlaceName = a.placeName || rawAuthor.placeName || null;
+  const computedTitle = (
+    a.title ?? a.headline ?? a.shortTitle ?? a.newsTitle ?? a.metaTitle ?? a.heading ?? a.titleText ?? a.headlineText ?? a.caption ?? a.name ?? a.seo?.metaTitle ?? a.seo?.title ?? ((a.description ?? a.summary ?? '') as string)
+  );
+  const rawBodyCandidate = (
+    a.content ?? a.body ?? a.text ?? a.detail ?? a.story ?? a.contentText ?? a.news ?? a.descriptionText ?? a.shortNews ?? a.shortNewsText ?? a.short_news ?? a.shortnews ?? a.newsText ?? a.news_text ?? a.newsContent ?? a.news_content ?? a.contentHtml ?? a.content_html ?? a.html ?? a.htmlContent ?? a.seo?.description ?? a.description ?? a.summary
+  );
+  const plainBody = toPlainText(rawBodyCandidate);
+  const articleObj: Article = {
+    id: genId,
+    title: (computedTitle && String(computedTitle).trim()) || 'Untitled',
+    summary: a.summary ?? a.description ?? a.shortDescription ?? a.seo?.metaDescription ?? a.seo?.description ?? a.caption ?? '',
+    body: plainBody,
+    image: imagesArr?.[0],
+    images: imagesArr,
+    videoUrl: primaryVideo,
+    author: {
+      id: a.authorId || rawAuthor.id,
+      name: authorFullName || '',
+      avatar: authorProfilePhoto || publisherLogo || '',
+      fullName: authorFullName || '',
+      profilePhotoUrl: authorProfilePhoto || '',
+      roleName: authorRoleName || null,
+      placeName: authorPlaceName || null,
+    } as any,
+    publisherName,
+    publisherLogo,
+    category: a.category?.name || a.categoryName || a.category?.title || a.category || 'General',
+    createdAt: a.createdAt ?? a.publishDate ?? a.publishedAt ?? jsonLd?.datePublished ?? new Date().toISOString(),
+    isRead: Boolean(a.isRead),
+    likes: (a.likeCount ?? a.likes) ?? 0,
+    dislikes: (a.dislikeCount ?? a.dislikes) ?? 0,
+    comments: (a.commentCount ?? a.comments) ?? 0,
+    language: a.languageCode || a.inLanguage || a.language,
+    tags: a.tags ?? [],
+    canonicalUrl: a.canonicalUrl || a.seo?.canonical || jsonLd?.mainEntityOfPage?.['@id'] || jsonLd?.url || undefined,
+    metaTitle: a.metaTitle || a.seo?.metaTitle || jsonLd?.headline || undefined,
+    metaDescription: a.metaDescription || a.seo?.metaDescription || jsonLd?.description || undefined,
+  } as Article;
+  if ((articleObj.title || '').trim() === 'Untitled') {
+    const synth = (articleObj.body || articleObj.summary || '').trim();
+    if (synth) {
+      const firstLine = synth.split(/\r?\n/)[0].slice(0, 96);
+      if (firstLine) articleObj.title = firstLine;
+    }
+  }
+  return articleObj;
+}
+
 export const getNews = async (lang: string, category?: string, cursor?: string): Promise<Article[]> => {
   try {
     // If mock mode is forced, skip network and return mock
     if (await getMockMode()) {
+      try { console.warn('[API] getNews returning mockArticles due to mock mode', { reason: mockModeReason }); } catch {}
       return mockArticles;
     }
 
@@ -329,21 +451,109 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
     // Correct endpoint: /shortnews with limit and optional cursor
     // Resolve languageId (required by public endpoint) via centralized resolver
     let languageId: string | undefined;
+    let languageCode: string | undefined = lang;
     try {
       const eff = await resolveEffectiveLanguage();
       languageId = eff.id;
+      languageCode = eff.code || languageCode;
+      if (DEBUG_API) {
+        try { console.log('[API] getNews: effective language', { languageId, languageCode, fromArg: lang }); } catch {}
+      }
     } catch {}
-    const params = new URLSearchParams({ limit: '10' });
-    if (languageId) params.set('languageId', languageId);
-  if (cursor) params.set('cursor', cursor);
-  // Do NOT pass category to backend yet; we filter client-side for stability
-  const endpoint = `/shortnews/public?${params.toString()}`;
-  const json = await request<{ data?: any[]; items?: any[]; success?: boolean; nextCursor?: string }>(endpoint, { timeoutMs: 30000, noAuth: true });
-    if (DEBUG_API) {
+  // Build parameter variants to maximize compatibility across deployments
+  const buildParams = (kv: Record<string, string | undefined>): URLSearchParams => {
+    const p = new URLSearchParams({ limit: '10' });
+    Object.entries(kv).forEach(([k, v]) => { if (v) p.set(k, v); });
+    if (cursor) p.set('cursor', cursor);
+    return p;
+  };
+  const paramVariants: { label: string; params: URLSearchParams }[] = [];
+  // Preferred: lang=<languageId>
+  if (languageId) paramVariants.push({ label: 'lang=id', params: buildParams({ lang: String(languageId) }) });
+  // Next: languageId=<id>
+  if (languageId) paramVariants.push({ label: 'languageId=id', params: buildParams({ languageId: String(languageId) }) });
+  // Next: language=<id> (older gateways)
+  if (languageId) paramVariants.push({ label: 'language=id', params: buildParams({ language: String(languageId) }) });
+  // Only if no id resolved, fall back to code-based params
+  if (!languageId && languageCode) {
+    paramVariants.push({ label: 'lang=code', params: buildParams({ lang: String(languageCode) }) });
+    paramVariants.push({ label: 'language=code', params: buildParams({ language: String(languageCode) }) });
+  }
+  // Last resort: no lang at all (server default)
+  if (!paramVariants.length) paramVariants.push({ label: 'no-lang', params: buildParams({}) });
+  if (DEBUG_API) {
+    try {
+      console.log('[API] getNews param variants', paramVariants.map(v => ({ label: v.label, qs: v.params.toString() })));
+    } catch {}
+  }
+  // Generate endpoint candidates across param variants (prefer the only public endpoint that works)
+  const candidates: string[] = [];
+  for (const v of paramVariants) {
+    const qs = v.params.toString();
+    // Public feed (works without auth) — primary and only target
+    candidates.push(`/shortnews/public?${qs}`);
+  }
+    let json: any = null;
+    let lastErr: any = null;
+    for (const ep of candidates) {
+      try {
+        json = await request<any>(ep as any, { timeoutMs: 30000, noAuth: true });
+        // Accept multiple shapes: array at top-level or nested in data/items
+        const arrTop = (json as any)?.data ?? (json as any)?.items ?? null;
+        const arrNested = (json as any)?.data?.items ?? (json as any)?.data?.data ?? (json as any)?.result?.items ?? null;
+        const listRawTry = Array.isArray(arrTop) ? arrTop : (Array.isArray(arrNested) ? arrNested : null);
+        if (Array.isArray(listRawTry)) {
+          // success path: keep endpoint in debug log
+          try {
+            console.log('[API] shortnews endpoint OK', ep, 'items=', listRawTry.length);
+            if (LOG_SHORTNEWS || DEBUG_API) {
+              const bodyPreview = (() => { try { return JSON.stringify(json).slice(0, 4000); } catch { return '(stringify failed)'; } })();
+              console.log('[API] shortnews RAW', {
+                endpoint: ep,
+                languageId,
+                languageCode,
+                count: listRawTry.length,
+                bodyPreview,
+              });
+              // Try to surface any language-related fields from the first item for quick inspection
+              const sample = listRawTry[0] || null;
+              if (sample && typeof sample === 'object') {
+                const langHints = {
+                  itemLanguageId: (sample as any).languageId || (sample as any)?.language?.id || null,
+                  itemLanguageCode: (sample as any)?.language?.code || null,
+                  itemCategory: (sample as any)?.category?.name || (sample as any)?.category || null,
+                  itemTitle: (sample as any)?.title || null,
+                };
+                console.log('[API] shortnews sample', langHints);
+              }
+            }
+          } catch {}
+          break;
+        }
+        // If not an array, continue trying others
+        try {
+          const keys = json && typeof json === 'object' ? Object.keys(json) : [];
+          console.warn('[API] shortnews unexpected shape; trying next', ep, { keys, hasTopArray: Array.isArray(arrTop), hasNestedArray: Array.isArray(arrNested) });
+        } catch {}
+      } catch (e) {
+        lastErr = e;
+        try { console.warn('[API] shortnews endpoint failed; trying next', ep, (e as any)?.message || e); } catch {}
+      }
+      json = null;
+    }
+    if (!json) {
+      // All attempts failed: do NOT fallback to mock when anonymous.
+      // Surface the error so UI can show an error/empty state.
+      if (lastErr) throw lastErr;
+      throw new Error('Shortnews endpoint not available');
+    }
+    const endpoint = 'multi';
+    if (DEBUG_API || LOG_SHORTNEWS) {
       const keys = json && typeof json === 'object' ? Object.keys(json as any) : [];
       const dataArr = Array.isArray((json as any)?.data) ? (json as any).data : null;
       const itemsArr = Array.isArray((json as any)?.items) ? (json as any).items : null;
-      const arr = dataArr || itemsArr;
+      const nestedArr = Array.isArray((json as any)?.data?.items) ? (json as any).data.items : (Array.isArray((json as any)?.data?.data) ? (json as any).data.data : null);
+      const arr = dataArr || itemsArr || nestedArr;
       const sample = Array.isArray(arr) && arr.length ? arr[0] : null;
       const sJsonLd = sample?.jsonLd || sample?.jsonld || sample?.jsonLD;
       console.log('[API] /shortnews response', {
@@ -351,6 +561,7 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
         keys,
         hasDataArray: Array.isArray(dataArr),
         hasItemsArray: Array.isArray(itemsArr),
+        hasNestedArray: Array.isArray(nestedArr),
         length: Array.isArray(arr) ? arr.length : null,
         sampleKeys: sample ? Object.keys(sample) : null,
         samplePreview: sample ? {
@@ -367,10 +578,19 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
         } : null,
       });
     }
-    const listRaw = (json as any)?.data ?? (json as any)?.items ?? null;
+    const listRaw = (json as any)?.data ?? (json as any)?.items ?? (json as any)?.data?.items ?? (json as any)?.data?.data ?? null;
     if (!Array.isArray(listRaw)) {
       // Hard fail if unexpected shape; caller decides what to do
       throw new Error('Invalid shortnews response');
+    }
+    // New mixed feed shape: [{ kind, data }] — filter to news
+    if (Array.isArray(listRaw) && listRaw.length && typeof listRaw[0] === 'object' && 'kind' in (listRaw[0] as any) && 'data' in (listRaw[0] as any)) {
+      const onlyNews = (listRaw as any[]).filter((x) => (x?.kind || '').toLowerCase() === 'news').map((x) => (x as any).data);
+      const normalized = onlyNews.map((a) => normalizeArticleFromAny(a));
+      const key = `news_cache:${lang}:${category || 'all'}`;
+      try { await AsyncStorage.setItem(key, JSON.stringify(normalized)); } catch {}
+      if (!normalized.length) throw new Error('Empty shortnews list');
+      return normalized;
     }
     const list = listRaw as any[];
     // Helper: collect URLs from mixed shapes (string | object | array)
@@ -400,18 +620,48 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
       return urls;
     };
 
-    // Normalize to Article shape with support for jsonLd and publisher data
-    const normalized: Article[] = list.map((a) => {
+  // Normalize to Article shape with support for jsonLd and publisher data
+  const tsBase = Date.now();
+  const toPlainText = (input: any): string => {
+    if (input == null) return '';
+    try {
+      const s = String(input);
+      // quick strip HTML tags and collapse whitespace
+      return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    } catch { return ''; }
+  };
+  const seenIds = new Set<string>();
+  const normalized: Article[] = list.map((a, idx) => {
       let jsonLd: any = (a as any)?.jsonLd || (a as any)?.jsonld || (a as any)?.jsonLD || undefined;
       if (jsonLd && typeof jsonLd === 'string') {
         try { jsonLd = JSON.parse(jsonLd); } catch { /* ignore parse errors */ }
       }
       // Prefer primary media fields from backend; fallback to jsonLd.image
-      const primaryImage: string | undefined = a.primaryImageUrl || a.coverImageUrl || a.featuredImage || a.image || a.thumbnail || (() => {
+      const primaryImage: string | undefined = a.primaryImageUrl
+        || a.primaryImage
+        || a.coverImageUrl
+        || a.cover
+        || a.coverUrl
+        || a.featuredImage
+        || a.image
+        || a.imageUrl
+        || a.imageURL
+        || a.image_link
+        || a.urlToImage
+        || a.thumbnail
+        || a.thumbnailUrl
+        || a.thumbnailImage
+        || a.photo
+        || a.photoUrl
+        || a.heroImage
+        || a.heroImageUrl
+        || a.poster
+        || a.posterUrl
+        || (() => {
         const arr = collectUrls(jsonLd?.image);
         return arr[0];
       })();
-      const primaryVideo: string | undefined = a.primaryVideoUrl || a.videoUrl || a.video || jsonLd?.video?.contentUrl;
+      const primaryVideo: string | undefined = a.primaryVideoUrl || a.videoUrl || a.video || a.videoLink || jsonLd?.video?.contentUrl;
       // Build media list from many possible fields, de-duplicate, keep primary first
       const jsonLdImages: string[] = collectUrls(jsonLd?.image);
       const mediaUrls: string[] = collectUrls((a as any)?.mediaUrls);
@@ -420,7 +670,7 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
       const photosField: string[] = collectUrls((a as any)?.photos);
       const mediaField: string[] = collectUrls((a as any)?.media);
       const mediaGalleryField: string[] = collectUrls((a as any)?.mediaGallery || (a as any)?.imageGallery);
-      const imageUrlsField: string[] = collectUrls((a as any)?.imageUrls || (a as any)?.imagesUrls);
+  const imageUrlsField: string[] = collectUrls((a as any)?.imageUrls || (a as any)?.imagesUrls || (a as any)?.imagesUrl || (a as any)?.thumbnails || (a as any)?.thumbnailImage || (a as any)?.imageURL || (a as any)?.urlToImage || (a as any)?.image_link);
       const seen = new Set<string>();
       const allImages: string[] = [];
       const add = (u?: string) => { if (u && !seen.has(u)) { seen.add(u); allImages.push(u); } };
@@ -429,7 +679,7 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
       const imagesArr: string[] | undefined = allImages.length ? allImages : undefined;
       const publisherLogo = jsonLd?.publisher?.logo?.url || (a.publisher?.logo?.url);
       const publisherName = jsonLd?.publisher?.name || a.publisher?.name;
-      const firstImage = imagesArr?.[0] || 'https://picsum.photos/800/1200';
+  const firstImage = imagesArr?.[0];
       const videoUrl: string | undefined = primaryVideo;
   // Extended author fields (backend may send either nested author.* or flat fields)
   const rawAuthor = (a as any).author || {};
@@ -438,12 +688,45 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
   const authorRoleName = (a as any).authorRoleName || rawAuthor.roleName || (a as any).roleName;
   const authorPlaceName = (a as any).authorPlaceName || rawAuthor.placeName || (a as any).placeName;
   const authorName = authorFullName || rawAuthor.name || (a as any).authorName || jsonLd?.author?.name || '';
-  const authorAvatar = authorProfilePhoto || rawAuthor.avatar || (a as any).authorAvatar || publisherLogo || 'https://i.pravatar.cc/100';
+  const authorAvatar = authorProfilePhoto || rawAuthor.avatar || (a as any).authorAvatar || publisherLogo || '';
+      // Generate a stable unique id: prefer backend ids; else derive from content; finally fall back to ts+idx
+      let genId = String(
+        a.id ?? a._id ?? (a.guid || a.slug || a.canonicalUrl || a.url || a.permalink) ?? ''
+      );
+      if (!genId) {
+        const seed = `${a.title || ''}|${a.createdAt || a.publishDate || a.publishedAt || ''}`;
+        genId = seed && seed.length ? String(Math.abs(seed.split('').reduce((h: number, c: string) => ((h << 5) - h) + c.charCodeAt(0), 0))) : '';
+      }
+      if (!genId) genId = `${tsBase}_${idx}`;
+      // Ensure uniqueness within this batch
+      while (seenIds.has(genId)) {
+        genId = `${genId}_${idx}`;
+      }
+      seenIds.add(genId);
+
+      // Prefer richer title fields; fall back to body-derived text
+      const computedTitle = (
+        a.title ?? a.headline ?? a.shortTitle ?? a.newsTitle ?? a.metaTitle ??
+        a.heading ?? a.titleText ?? a.headlineText ?? a.caption ?? a.name ??
+        (a.short_news_title || a.shortNewsTitle || a.newsHeading || a.heading_text || a.title_text) ??
+        jsonLd?.headline ?? a.seo?.metaTitle ?? a.seo?.title ??
+        ((a.description ?? a.summary ?? '') as string)
+      );
+
+      const rawBodyCandidate = (
+        a.content ?? a.body ?? a.text ?? a.detail ?? a.story ?? a.contentText ?? a.news ??
+        a.descriptionText ?? a.shortNews ?? a.shortNewsText ?? a.short_news ?? a.shortnews ??
+        a.newsText ?? a.news_text ?? a.newsContent ?? a.news_content ??
+        a.contentHtml ?? a.content_html ?? a.html ?? a.htmlContent ??
+        a.seo?.description ?? a.description ?? a.summary
+      );
+      const plainBody = toPlainText(rawBodyCandidate);
+
       const articleObj: Article = {
-        id: String(a.id ?? a._id ?? Date.now()),
-        title: a.title ?? jsonLd?.headline ?? 'Untitled',
-        summary: a.summary ?? a.seo?.metaDescription ?? a.seo?.description ?? '',
-        body: a.content ?? a.body ?? a.seo?.description ?? '',
+        id: genId,
+        title: (computedTitle && String(computedTitle).trim()) || 'Untitled',
+        summary: a.summary ?? a.description ?? a.shortDescription ?? a.seo?.metaDescription ?? a.seo?.description ?? a.caption ?? '',
+        body: plainBody,
         image: firstImage,
         images: imagesArr,
         videoUrl,
@@ -458,7 +741,7 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
         } as any,
         publisherName,
         publisherLogo,
-        category: a.category?.name || a.categoryName || a.category || 'General',
+        category: a.category?.name || a.categoryName || a.category?.title || a.category || 'General',
         createdAt: a.createdAt ?? a.publishDate ?? a.publishedAt ?? jsonLd?.datePublished ?? new Date().toISOString(),
         isRead: Boolean(a.isRead),
         likes: a.likes ?? 0,
@@ -466,10 +749,18 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
         comments: a.comments ?? 0,
         language: a.languageCode || a.inLanguage || a.language,
         tags: a.tags ?? [],
-        canonicalUrl: (a as any).canonicalUrl || (a.seo?.canonical) || jsonLd?.mainEntityOfPage?.['@id'] || jsonLd?.url || undefined,
-        metaTitle: (a as any).metaTitle || a.seo?.metaTitle || jsonLd?.headline || undefined,
-        metaDescription: (a as any).metaDescription || a.seo?.metaDescription || jsonLd?.description || undefined,
+  canonicalUrl: (a as any).canonicalUrl || (a.seo?.canonical) || jsonLd?.mainEntityOfPage?.['@id'] || jsonLd?.url || (a as any).url || (a as any).link || undefined,
+        metaTitle: (a as any).metaTitle || a.headline || a.shortTitle || a.title || a.seo?.metaTitle || jsonLd?.headline || undefined,
+        metaDescription: (a as any).metaDescription || a.summary || a.description || a.seo?.metaDescription || jsonLd?.description || undefined,
       } as Article;
+      // If backend didn’t provide a usable title, synthesize one from body/summary
+      if ((articleObj.title || '').trim() === 'Untitled') {
+        const synth = (articleObj.body || articleObj.summary || '').trim();
+        if (synth) {
+          const firstLine = synth.split(/\r?\n/)[0].slice(0, 96);
+          if (firstLine) articleObj.title = firstLine;
+        }
+      }
       if (DEBUG_API) {
         (articleObj as any)._mediaDebug = {
           counts: {
@@ -509,10 +800,164 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
   }
 };
 
+export const getNewsFeed = async (lang: string, category?: string, cursor?: string): Promise<{ items: FeedItem[]; nextCursor?: string | null; hasMore?: boolean } > => {
+  // Reuse the same network logic as getNews but keep kind=ad items too
+  const itemsArticles = await (async () => {
+    // Call the same endpoint resolution logic via getNews but we need raw JSON; to avoid duplication, repeat minimal request logic
+    let languageId: string | undefined; let languageCode: string | undefined = lang;
+    try { const eff = await resolveEffectiveLanguage(); languageId = eff.id; languageCode = eff.code || languageCode; } catch {}
+    const buildParams = (kv: Record<string, string | undefined>): URLSearchParams => { const p = new URLSearchParams({ limit: '10' }); Object.entries(kv).forEach(([k, v]) => { if (v) p.set(k, v); }); if (cursor) p.set('cursor', cursor); return p; };
+    const paramVariants: { label: string; params: URLSearchParams }[] = [];
+    if (languageId) paramVariants.push({ label: 'lang=id', params: buildParams({ lang: String(languageId) }) });
+    if (languageId) paramVariants.push({ label: 'languageId=id', params: buildParams({ languageId: String(languageId) }) });
+    if (languageId) paramVariants.push({ label: 'language=id', params: buildParams({ language: String(languageId) }) });
+    if (!languageId && languageCode) { paramVariants.push({ label: 'lang=code', params: buildParams({ lang: String(languageCode) }) }); paramVariants.push({ label: 'language=code', params: buildParams({ language: String(languageCode) }) }); }
+    if (!paramVariants.length) paramVariants.push({ label: 'no-lang', params: buildParams({}) });
+    const candidates: string[] = []; for (const v of paramVariants) { const qs = v.params.toString(); candidates.push(`/shortnews/public?${qs}`); }
+    let json: any = null; let lastErr: any = null;
+    for (const ep of candidates) { try { json = await request<any>(ep as any, { timeoutMs: 30000, noAuth: true }); break; } catch (e) { lastErr = e; json = null; } }
+    if (!json) { if (lastErr) throw lastErr; throw new Error('Shortnews endpoint not available'); }
+    const pageInfo = (json as any)?.pageInfo || null;
+    const listRaw = (json as any)?.data ?? (json as any)?.items ?? (json as any)?.data?.items ?? (json as any)?.data?.data ?? null;
+    const out: { items: FeedItem[]; nextCursor?: string | null; hasMore?: boolean } = { items: [], nextCursor: pageInfo?.nextCursor || null, hasMore: Boolean(pageInfo?.hasMore) };
+    if (!Array.isArray(listRaw)) {
+      // Old shape: just articles
+      const arr = Array.isArray((json as any)?.data) ? (json as any).data : Array.isArray((json as any)?.items) ? (json as any).items : [];
+      out.items = arr.map((a: any) => ({ type: 'news', article: normalizeArticleFromAny(a) }));
+      return out;
+    }
+    for (const entry of listRaw) {
+      if (entry && typeof entry === 'object' && 'kind' in entry && 'data' in entry) {
+        const kind = String(entry.kind || '').toLowerCase();
+        if (kind === 'news') {
+          out.items.push({ type: 'news', article: normalizeArticleFromAny(entry.data) });
+        } else if (kind === 'ad') {
+          const d = entry.data || {};
+          const mediaUrls: string[] = Array.isArray(d.mediaUrls) ? d.mediaUrls : (d.mediaUrl ? [d.mediaUrl] : []);
+          const ad: AdItem = {
+            id: String(d.id || `ad_${Math.random().toString(36).slice(2)}`),
+            title: d.title || undefined,
+            mediaType: d.mediaType || undefined,
+            mediaUrls,
+            posterUrl: d.posterUrl || undefined,
+            clickUrl: d.clickUrl || undefined,
+            languageId: d.languageId || undefined,
+          };
+          out.items.push({ type: 'ad', ad });
+        }
+      } else {
+        // If backend returns plain articles in the same array, treat as news
+        out.items.push({ type: 'news', article: normalizeArticleFromAny(entry) });
+      }
+    }
+    return out;
+  })();
+  return itemsArticles;
+};
+
 export const getArticleById = async (id: string): Promise<Article | undefined> => {
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 500));
+  if (!id) return undefined;
+  // Mock-mode: keep existing mock behavior
+  if (await getMockMode()) {
     return mockArticles.find(article => article.id === id);
+  }
+  try {
+    // 1) Try local caches from any language/category for instant hit
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const newsKeys = (keys || []).filter(k => k.startsWith('news_cache:'));
+      if (newsKeys.length) {
+        const pairs = await AsyncStorage.multiGet(newsKeys);
+        for (const [, val] of pairs) {
+          if (!val) continue;
+          try {
+            const arr = JSON.parse(val) as Article[];
+            const found = (arr || []).find(a => String(a.id) === String(id));
+            if (found) return found;
+          } catch {}
+        }
+      }
+    } catch {}
+
+    // 2) Try backend detail endpoints (adaptive)
+    const candidates = [
+      `/shortnews/${encodeURIComponent(id)}`,
+      `/shortnews/item?id=${encodeURIComponent(id)}`,
+      `/news/${encodeURIComponent(id)}`,
+    ];
+    let data: any = null;
+    let lastErr: any = null;
+    for (const ep of candidates) {
+      try {
+        const json = await request<any>(ep as any, { noAuth: true, timeoutMs: 20000 });
+        // Accept common shapes
+        data = (json as any)?.data || (json as any)?.item || (json as any);
+        if (data && typeof data === 'object') {
+          try { console.log('[API] getArticleById OK', ep); } catch {}
+          break;
+        }
+      } catch (e) {
+        lastErr = e;
+        try { console.warn('[API] getArticleById failed; trying next', ep, (e as any)?.message || e); } catch {}
+      }
+      data = null;
+    }
+    if (!data) {
+      if (lastErr) throw lastErr;
+      return undefined;
+    }
+
+    // Minimal normalization (reuse logic from list where possible)
+    const a: any = data;
+    let jsonLd: any = a?.jsonLd || a?.jsonld || a?.jsonLD;
+    if (jsonLd && typeof jsonLd === 'string') {
+      try { jsonLd = JSON.parse(jsonLd); } catch {}
+    }
+    const firstImage = a.primaryImageUrl || a.coverImageUrl || a.featuredImage || a.image || a.thumbnail || (() => {
+      const img = (jsonLd?.image && Array.isArray(jsonLd.image) && jsonLd.image[0]) || undefined;
+      return typeof img === 'string' ? img : (img?.url || undefined);
+    })();
+    const primaryVideo: string | undefined = a.primaryVideoUrl || a.videoUrl || a.video || jsonLd?.video?.contentUrl;
+    const authorObj = a.author || {};
+    const authorName = a.authorFullName || authorObj.fullName || authorObj.name || jsonLd?.author?.name || '';
+    const authorAvatar = a.authorProfilePhotoUrl || authorObj.profilePhotoUrl || authorObj.avatar || '';
+    const publisherLogo = jsonLd?.publisher?.logo?.url || (a.publisher?.logo?.url);
+    const publisherName = jsonLd?.publisher?.name || a.publisher?.name;
+    const article: Article = {
+      id: String(a.id || a._id || id),
+      title: a.title || jsonLd?.headline || 'Untitled',
+      summary: a.summary || a.seo?.metaDescription || a.seo?.description || '',
+      body: a.content || a.body || a.seo?.description || '',
+      image: firstImage,
+      images: Array.isArray(a.images) ? a.images : undefined,
+      videoUrl: primaryVideo,
+      author: {
+        id: a.authorId || authorObj.id,
+        name: authorName,
+        avatar: authorAvatar,
+        fullName: authorName,
+        profilePhotoUrl: authorAvatar,
+        roleName: authorObj.roleName || null,
+        placeName: authorObj.placeName || null,
+      } as any,
+      publisherName,
+      publisherLogo,
+      category: a.category?.name || a.categoryName || a.category || 'General',
+      createdAt: a.createdAt ?? a.publishDate ?? a.publishedAt ?? jsonLd?.datePublished ?? new Date().toISOString(),
+      isRead: Boolean(a.isRead),
+      likes: a.likes ?? 0,
+      dislikes: a.dislikes ?? 0,
+      comments: a.comments ?? 0,
+      language: a.languageCode || a.inLanguage || a.language,
+      tags: a.tags ?? [],
+      canonicalUrl: a.canonicalUrl || a.seo?.canonical || jsonLd?.mainEntityOfPage?.['@id'] || jsonLd?.url || undefined,
+      metaTitle: a.metaTitle || a.seo?.metaTitle || jsonLd?.headline || undefined,
+      metaDescription: a.metaDescription || a.seo?.metaDescription || jsonLd?.description || undefined,
+    } as Article;
+    return article;
+  } catch {
+    return undefined;
+  }
 }
 
 // Lightweight translation helper. Tries backend first; falls back to no-op.

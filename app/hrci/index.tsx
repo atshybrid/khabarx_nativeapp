@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
 import { on } from '../../services/events';
+import { canCreateHrciCase, getHrciCasesSummary, HrciCasesSummary } from '../../services/hrciCases';
 import { request } from '../../services/http';
 
 type Profile = {
@@ -81,6 +82,23 @@ type CaseStats = {
   rejected: number;
 };
 
+// Small helper to color the tiny status dot in smart mini-cards
+function dotStyleForStatus(status: string) {
+  const s = String(status || '').toUpperCase();
+  switch (s) {
+    case 'NEW': return { backgroundColor: '#E5E7EB' };
+    case 'TRIAGED': return { backgroundColor: '#DBEAFE' };
+    case 'IN_PROGRESS': return { backgroundColor: '#FEF3C7' };
+    case 'LEGAL_REVIEW': return { backgroundColor: '#EDE9FE' };
+    case 'ACTION_TAKEN': return { backgroundColor: '#DBEAFE' };
+    case 'RESOLVED': return { backgroundColor: '#DCFCE7' };
+    case 'REJECTED': return { backgroundColor: '#FEE2E2' };
+    case 'CLOSED': return { backgroundColor: '#E5E7EB' };
+    case 'ESCALATED': return { backgroundColor: '#FFE4E6' };
+    default: return { backgroundColor: '#E5E7EB' };
+  }
+}
+
 export default function HrciDashboard() {
   const router = useRouter();
   const {
@@ -97,6 +115,7 @@ export default function HrciDashboard() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [membership, setMembership] = useState<Membership | null>(null);
   const [stats, setStats] = useState<CaseStats>({ total: 0, completed: 0, pending: 0, rejected: 0 });
+  const [summary, setSummary] = useState<HrciCasesSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [usingFallbackMembership, setUsingFallbackMembership] = useState(false);
@@ -163,29 +182,23 @@ export default function HrciDashboard() {
   };
 
   const loadStats = async () => {
-    console.log('[Dashboard] 📈 Loading case statistics...');
-    
+    console.log('[Dashboard] 📈 Loading case statistics (summary)…');
     try {
-      // Mock data for now - replace with actual API calls
-      const mockStats = {
-        total: 12,
-        completed: 8,
-        pending: 3,
-        rejected: 1
-      };
-      
-      console.log('[Dashboard] 📊 Case Stats Loaded:', {
-        ...mockStats,
-        completionRate: `${Math.round((mockStats.completed / mockStats.total) * 100)}%`,
-        timestamp: new Date().toISOString()
-      });
-      
-      setStats(mockStats);
+      const start = Date.now();
+      const sum = await getHrciCasesSummary();
+      const ms = Date.now() - start;
+      console.log(`[Dashboard] ✅ Summary loaded (${ms}ms)`, sum);
+      setSummary(sum);
+      // Derive basic 4 numbers for the legacy section (we will remove that grid below)
+      const completed = (sum.breakdown?.RESOLVED || 0) + (sum.breakdown?.CLOSED || 0) + (sum.breakdown?.COMPLETED || 0) + (sum.breakdown?.DONE || 0);
+      const rejected = (sum.breakdown?.REJECTED || 0) + (sum.breakdown?.REVOKED || 0) + (sum.breakdown?.DENIED || 0);
+      // Treat everything else as pending/open bucket (best effort, not shown prominently anymore)
+      const pending = (sum.pending ?? 0);
+      setStats({ total: sum.total || 0, completed, pending, rejected });
     } catch (e: any) {
-      console.error('[Dashboard] ❌ Stats Load Failed:', {
-        error: e?.message || 'Unknown error',
-        timestamp: new Date().toISOString()
-      });
+      console.error('[Dashboard] ❌ Summary Load Failed:', { error: e?.message || 'Unknown error' });
+      // Keep zeros and allow UI to render
+      setSummary(null);
     }
   };
 
@@ -316,10 +329,9 @@ export default function HrciDashboard() {
     if (!compositeOk) {
       // Fall back to parallel individual loads (profile + membership) if composite not available
       await Promise.all([loadProfile(), loadMembership()]);
-    } else {
-      // Still load stats in parallel; they are mock currently
-      await loadStats();
     }
+    // Always load summary stats
+    await loadStats();
     const endTime = Date.now();
     console.log(`[Dashboard] ✅ Dashboard loaded successfully (${endTime - startTime}ms) (composite=${compositeOk})`);
     setLoading(false);
@@ -545,39 +557,22 @@ export default function HrciDashboard() {
           </View>
         </LinearGradient>
 
-        {/* Stats Cards */}
+        {/* Smart Stats Mini-Cards */}
         <View style={styles.statsContainer}>
           <Text style={styles.sectionTitle}>Case Statistics</Text>
-          <View style={styles.statsGrid}>
-            <StatsCard
-              title="Total Cases"
-              value={stats.total}
-              icon="folder"
-              color="#3b82f6"
-              bgColor="#eff6ff"
-            />
-            <StatsCard
-              title="Completed"
-              value={stats.completed}
-              icon="check-circle"
-              color="#FE0002"
-              bgColor="#f0fdf4"
-            />
-            <StatsCard
-              title="Pending"
-              value={stats.pending}
-              icon="clock"
-              color="#f59e0b"
-              bgColor="#fffbeb"
-            />
-            <StatsCard
-              title="Rejected"
-              value={stats.rejected}
-              icon="close-circle"
-              color="#ef4444"
-              bgColor="#fef2f2"
-            />
-          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsScroll}>
+            <View style={styles.statMiniCard}>
+              <Text style={styles.statMiniLabel}>Total</Text>
+              <Text style={styles.statMiniValue}>{summary?.total ?? stats.total}</Text>
+            </View>
+            {(['NEW','TRIAGED','IN_PROGRESS','LEGAL_REVIEW','ACTION_TAKEN','RESOLVED','REJECTED','ESCALATED','CLOSED'] as const).map((k) => (
+              <View key={k} style={styles.statMiniCard}>
+                <View style={[styles.statDot, dotStyleForStatus(k)]} />
+                <Text style={styles.statMiniLabel}>{k.replace('_',' ')}</Text>
+                <Text style={styles.statMiniValue}>{summary?.breakdown?.[k] ?? 0}</Text>
+              </View>
+            ))}
+          </ScrollView>
         </View>
 
         {/* Quick Actions */}
@@ -588,13 +583,51 @@ export default function HrciDashboard() {
               title="New Case"
               subtitle="File a new case"
               icon="plus-circle"
-              onPress={() => Alert.alert('Coming Soon', 'New case filing will be available soon!')}
+              onPress={async () => {
+                try {
+                  const res = await canCreateHrciCase();
+                  if (!res.allowed) {
+                    Alert.alert('Not allowed', res.reason || 'Only Member or HRCI Admin can create cases');
+                    return;
+                  }
+                  // Directly open Create Case page
+                  router.push('/hrci/cases/new' as any);
+                } catch (e:any) {
+                  Alert.alert('Error', e?.message || 'Unable to open create case');
+                }
+              }}
             />
+            {/* Show Legal Advise card only for LEGAL_SECRETARY designation (member scope) */}
+            {(() => {
+              const desigCode = typeof membership?.designation === 'string' ? String(membership?.designation) : String((membership as any)?.designation?.code || '');
+              const show = desigCode.toUpperCase() === 'LEGAL_SECRETARY';
+              if (!show) return null;
+              return (
+                <ActionCard
+                  title="Legal Advise"
+                  subtitle="Review and advise"
+                  icon="scale-balance"
+                  onPress={() => router.push('/hrci/legal' as any)}
+                />
+              );
+            })()}
             <ActionCard
               title="My Cases"
               subtitle="View all cases"
               icon="folder-open"
-              onPress={() => Alert.alert('Coming Soon', 'Case management will be available soon!')}
+              onPress={() => router.push('/hrci/cases' as any)}
+            />
+            <ActionCard
+              title="Meetings"
+              subtitle="Join upcoming"
+              icon="video-outline"
+              onPress={() => router.push('/hrci/meet' as any)}
+            />
+            <ActionCard
+              title="Donations"
+              subtitle="Manage & create"
+              icon="cash-multiple"
+              onPress={() => router.push('/hrci/donations' as any)}
             />
             <ActionCard
               title="Reports"
@@ -632,24 +665,6 @@ function SkeletonBox({ style }: { style?: any }) {
 
   return (
     <Animated.View style={[{ backgroundColor: '#e5e7eb' }, style, { opacity: opacity.current }]} />
-  );
-}
-
-function StatsCard({ title, value, icon, color, bgColor }: {
-  title: string;
-  value: number;
-  icon: string;
-  color: string;
-  bgColor: string;
-}) {
-  return (
-    <View style={[styles.statsCard, { backgroundColor: bgColor }]}>
-      <View style={styles.statsIcon}>
-        <MaterialCommunityIcons name={icon as any} size={24} color={color} />
-      </View>
-      <Text style={styles.statsValue}>{value}</Text>
-      <Text style={styles.statsTitle}>{title}</Text>
-    </View>
   );
 }
 
@@ -722,18 +737,12 @@ const styles = StyleSheet.create({
   idCardFullText: { fontSize: 14, fontWeight: '700', color: '#ffffff' },
   statsContainer: { padding: 16 },
   sectionTitle: { fontSize: 20, fontWeight: '800', color: '#111827', marginBottom: 16 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  statsCard: {
-    flex: 1,
-    minWidth: '45%',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    ...makeShadow(2, { opacity: 0.05, y: 1, blur: 12 })
-  },
-  statsIcon: { marginBottom: 8 },
-  statsValue: { fontSize: 24, fontWeight: '800', color: '#111827', marginBottom: 4 },
-  statsTitle: { fontSize: 12, fontWeight: '600', color: '#6b7280', textAlign: 'center' },
+  // Smart mini-cards styling
+  statsScroll: { paddingHorizontal: 16, gap: 8 },
+  statMiniCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e5e7eb', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, alignItems: 'center', minWidth: 84 },
+  statMiniLabel: { color: '#6b7280', fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
+  statMiniValue: { color: '#111', fontSize: 16, fontWeight: '800', marginTop: 2 },
+  statDot: { width: 8, height: 8, borderRadius: 999, marginBottom: 6 },
   actionsContainer: { paddingHorizontal: 16 },
   actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   actionCard: {

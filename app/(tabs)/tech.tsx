@@ -1,11 +1,12 @@
 import BottomSheet from '@/components/ui/BottomSheet';
+import { Loader } from '@/components/ui/Loader';
 import { Colors } from '@/constants/Colors';
 import { LANGUAGES, type Language } from '@/constants/languages';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useThemeColor } from '@/hooks/useThemeColor';
-import { afterPreferencesUpdated, getUserPreferences, logout, pickPreferenceLanguage, pickPreferenceLocation, updatePreferences, updateUserProfile, uploadMedia } from '@/services/api';
-import { loadTokens, saveTokens, softLogout } from '@/services/auth';
+import { afterPreferencesUpdated, getUserPreferences, pickPreferenceLanguage, pickPreferenceLocation, updatePreferences, updateUserProfile, uploadMedia } from '@/services/api';
+import { loadTokens, logoutAndClearProfile, saveTokens } from '@/services/auth';
 import { on } from '@/services/events';
 import { requestMediaPermissionsOnly } from '@/services/permissions';
 import { makeShadow } from '@/utils/shadow';
@@ -14,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, BackHandler, Image, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, BackHandler, Image, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AccountScreen() {
@@ -30,6 +31,7 @@ export default function AccountScreen() {
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [photoUrl, setPhotoUrl] = useState<string>('');
+  const [photoVersion, setPhotoVersion] = useState<number>(0);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [location, setLocation] = useState('');
   const [language, setLanguage] = useState<Language | null>(null);
@@ -46,14 +48,20 @@ export default function AccountScreen() {
       if (t?.user) {
         setName(t.user.fullName || t.user.name || '');
         setRole(t.user.role || '');
-        if (t.user.profilePhotoUrl) setPhotoUrl(t.user.profilePhotoUrl);
+        if (t.user.profilePhotoUrl) {
+          setPhotoUrl(t.user.profilePhotoUrl);
+          setPhotoVersion((v) => v + 1);
+        }
       } else {
         const savedName = await AsyncStorage.getItem('profile_name');
         if (savedName) setName(savedName);
         const savedRole = await AsyncStorage.getItem('profile_role');
         if (savedRole) setRole(savedRole);
         const savedPhoto = await AsyncStorage.getItem('profile_photo_url');
-        if (savedPhoto) setPhotoUrl(savedPhoto);
+        if (savedPhoto) {
+          setPhotoUrl(savedPhoto);
+          setPhotoVersion((v) => v + 1);
+        }
       }
 
       // Resolve language with local-first strategy to avoid "late" updates on UI
@@ -161,13 +169,16 @@ export default function AccountScreen() {
   const gotoLogin = () => router.push('/auth/login');
   const doLogout = async () => {
     try {
-      const jwt = await AsyncStorage.getItem('jwt');
-      const mobile = await AsyncStorage.getItem('profile_mobile') || await AsyncStorage.getItem('last_login_mobile') || '';
-        if (jwt) { try { await logout(); } catch (e:any) { console.warn('[UI] remote logout failed (continuing)', e?.message); } }
-  // legacy is_guest_session flag no longer in use
-      await softLogout([], mobile || undefined);
+      await logoutAndClearProfile();
+      // Reset local UI state
       setLoggedIn(false);
-      // Keep role if present but tokens gone; ensures fast MPIN flow next time
+      setName('');
+      setRole('');
+      setPhotoUrl('');
+      setPhotoVersion(0);
+      setHrciMembership(null);
+      // Optionally navigate
+      // try { router.replace('/news'); } catch {}
     } catch (e) {
       try { console.warn('[UI] logout failed locally', (e as any)?.message); } catch {}
     }
@@ -309,13 +320,13 @@ export default function AccountScreen() {
             <Pressable onPress={pickAndUploadAvatar} disabled={!loggedIn || uploadingPhoto} accessibilityLabel="Change profile photo"> 
               <View style={styles.avatar}> 
                 {photoUrl ? (
-                  <Image source={{ uri: photoUrl }} style={styles.avatarImg} /> 
+                  <Image source={{ uri: `${photoUrl}${photoUrl.includes('?') ? '&' : '?' }v=${photoVersion}` }} style={styles.avatarImg} /> 
                 ) : (
                   <Text style={[styles.avatarText, { color: scheme === 'dark' ? '#fff' : Colors.light.primary }]}>{(name || 'G').charAt(0).toUpperCase()}</Text> 
                 )}
                 {uploadingPhoto ? (
                   <View style={[styles.avatarOverlay, { backgroundColor: scheme === 'dark' ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.6)' }]}> 
-                    <ActivityIndicator color={Colors.light.primary} /> 
+                    <Loader size={32} /> 
                   </View> 
                 ) : null}
               </View> 
