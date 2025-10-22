@@ -62,6 +62,10 @@ export async function getKYCStatus(): Promise<KYCStatusResponse['data']> {
     });
     const record = (res as any)?.data || (res as any);
     const raw = record?.data ?? record; // accept either shape
+    // If API returns success with data: null, treat as PENDING (under verification)
+    if (record && record.success === true && record.data === null) {
+      return { kycCompleted: false, status: 'PENDING' };
+    }
     if (!raw || !raw.id) {
       return { kycCompleted: false, status: 'NOT_STARTED' };
     }

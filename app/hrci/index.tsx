@@ -20,6 +20,7 @@ import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
 import { on } from '../../services/events';
 import { canCreateHrciCase, getHrciCasesSummary, HrciCasesSummary } from '../../services/hrciCases';
 import { request } from '../../services/http';
+import { getKYCStatus } from '../../services/kyc';
 
 type Profile = {
   fullName?: string;
@@ -120,6 +121,7 @@ export default function HrciDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [usingFallbackMembership, setUsingFallbackMembership] = useState(false);
   const [cardInfo, setCardInfo] = useState<CardInfo | null>(null);
+  const [kycOverride, setKycOverride] = useState<'PENDING' | 'VERIFIED' | 'REJECTED' | 'NOT_STARTED' | undefined>(undefined);
 
 
   const loadProfile = async () => {
@@ -332,6 +334,13 @@ export default function HrciDashboard() {
     }
     // Always load summary stats
     await loadStats();
+    // Load KYC status for accurate quick card logic
+    try {
+      const k = await getKYCStatus();
+      setKycOverride(k.status);
+    } catch {
+      setKycOverride(undefined);
+    }
     const endTime = Date.now();
     console.log(`[Dashboard] ✅ Dashboard loaded successfully (${endTime - startTime}ms) (composite=${compositeOk})`);
     setLoading(false);
@@ -353,7 +362,13 @@ export default function HrciDashboard() {
       loadProfile();
       loadMembership();
     });
-    return () => off();
+    const offKyc = on('kyc:updated', (p) => {
+      console.log('[Dashboard] Received kyc:updated event – status =', p.status);
+      setKycOverride(p.status);
+      // Optionally refresh membership to sync embedded flags
+      loadMembership();
+    });
+    return () => { off(); offKyc(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -579,10 +594,10 @@ export default function HrciDashboard() {
         <View style={styles.actionsContainer}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
-            {/* KYC card logic: show Pending status, block submit page; hide when verified */}
+            {/* KYC card logic: use override from /memberships/kyc/me when available */}
             {(() => {
-              const statusRaw = String(membership?.kyc?.status || '').toUpperCase();
-              const hasKycFlag = membership?.kyc?.hasKyc === true;
+              const statusRaw = (kycOverride || String(membership?.kyc?.status || '')).toUpperCase();
+              const hasKycFlag = membership?.kyc?.hasKyc === true || kycOverride === 'VERIFIED';
               const kycOk = hasKycFlag || (statusRaw === 'APPROVED' || statusRaw === 'VERIFIED');
               if (kycOk) return null; // Verified: no card
 
@@ -608,68 +623,76 @@ export default function HrciDashboard() {
                 />
               );
             })()}
-            <ActionCard
-              title="New Case"
-              subtitle="File a new case"
-              icon="plus-circle"
-              onPress={async () => {
-                try {
-                  const res = await canCreateHrciCase();
-                  if (!res.allowed) {
-                    Alert.alert('Not allowed', res.reason || 'Only Member or HRCI Admin can create cases');
-                    return;
-                  }
-                  // Directly open Create Case page
-                  router.push('/hrci/cases/new' as any);
-                } catch (e:any) {
-                  Alert.alert('Error', e?.message || 'Unable to open create case');
-                }
-              }}
-            />
-            {/* Show Legal Advise card only for LEGAL_SECRETARY designation (member scope) */}
             {(() => {
-              const desigCode = typeof membership?.designation === 'string' ? String(membership?.designation) : String((membership as any)?.designation?.code || '');
-              const show = desigCode.toUpperCase() === 'LEGAL_SECRETARY';
-              if (!show) return null;
+              const statusRaw = (kycOverride || String(membership?.kyc?.status || '')).toUpperCase();
+              const hasKycFlag = membership?.kyc?.hasKyc === true || kycOverride === 'VERIFIED';
+              const kycOk = hasKycFlag || (statusRaw === 'APPROVED' || statusRaw === 'VERIFIED');
+              const guard = (fn: () => void) => kycOk ? fn : () => Alert.alert('KYC Required', 'Please complete your KYC to access this feature.');
               return (
-                <ActionCard
-                  title="Legal Advise"
-                  subtitle="Review and advise"
-                  icon="scale-balance"
-                  onPress={() => router.push('/hrci/legal' as any)}
-                />
+                <>
+                  <ActionCard
+                    title="New Case"
+                    subtitle="File a new case"
+                    icon="plus-circle"
+                    onPress={guard(async () => {
+                      try {
+                        const res = await canCreateHrciCase();
+                        if (!res.allowed) {
+                          Alert.alert('Not allowed', res.reason || 'Only Member or HRCI Admin can create cases');
+                          return;
+                        }
+                        router.push('/hrci/cases/new' as any);
+                      } catch (e:any) {
+                        Alert.alert('Error', e?.message || 'Unable to open create case');
+                      }
+                    })}
+                  />
+                  {(() => {
+                    const desigCode = typeof membership?.designation === 'string' ? String(membership?.designation) : String((membership as any)?.designation?.code || '');
+                    const show = desigCode.toUpperCase() === 'LEGAL_SECRETARY';
+                    if (!show) return null;
+                    return (
+                      <ActionCard
+                        title="Legal Advise"
+                        subtitle="Review and advise"
+                        icon="scale-balance"
+                        onPress={guard(() => router.push('/hrci/legal' as any))}
+                      />
+                    );
+                  })()}
+                  <ActionCard
+                    title="My Cases"
+                    subtitle="View all cases"
+                    icon="folder-open"
+                    onPress={guard(() => router.push('/hrci/cases' as any))}
+                  />
+                  <ActionCard
+                    title="Meetings"
+                    subtitle="Join upcoming"
+                    icon="video-outline"
+                    onPress={guard(() => router.push('/hrci/meet' as any))}
+                  />
+                  <ActionCard
+                    title="Donations"
+                    subtitle="Manage & create"
+                    icon="cash-multiple"
+                    onPress={guard(() => router.push('/hrci/donations' as any))}
+                  />
+                  <ActionCard
+                    title="Reports"
+                    subtitle="Generate reports"
+                    icon="chart-bar"
+                    onPress={guard(() => Alert.alert('Coming Soon', 'Reports feature will be available soon!'))}
+                  />
+                  <ActionCard
+                    title="Support"
+                    subtitle="Get help"
+                    icon="help-circle"
+                    onPress={guard(() => Alert.alert('Support', 'Contact: support@hrcitodaynews.in'))}
+                  />
+                </>
               );
             })()}
-            <ActionCard
-              title="My Cases"
-              subtitle="View all cases"
-              icon="folder-open"
-              onPress={() => router.push('/hrci/cases' as any)}
-            />
-            <ActionCard
-              title="Meetings"
-              subtitle="Join upcoming"
-              icon="video-outline"
-              onPress={() => router.push('/hrci/meet' as any)}
-            />
-            <ActionCard
-              title="Donations"
-              subtitle="Manage & create"
-              icon="cash-multiple"
-              onPress={() => router.push('/hrci/donations' as any)}
-            />
-            <ActionCard
-              title="Reports"
-              subtitle="Generate reports"
-              icon="chart-bar"
-              onPress={() => Alert.alert('Coming Soon', 'Reports feature will be available soon!')}
-            />
-            <ActionCard
-              title="Support"
-              subtitle="Get help"
-              icon="help-circle"
-              onPress={() => Alert.alert('Support', 'Contact: support@hrcitodaynews.in')}
-            />
           </View>
         </View>
 

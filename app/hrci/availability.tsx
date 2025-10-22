@@ -183,6 +183,15 @@ export default function HrciAvailabilityScreen() {
   const createOrder = async () => {
     try {
       // If we already have a pre-created order with breakdown, reuse it
+      // If preOrder exists and final amount is zero (e.g., LEGAL_SECRETARY free), skip payment
+      if (preOrder && Number(preOrder?.breakdown?.finalAmount ?? preOrder.amount ?? 0) <= 0) {
+        // Persist and navigate directly to registration
+        setPayOrder(preOrder);
+        try { await persistPayOrder(preOrder as any); } catch {}
+        router.replace('/hrci/register' as any);
+        return;
+      }
+
       if (preOrder && preOrder.provider === 'razorpay' && preOrder.providerOrderId && preOrder.providerKeyId) {
         const order = preOrder;
         // rupees to paise for Razorpay
@@ -283,7 +292,7 @@ export default function HrciAvailabilityScreen() {
         body.hrcMandalId = geo.hrcMandalId;
       }
       const res = await request<OrderRes>(`/memberships/payfirst/orders`, { method: 'POST', body });
-      const order = res?.data?.order as any;
+  const order = res?.data?.order as any;
       if (!order?.orderId) throw new Error('Order not created');
       // Prefer finalAmount from breakdown when present (rupees)
       const finalRupees: number = Number(order?.breakdown?.finalAmount ?? order?.amount ?? 0);
@@ -302,6 +311,11 @@ export default function HrciAvailabilityScreen() {
       };
       setPayOrder(payOrderObj);
   try { await persistPayOrder(payOrderObj); } catch {}
+  // If free (amount <= 0), bypass payment and go to registration
+  if (finalRupees <= 0) {
+        router.replace('/hrci/register' as any);
+        return;
+      }
   if (order.provider === 'razorpay' && order.providerOrderId && order.providerKeyId) {
         // Open Razorpay Checkout (guarded dynamic require so build doesn't break if SDK isn't installed)
         if (Platform.OS !== 'web') {

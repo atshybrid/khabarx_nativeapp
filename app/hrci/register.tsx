@@ -140,7 +140,8 @@ export default function HrciRegisterScreen() {
 
       const response = await request<any>(`/memberships/payfirst/register`, { 
         method: 'POST', 
-        body: payload 
+        body: payload,
+        noAuth: true,
       });
 
       const apiDuration = Date.now() - apiStartTime;
@@ -159,7 +160,7 @@ export default function HrciRegisterScreen() {
         message: e?.message,
         status: e?.status,
         stack: e?.stack,
-        response: e?.response
+        body: e?.body
       });
       
       // Enhanced error handling with specific messages
@@ -167,8 +168,15 @@ export default function HrciRegisterScreen() {
         console.log('[Register] Showing 400 error alert - Invalid Data');
         Alert.alert('Invalid Data', e?.message || 'Please check your information and try again.');
       } else if (e?.status === 409) {
-        console.log('[Register] Showing 409 error alert - Capacity Full');
-        Alert.alert('Capacity Full', 'Please adjust your selection and check availability again.');
+        const msg = String(e?.message || '').toLowerCase();
+        if (msg.includes('already') && msg.includes('register')) {
+          console.log('[Register] 409 indicates already registered – treating as success');
+          Alert.alert('Already Registered', 'Your registration is already complete. You can now login.');
+          router.replace('/hrci/login' as any);
+        } else {
+          console.log('[Register] Showing 409 error alert - Capacity/Conflict');
+          Alert.alert('Capacity Full', 'Please adjust your selection and check availability again.');
+        }
       } else if (e?.status === 404) {
         console.log('[Register] Showing 404 error alert - Order Not Found');
         Alert.alert('Order Not Found', 'Your order has expired. Please start the process again.');

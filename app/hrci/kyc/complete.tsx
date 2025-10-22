@@ -1,7 +1,8 @@
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/context/AuthContextNew';
+import { emit } from '@/services/events';
 import { request } from '@/services/http';
-import { submitKYC, uploadKYCDocument } from '@/services/kyc';
+import { getKYCStatus, submitKYC, uploadKYCDocument } from '@/services/kyc';
 import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -246,6 +247,13 @@ export default function KYCCompletionScreen() {
         panNumber: panNumber.trim(),
         panCardUrl: panCard.uploadedUrl
       });
+
+      // After submit, check live KYC status
+      try {
+        const statusRes = await getKYCStatus();
+        // Broadcast new status so dashboard can update card immediately
+        emit('kyc:updated', { status: statusRes.status });
+      } catch {}
 
       setStep(4); // Success step
       

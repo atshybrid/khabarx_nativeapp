@@ -8,6 +8,8 @@ export type AppEvents = {
   'comments:updated': { shortNewsId: string; total: number };
   // Fired after a user updates their profile (e.g., photo). Consumers can refetch /profiles/me.
   'profile:updated': { photoUrl?: string };
+  // Fired after KYC is submitted or status changes; consumers can refresh membership or KYC status
+  'kyc:updated': { status: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'NOT_STARTED' };
 };
 
 type Handler<T> = (payload: T) => void;
