@@ -19,6 +19,7 @@ export default function CampaignDetail() {
   const [inputFocused, setInputFocused] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const inputWrapperRef = useRef<View>(null);
+  const [inputY, setInputY] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -39,6 +40,16 @@ export default function CampaignDetail() {
     const n = Number(amount);
     return !isNaN(n) && n > 0 ? n : 0;
   }, [amount]);
+
+  // Scroll to the amount input when keyboard opens
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      if (inputFocused) {
+        try { scrollRef.current?.scrollTo({ y: Math.max(0, inputY - 24), animated: true }); } catch {}
+      }
+    });
+    return () => sub.remove();
+  }, [inputFocused, inputY]);
 
   if (loading && !event) {
     return (
@@ -64,8 +75,17 @@ export default function CampaignDetail() {
       behavior="padding"
       keyboardVerticalOffset={insets.top}
     >
-      {/* Hero with overlay actions */}
-      <View style={{ backgroundColor: '#fff' }}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={{ paddingBottom: 200 }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        onContentSizeChange={() => {
+          if (inputFocused) {
+            try { scrollRef.current?.scrollTo({ y: Math.max(0, inputY - 24), animated: true }); } catch {}
+          }
+        }}
+      >
         <View style={{ position: 'relative' }}>
           {event.coverImageUrl ? (
             <>
@@ -76,9 +96,6 @@ export default function CampaignDetail() {
             <View style={styles.hero} />
           )}
           <SafeAreaView style={styles.heroBar} pointerEvents="box-none">
-            <Pressable onPress={() => router.back()} hitSlop={8} style={styles.iconCircle}>
-              <MaterialCommunityIcons name="arrow-left" size={20} color="#111" />
-            </Pressable>
             <View style={{ flex: 1 }} />
             <Pressable
               onPress={async () => {
@@ -93,24 +110,9 @@ export default function CampaignDetail() {
             </Pressable>
           </SafeAreaView>
         </View>
-      </View>
 
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={{ paddingBottom: 200 }}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        onContentSizeChange={() => {
-          // If input focused, ensure it's visible
-          // naive approach: scroll to end to keep input above keyboard
-          if (inputFocused) {
-            try { scrollRef.current?.scrollToEnd({ animated: true }); } catch {}
-          }
-        }}
-      >
         <View style={{ padding: 16 }}>
           <Text style={styles.title}>{event.title || 'Campaign'}</Text>
-          {/* Progress */}
           {event.goalAmount ? (
             <View style={{ marginTop: 10 }}>
               <View style={styles.progressRow}>
@@ -125,7 +127,6 @@ export default function CampaignDetail() {
             </View>
           ) : null}
 
-          {/* Quick Donate */}
           <View style={styles.quickCard}>
             <Text style={styles.subhead}>Quick Donate</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
@@ -135,7 +136,11 @@ export default function CampaignDetail() {
                 </Pressable>
               ))}
             </View>
-            <View ref={inputWrapperRef} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}>
+            <View
+              ref={inputWrapperRef}
+              onLayout={(e) => setInputY(e.nativeEvent.layout.y)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}
+            >
               <View style={[styles.input, { flex: 1, height: 44, flexDirection: 'row', alignItems: 'center' }]}> 
                 <Text style={{ color: '#6b7280', fontWeight: '800', marginRight: 6 }}>₹</Text>
                 <TextInput
@@ -148,10 +153,7 @@ export default function CampaignDetail() {
                   returnKeyType="done"
                   onFocus={() => {
                     setInputFocused(true);
-                    // try to bring into view
-                    try {
-                      scrollRef.current?.scrollToEnd({ animated: true });
-                    } catch {}
+                    try { scrollRef.current?.scrollTo({ y: Math.max(0, inputY - 24), animated: true }); } catch {}
                   }}
                   onBlur={() => { setInputFocused(false); }}
                   onSubmitEditing={() => Keyboard.dismiss()}
@@ -161,7 +163,6 @@ export default function CampaignDetail() {
             <Text style={styles.subHint}>Secure • Instant receipt</Text>
           </View>
 
-          {/* About */}
           {event.description ? (
             <View style={{ marginTop: 16 }}>
               <Text style={styles.subhead}>About this campaign</Text>
@@ -171,7 +172,6 @@ export default function CampaignDetail() {
         </View>
       </ScrollView>
 
-      {/* Sticky bottom bar */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom || 12 }]}>
         <Text style={{ color: '#6b7280', fontSize: 12, fontWeight: '700' }}>Amount</Text>
         <Text style={{ color: '#111', fontSize: 18, fontWeight: '900', marginLeft: 8 }}>₹{(validAmount || 0).toLocaleString('en-IN')}</Text>

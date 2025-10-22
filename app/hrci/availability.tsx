@@ -171,6 +171,9 @@ export default function HrciAvailabilityScreen() {
       if (!order?.orderId) throw new Error('Order not created');
       // Prefer finalAmount from breakdown when present
       const effectiveAmount: number = Number(order?.breakdown?.finalAmount ?? order?.amount ?? 0);
+      // Build a human-readable price breakdown (if available)
+      const breakdown = order?.breakdown ?? null;
+      const fmtINR = (amt: number) => `₹ ${(amt / 100).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 0 })}`;
       const payOrderObj = {
         orderId: order.orderId,
         amount: effectiveAmount,
@@ -178,12 +181,40 @@ export default function HrciAvailabilityScreen() {
         provider: order.provider || null,
         providerOrderId: order.providerOrderId || null,
         providerKeyId: order.providerKeyId || null,
-        breakdown: order?.breakdown ?? null,
+        breakdown,
         createdAt: Date.now()
       };
       setPayOrder(payOrderObj);
   try { await persistPayOrder(payOrderObj); } catch {}
   if (order.provider === 'razorpay' && order.providerOrderId && order.providerKeyId) {
+        // If we have a breakdown, show a quick confirmation with discount details before opening checkout
+        if (breakdown && typeof breakdown.finalAmount === 'number') {
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const baseTxt = typeof breakdown.baseAmount === 'number' ? fmtINR(breakdown.baseAmount) : null;
+              const discPct = breakdown.discountPercent != null ? `${breakdown.discountPercent}%` : null;
+              const discAmt = typeof breakdown.discountAmount === 'number' ? fmtINR(breakdown.discountAmount) : null;
+              const finalTxt = fmtINR(breakdown.finalAmount);
+              const lines = [
+                baseTxt ? `Base amount: ${baseTxt}` : null,
+                discPct || discAmt ? `Discount: ${[discPct, discAmt].filter(Boolean).join(' • ')}` : null,
+                `You pay: ${finalTxt}`,
+              ].filter(Boolean).join('\n');
+              Alert.alert(
+                'Price breakdown',
+                lines,
+                [
+                  { text: 'Cancel', style: 'cancel', onPress: () => reject(new Error('Payment cancelled')) },
+                  { text: 'Pay now', style: 'default', onPress: () => resolve() },
+                ],
+                { cancelable: true }
+              );
+            });
+          } catch {
+            // User cancelled from breakdown dialog; stop here
+            return;
+          }
+        }
         // Open Razorpay Checkout (guarded dynamic require so build doesn't break if SDK isn't installed)
         if (Platform.OS !== 'web') {
           try {
@@ -197,7 +228,7 @@ export default function HrciAvailabilityScreen() {
               const options: any = {
                 key: order.providerKeyId,
                 order_id: order.providerOrderId,
-                // Ensure the checkout shows the final amount (paise)
+                // IMPORTANT: Pass only the final amount (in paise) to Razorpay
                 amount: effectiveAmount,
                 name: 'Membership Contribution',
                 description: `${designationName || String(designationCode)} • ${cellName || ''} • ${String(level)}`.replace(/\s+•\s+/g, ' • ').trim(),
