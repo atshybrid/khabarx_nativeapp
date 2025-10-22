@@ -212,7 +212,7 @@ export default function HrciGeoScreen() {
   const continueNext = () => router.push('/hrci/availability' as any);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }} edges={['top','left','right','bottom']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }} edges={['top','left','right']}>
       <StatusBar style="dark" backgroundColor="#ffffff" />
       <View style={styles.searchWrap}>
         <View style={styles.searchBox}>
