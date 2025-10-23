@@ -1,5 +1,5 @@
 import { Colors } from '@/constants/Colors';
-import { getDonationEvents, getTopDonors, TopDonor } from '@/services/hrciDonations';
+import { DonationStory, getDonationEvents, getDonationStories, getTopDonors, TopDonor } from '@/services/hrciDonations';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -19,6 +19,8 @@ export default function DonationHub() {
   const [loading, setLoading] = useState(true);
   const [topDonors, setTopDonors] = useState<TopDonor[]>([]);
   const [loadingTop, setLoadingTop] = useState(false);
+  const [stories, setStories] = useState<DonationStory[]>([]);
+  const [loadingStories, setLoadingStories] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -37,6 +39,17 @@ export default function DonationHub() {
         setTopDonors(list || []);
       } catch {}
       finally { setLoadingTop(false); }
+    };
+    run();
+  }, []);
+  useEffect(() => {
+    const run = async () => {
+      setLoadingStories(true);
+      try {
+        const list = await getDonationStories(20, 0);
+        setStories(list || []);
+      } catch {}
+      finally { setLoadingStories(false); }
     };
     run();
   }, []);
@@ -141,12 +154,27 @@ export default function DonationHub() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Success Stories</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-            {[1,2,3].map(i => (
-              <View key={i} style={styles.storyCard}>
-                <View style={styles.storyMedia} />
-                <Text numberOfLines={2} style={styles.storyTitle}>Story title {i}</Text>
-              </View>
-            ))}
+            {(stories.length === 0 && !loadingStories) ? (
+              [1,2,3].map(i => (
+                <View key={i} style={styles.storyCard}>
+                  <View style={styles.storyMedia} />
+                  <Text numberOfLines={2} style={styles.storyTitle}>Story</Text>
+                </View>
+              ))
+            ) : (
+              stories.map(s => (
+                <Pressable key={s.id} onPress={() => router.push({ pathname: '/donations/story/[id]', params: { id: s.id } })} style={styles.storyCard}>
+                  {s.heroImageUrl ? (
+                    <Image source={{ uri: s.heroImageUrl }} style={styles.storyMedia} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.storyMedia, { alignItems: 'center', justifyContent: 'center' }]}>
+                      <MaterialCommunityIcons name="image-off-outline" size={22} color="#9CA3AF" />
+                    </View>
+                  )}
+                  <Text numberOfLines={2} style={styles.storyTitle}>{s.title || 'Story'}</Text>
+                </Pressable>
+              ))
+            )}
           </ScrollView>
         </View>
 

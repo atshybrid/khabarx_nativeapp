@@ -181,3 +181,35 @@ export async function getTopDonors(limit = 20): Promise<TopDonor[]> {
   );
   return Array.isArray(res?.data) ? (res.data as TopDonor[]) : [];
 }
+
+// Success stories (public read)
+export type DonationStory = {
+  id: string;
+  title: string;
+  description?: string | null;
+  heroImageUrl?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type DonationStoryDetail = DonationStory & {
+  images?: { id: string; url: string; caption?: string | null; order?: number; isActive?: boolean; createdAt?: string; updatedAt?: string }[];
+};
+
+export async function getDonationStories(limit = 20, offset = 0): Promise<DonationStory[]> {
+  const usp = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const res = await request<{ success?: boolean; count?: number; total?: number; data?: DonationStory[] }>(
+    `/donations/stories?${usp.toString()}` as any,
+    { method: 'GET', noAuth: true }
+  );
+  return Array.isArray(res?.data) ? (res.data as DonationStory[]) : [];
+}
+
+export async function getDonationStoryById(id: string): Promise<DonationStoryDetail | undefined> {
+  if (!id) return undefined;
+  const res = await request<{ success?: boolean; data?: DonationStoryDetail }>(
+    `/donations/stories/${encodeURIComponent(id)}` as any,
+    { method: 'GET', noAuth: true }
+  );
+  return (res as any)?.data as DonationStoryDetail;
+}
