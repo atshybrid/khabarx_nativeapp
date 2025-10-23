@@ -1,8 +1,9 @@
 import { confirmDonation, createDonationOrder, getDonationOrderStatus } from '@/services/donations';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import LottieView from 'lottie-react-native';
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 
@@ -17,35 +18,46 @@ export default function CreateDonationScreen() {
   const [donorEmail, setDonorEmail] = useState('');
   const [donorPan, setDonorPan] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
-  const [eventId, setEventId] = useState<string>(() => (params?.eventId ? String(params.eventId) : ''));
+  // Event donations: accept eventId from route params (hidden from UI)
+  const lockedEventId = useMemo(() => (params?.eventId ? String(params.eventId) : undefined), [params?.eventId]);
   const [shareCode, setShareCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [providerOrderId, setProviderOrderId] = useState<string | null>(null);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [overlayStep, setOverlayStep] = useState<
+    'idle' | 'creating' | 'paying' | 'confirming' | 'processingReceipt'
+  >('idle');
 
   const amtNum = useMemo(() => Number(amount || 0), [amount]);
-  const panRequired = amtNum > 1000 && !isAnonymous;
+  // PAN mandatory for non-anonymous donations above ₹10,000
+  const panRequired = amtNum > 10000 && !isAnonymous;
   const canSubmit = useMemo(() => {
     if (!amtNum || amtNum <= 0) return false;
+    if (isAnonymous) {
+      // For anonymous donations, only amount is required
+      return true;
+    }
+    // For identified donations, require basic info
     if (!donorName.trim()) return false;
     if (!donorMobile.trim()) return false;
     if (panRequired && !donorPan.trim()) return false;
     return true;
-  }, [amtNum, donorName, donorMobile, panRequired, donorPan]);
+  }, [amtNum, isAnonymous, donorName, donorMobile, panRequired, donorPan]);
 
   const startDonation = async () => {
     if (!canSubmit || submitting) return;
     setSubmitting(true);
+    setOverlayStep('creating');
     try {
       // Create donation order
       const order = await createDonationOrder({
-        eventId: eventId || undefined,
+        eventId: lockedEventId || undefined,
         amount: amtNum,
-        donorName,
-        donorAddress,
-        donorMobile,
-        donorEmail,
-        donorPan: donorPan || undefined,
+        donorName: isAnonymous ? '' : donorName,
+        donorAddress: isAnonymous ? undefined : donorAddress,
+        donorMobile: isAnonymous ? '' : donorMobile,
+        donorEmail: isAnonymous ? undefined : donorEmail,
+        donorPan: isAnonymous ? undefined : (donorPan || undefined),
         isAnonymous,
         shareCode: shareCode || undefined,
       });
@@ -74,15 +86,17 @@ export default function CreateDonationScreen() {
           order_id: order.providerOrderId,
           amount: amountPaise,
           name: 'HRCI Donation',
-          description: eventId ? `Event: ${eventId}` : 'Direct Donation',
+          description: lockedEventId ? `Event Donation` : 'Direct Donation',
           theme: { color: '#FE0002' },
-          prefill: { name: donorName, contact: donorMobile, email: donorEmail },
+          prefill: isAnonymous ? undefined : { name: donorName, contact: donorMobile, email: donorEmail },
           retry: { enabled: true, max_count: 1 },
         };
         try {
+          setOverlayStep('paying');
           const result = await checkoutAPI.open(options);
           // On success
           if (result && result.razorpay_order_id && result.razorpay_payment_id && result.razorpay_signature) {
+            setOverlayStep('confirming');
             await confirmDonation({
               orderId: order.orderId,
               status: 'SUCCESS',
@@ -92,6 +106,8 @@ export default function CreateDonationScreen() {
               razorpay_payment_id: result.razorpay_payment_id,
               razorpay_signature: result.razorpay_signature,
             });
+            // After confirming success, start receipt processing
+            setOverlayStep('processingReceipt');
           }
         } catch (err: any) {
           // Cancel or failure
@@ -116,19 +132,34 @@ export default function CreateDonationScreen() {
         Alert.alert('Unsupported Provider', 'This payment provider is not supported.');
       }
 
-      // Check order status and try to extract receipt URLs
+      // Poll order status for a short period to check for receipt URL
+      let receiptReady = false;
       try {
-        const st = await getDonationOrderStatus(order.providerOrderId!);
-        if (st?.receiptPdfUrl || st?.receiptHtmlUrl) {
-          setReceiptUrl((st.receiptPdfUrl || st.receiptHtmlUrl) || null);
+        const maxAttempts = 6; // ~9s if 1.5s delay
+        const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+        for (let i = 0; i < maxAttempts; i++) {
+          const st = await getDonationOrderStatus(order.providerOrderId!);
+          if (st?.receiptPdfUrl || st?.receiptHtmlUrl) {
+            const url = (st.receiptPdfUrl || st.receiptHtmlUrl) as string;
+            receiptReady = true;
+            setReceiptUrl(url);
+            // Try opening immediately
+            try { await Linking.openURL(url); } catch {}
+            break;
+          }
+          await delay(1500);
         }
       } catch {}
 
-      Alert.alert('Donation Recorded', 'We will update your receipt once the payment is confirmed.');
+      if (!receiptReady) {
+        // Fallback message if receipt not immediately available
+        Alert.alert('Donation Recorded', 'Payment captured. Your 80G receipt will be ready shortly. You can refresh status below.');
+      }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not start donation. Please try again.');
     } finally {
       setSubmitting(false);
+      setOverlayStep('idle');
     }
   };
 
@@ -159,33 +190,38 @@ export default function CreateDonationScreen() {
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding', android: 'height' })}>
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
+          <Field label="Donate Anonymously">
+            <View style={[styles.switchRow, { alignItems: 'center', justifyContent: 'space-between' }]}> 
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ color: '#374151', fontWeight: '700' }}>Hide my name on public lists</Text>
+                <Text style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>Your personal details won’t be shown. Receipt will still be issued.</Text>
+              </View>
+              <Switch value={isAnonymous} onValueChange={setIsAnonymous} />
+            </View>
+          </Field>
           <Field label="Amount (INR)">
             <TextInput keyboardType="numeric" value={amount} onChangeText={setAmount} placeholder="500" style={styles.input} />
           </Field>
-          <Field label="Donor Name">
-            <TextInput value={donorName} onChangeText={setDonorName} placeholder="Full name" style={styles.input} />
-          </Field>
-          <Field label="Mobile">
-            <TextInput keyboardType="phone-pad" value={donorMobile} onChangeText={setDonorMobile} placeholder="10-digit mobile" style={styles.input} />
-          </Field>
-          <Field label="Email (optional)">
-            <TextInput value={donorEmail} onChangeText={setDonorEmail} placeholder="email@example.com" style={styles.input} />
-          </Field>
-          <Field label="Address (optional)">
-            <TextInput value={donorAddress} onChangeText={setDonorAddress} placeholder="Address" style={styles.input} />
-          </Field>
-          <Field label={`PAN ${panRequired ? '(required)' : '(optional)'}`}>
-            <TextInput autoCapitalize="characters" maxLength={10} value={donorPan} onChangeText={setDonorPan} placeholder="ABCDE1234F" style={styles.input} />
-          </Field>
-          <Field label="Anonymous">
-            <View style={styles.switchRow}>
-              <Switch value={isAnonymous} onValueChange={setIsAnonymous} />
-              <Text style={{ marginLeft: 8, color: '#374151' }}>Hide my name on public lists</Text>
-            </View>
-          </Field>
-          <Field label="Event ID (optional)">
-            <TextInput value={eventId} onChangeText={setEventId} placeholder="Event ID" style={styles.input} />
-          </Field>
+          {!isAnonymous && (
+            <>
+              <Field label="Donor Name">
+                <TextInput value={donorName} onChangeText={setDonorName} placeholder="Full name" style={styles.input} />
+              </Field>
+              <Field label="Mobile">
+                <TextInput keyboardType="phone-pad" value={donorMobile} onChangeText={setDonorMobile} placeholder="10-digit mobile" style={styles.input} />
+              </Field>
+              <Field label="Email (optional)">
+                <TextInput value={donorEmail} onChangeText={setDonorEmail} placeholder="email@example.com" style={styles.input} />
+              </Field>
+              <Field label="Address (optional)">
+                <TextInput value={donorAddress} onChangeText={setDonorAddress} placeholder="Address" style={styles.input} />
+              </Field>
+              <Field label={`PAN ${panRequired ? '(required for > ₹10,000)' : '(optional)'}`}>
+                <TextInput autoCapitalize="characters" maxLength={10} value={donorPan} onChangeText={setDonorPan} placeholder="ABCDE1234F" style={styles.input} />
+              </Field>
+            </>
+          )}
+          {/* Hide Event selection completely; if provided via params, we pass it silently */}
           <Field label="Share Code (optional)">
             <TextInput value={shareCode} onChangeText={setShareCode} placeholder="Referral / share code" style={styles.input} />
           </Field>
@@ -211,6 +247,21 @@ export default function CreateDonationScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Processing overlay */}
+      {overlayStep !== 'idle' && (
+        <View style={styles.overlay} pointerEvents="none">
+          <View style={styles.overlayCard}>
+            <LottieView source={require('@/assets/lotti/hrci_loader_svg.json')} autoPlay loop style={{ width: 90, height: 90 }} />
+            <Text style={styles.overlayTxt}>
+              {overlayStep === 'creating' && 'Creating donation...'}
+              {overlayStep === 'paying' && 'Opening payment...'}
+              {overlayStep === 'confirming' && 'Confirming payment...'}
+              {overlayStep === 'processingReceipt' && 'Generating 80G receipt...'}
+            </Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -237,4 +288,7 @@ const styles = StyleSheet.create({
   statusSub: { fontSize: 12, color: '#64748b' },
   smallBtn: { backgroundColor: '#1D0DA1', paddingVertical: 10, borderRadius: 10, alignItems: 'center', marginTop: 8 },
   smallBtnText: { color: '#fff', fontWeight: '700' },
+  overlay: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.25)', alignItems: 'center', justifyContent: 'center' },
+  overlayCard: { width: 220, alignItems: 'center', gap: 8, backgroundColor: '#fff', borderRadius: 16, paddingVertical: 18, paddingHorizontal: 12, borderWidth: 1, borderColor: '#eef0f4' },
+  overlayTxt: { color: '#111827', fontWeight: '800' },
 });
