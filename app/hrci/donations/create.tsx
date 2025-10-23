@@ -23,7 +23,8 @@ export default function CreateDonationScreen() {
   // Hide share code in UI; accept via params if provided
   const lockedShareCode = useMemo(() => (params?.shareCode ? String(params.shareCode) : undefined), [params?.shareCode]);
   const [submitting, setSubmitting] = useState(false);
-  const [overlayStep, setOverlayStep] = useState<'idle' | 'creating' | 'paying' | 'confirming'>('idle');
+  const [overlayStep, setOverlayStep] = useState<'idle' | 'creating' | 'paying' | 'confirming' | 'success'>('idle');
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const amtNum = useMemo(() => Number(amount || 0), [amount]);
   // PAN mandatory for non-anonymous donations above ₹10,000
@@ -101,7 +102,7 @@ export default function CreateDonationScreen() {
               razorpay_payment_id: result.razorpay_payment_id,
               razorpay_signature: result.razorpay_signature,
             });
-            // Show success message and return
+            // Show success overlay with message (no manual refresh UI)
             const lines: string[] = ['Thank you for your donation.'];
             if (!isAnonymous) {
               if (donorMobile?.trim()) lines.push(`You will receive your 80G receipt on WhatsApp at ${donorMobile}.`);
@@ -111,7 +112,8 @@ export default function CreateDonationScreen() {
               // Anonymous: simple thanks
               lines.push('Your 80G receipt will be sent to your provided contact if available.');
             }
-            Alert.alert('Payment Successful', lines.join('\n'), [{ text: 'OK', onPress: () => router.back() }]);
+            setSuccessMessage(lines.join('\n'));
+            setOverlayStep('success');
           }
         } catch (err: any) {
           // Cancel or failure
@@ -204,13 +206,24 @@ export default function CreateDonationScreen() {
       {overlayStep !== 'idle' && (
         <View style={styles.overlay} pointerEvents="none">
           <View style={styles.overlayCard}>
-            <LottieView source={require('@/assets/lotti/hrci_loader_svg.json')} autoPlay loop style={{ width: 90, height: 90 }} />
-            <Text style={styles.overlayTxt}>
-              {overlayStep === 'creating' && 'Creating donation...'}
-              {overlayStep === 'paying' && 'Opening payment...'}
-              {overlayStep === 'confirming' && 'Confirming payment...'}
-              {/* No separate receipt processing step */}
-            </Text>
+            {overlayStep === 'success' ? (
+              <>
+                <LottieView source={require('@/assets/lotti/congratulation.json')} autoPlay loop={false} style={{ width: 140, height: 140 }} />
+                {!!successMessage && <Text style={[styles.overlayTxt, styles.overlayMsg]}>{successMessage}</Text>}
+                <TouchableOpacity onPress={() => router.back()} style={[styles.smallBtn, { marginTop: 10 }] }>
+                  <Text style={styles.smallBtnText}>Done</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <LottieView source={require('@/assets/lotti/donate.json')} autoPlay loop style={{ width: 120, height: 120 }} />
+                <Text style={styles.overlayTxt}>
+                  {overlayStep === 'creating' && 'Creating donation...'}
+                  {overlayStep === 'paying' && 'Opening payment...'}
+                  {overlayStep === 'confirming' && 'Confirming payment...'}
+                </Text>
+              </>
+            )}
           </View>
         </View>
       )}
@@ -243,4 +256,5 @@ const styles = StyleSheet.create({
   overlay: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.25)', alignItems: 'center', justifyContent: 'center' },
   overlayCard: { width: 220, alignItems: 'center', gap: 8, backgroundColor: '#fff', borderRadius: 16, paddingVertical: 18, paddingHorizontal: 12, borderWidth: 1, borderColor: '#eef0f4' },
   overlayTxt: { color: '#111827', fontWeight: '800' },
+  overlayMsg: { textAlign: 'center', marginTop: 6 },
 });
