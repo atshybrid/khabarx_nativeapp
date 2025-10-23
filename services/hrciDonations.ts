@@ -160,3 +160,24 @@ export async function getDonationReceiptUrl(donationId: string): Promise<string 
     throw error;
   }
 }
+
+// Top donors (public)
+export type TopDonor = {
+  key: string;
+  displayName: string;
+  mobileMasked?: string | null;
+  emailMasked?: string | null;
+  panMasked?: string | null;
+  totalAmount: number;
+  donationCount: number;
+  photoUrl?: string | null;
+};
+
+export async function getTopDonors(limit = 20): Promise<TopDonor[]> {
+  const usp = new URLSearchParams({ limit: String(limit) });
+  const res = await request<{ success?: boolean; count?: number; data?: TopDonor[] }>(
+    `/donations/top-donors?${usp.toString()}` as any,
+    { method: 'GET', noAuth: true }
+  );
+  return Array.isArray(res?.data) ? (res.data as TopDonor[]) : [];
+}

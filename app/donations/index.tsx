@@ -1,5 +1,5 @@
 import { Colors } from '@/constants/Colors';
-import { getDonationEvents } from '@/services/hrciDonations';
+import { getDonationEvents, getTopDonors, TopDonor } from '@/services/hrciDonations';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -15,6 +15,8 @@ export default function DonationHub() {
   const [amount, setAmount] = useState<string>('');
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [topDonors, setTopDonors] = useState<TopDonor[]>([]);
+  const [loadingTop, setLoadingTop] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -25,6 +27,17 @@ export default function DonationHub() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const run = async () => {
+      setLoadingTop(true);
+      try {
+        const list = await getTopDonors(20);
+        setTopDonors(list || []);
+      } catch {}
+      finally { setLoadingTop(false); }
+    };
+    run();
+  }, []);
 
   // Handle Android hardware back: go to News tab instead of blank/back stack
   useFocusEffect(
@@ -138,9 +151,22 @@ export default function DonationHub() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Donor Wall</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-            {[...Array(12)].map((_, i) => (
-              <View key={i} style={styles.avatar} />
-            ))}
+            {topDonors.length === 0 && !loadingTop ? (
+              [...Array(8)].map((_, i) => <View key={i} style={styles.avatar} />)
+            ) : (
+              topDonors.map((d) => (
+                <View key={d.key} style={styles.donorCard}>
+                  {d.photoUrl ? (
+                    <Image source={{ uri: d.photoUrl }} style={styles.donorAvatar} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.donorAvatar, { alignItems: 'center', justifyContent: 'center', backgroundColor: '#eef2f7' }]}>
+                      <MaterialCommunityIcons name="account" size={22} color="#9CA3AF" />
+                    </View>
+                  )}
+                  <Text numberOfLines={1} style={styles.donorName}>{d.displayName || 'Donor'}</Text>
+                </View>
+              ))
+            )}
           </ScrollView>
         </View>
       </ScrollView>
@@ -191,5 +217,8 @@ const styles = StyleSheet.create({
   storyMedia: { width: '100%', height: 100, backgroundColor: '#f3f4f6', borderTopLeftRadius: 12, borderTopRightRadius: 12 },
   storyTitle: { color: '#111', padding: 10, fontWeight: '700' },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#e5e7eb' },
+  donorCard: { width: 72, alignItems: 'center' },
+  donorAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#e5e7eb' },
+  donorName: { color: '#111', fontSize: 12, fontWeight: '700', marginTop: 6, maxWidth: 72, textAlign: 'center' },
   bottomBar: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 10, backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, borderTopColor: '#eef0f4' },
 });
