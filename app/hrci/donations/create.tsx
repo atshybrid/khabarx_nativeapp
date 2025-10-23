@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function CreateDonationScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ amount?: string; eventId?: string }>();
+  const params = useLocalSearchParams<{ amount?: string; eventId?: string; shareCode?: string }>();
   const [amount, setAmount] = useState<string>(() => (params?.amount ? String(params.amount) : ''));
   const [donorName, setDonorName] = useState('');
   const [donorAddress, setDonorAddress] = useState('');
@@ -20,7 +20,8 @@ export default function CreateDonationScreen() {
   const [isAnonymous, setIsAnonymous] = useState(false);
   // Event donations: accept eventId from route params (hidden from UI)
   const lockedEventId = useMemo(() => (params?.eventId ? String(params.eventId) : undefined), [params?.eventId]);
-  const [shareCode, setShareCode] = useState('');
+  // Hide share code in UI; accept via params if provided
+  const lockedShareCode = useMemo(() => (params?.shareCode ? String(params.shareCode) : undefined), [params?.shareCode]);
   const [submitting, setSubmitting] = useState(false);
   const [providerOrderId, setProviderOrderId] = useState<string | null>(null);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
@@ -59,7 +60,7 @@ export default function CreateDonationScreen() {
         donorEmail: isAnonymous ? undefined : donorEmail,
         donorPan: isAnonymous ? undefined : (donorPan || undefined),
         isAnonymous,
-        shareCode: shareCode || undefined,
+        shareCode: lockedShareCode || undefined,
       });
 
       setProviderOrderId(order.providerOrderId || null);
@@ -221,10 +222,7 @@ export default function CreateDonationScreen() {
               </Field>
             </>
           )}
-          {/* Hide Event selection completely; if provided via params, we pass it silently */}
-          <Field label="Share Code (optional)">
-            <TextInput value={shareCode} onChangeText={setShareCode} placeholder="Referral / share code" style={styles.input} />
-          </Field>
+          {/* Share code hidden; if provided via params, it will be passed silently */}
 
           <TouchableOpacity disabled={!canSubmit || submitting} onPress={startDonation} style={[styles.cta, (!canSubmit || submitting) && styles.ctaDisabled]}>
             {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaText}>Donate</Text>}
