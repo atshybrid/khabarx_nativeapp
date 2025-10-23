@@ -12,8 +12,8 @@ const PRESETS = [100, 250, 500, 1000];
 export default function DonationHub() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  // Default donor avatar (local asset). Replace with '@/assets/images/doner.png' when provided.
-  const DEFAULT_DONOR_AVATAR = require('@/assets/images/hrci_logo.png');
+  // Default donor avatar (local asset)
+  const DEFAULT_DONOR_AVATAR = require('@/assets/images/donor.png');
   const [amount, setAmount] = useState<string>('');
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
