@@ -1,15 +1,12 @@
 import { confirmDonation, createDonationOrder, getDonationOrderStatus } from '@/services/donations';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'expo-router';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-
-
-export default function CreateDonationScreen() {
+export default function DirectDonationsScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ amount?: string; eventId?: string }>();
   const [amount, setAmount] = useState<string>('');
   const [donorName, setDonorName] = useState('');
   const [donorAddress, setDonorAddress] = useState('');
@@ -22,11 +19,6 @@ export default function CreateDonationScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [providerOrderId, setProviderOrderId] = useState<string | null>(null);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (params?.amount && !amount) setAmount(String(params.amount));
-    if (params?.eventId && !eventId) setEventId(String(params.eventId));
-  }, [params]);
 
   const amtNum = useMemo(() => Number(amount || 0), [amount]);
   const panRequired = amtNum > 1000 && !isAnonymous;
@@ -69,7 +61,7 @@ export default function CreateDonationScreen() {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const RazorpayCheckout = require('react-native-razorpay');
           checkoutAPI = RazorpayCheckout.default || RazorpayCheckout;
-        } catch {
+        } catch (e: any) {
           Alert.alert('Payment Setup Required', 'Razorpay is not available in this build. Please rebuild the development client.');
           return;
         }
@@ -158,7 +150,7 @@ export default function CreateDonationScreen() {
         <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <MaterialCommunityIcons name="arrow-left" size={22} color="#374151" />
         </TouchableOpacity>
-        <Text style={styles.heading}>New Donation</Text>
+        <Text style={styles.heading}>Donate</Text>
         <View style={{ width: 22 }} />
       </View>
 
