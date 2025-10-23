@@ -12,6 +12,8 @@ const PRESETS = [100, 250, 500, 1000];
 export default function DonationHub() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Default donor avatar (local asset). Replace with '@/assets/images/doner.png' when provided.
+  const DEFAULT_DONOR_AVATAR = require('@/assets/images/hrci_logo.png');
   const [amount, setAmount] = useState<string>('');
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,13 +158,11 @@ export default function DonationHub() {
             ) : (
               topDonors.map((d) => (
                 <View key={d.key} style={styles.donorCard}>
-                  {d.photoUrl ? (
-                    <Image source={{ uri: d.photoUrl }} style={styles.donorAvatar} contentFit="cover" />
-                  ) : (
-                    <View style={[styles.donorAvatar, { alignItems: 'center', justifyContent: 'center', backgroundColor: '#eef2f7' }]}>
-                      <MaterialCommunityIcons name="account" size={22} color="#9CA3AF" />
-                    </View>
-                  )}
+                  <Image
+                    source={d.photoUrl ? { uri: d.photoUrl } : DEFAULT_DONOR_AVATAR}
+                    style={styles.donorAvatar}
+                    contentFit="cover"
+                  />
                   <Text numberOfLines={1} style={styles.donorName}>{d.displayName || 'Donor'}</Text>
                 </View>
               ))
