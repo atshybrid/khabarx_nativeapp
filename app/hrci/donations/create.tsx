@@ -1,7 +1,7 @@
 import { confirmDonation, createDonationOrder, getDonationOrderStatus } from '@/services/donations';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,23 +10,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function CreateDonationScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ amount?: string; eventId?: string }>();
-  const [amount, setAmount] = useState<string>('');
+  const [amount, setAmount] = useState<string>(() => (params?.amount ? String(params.amount) : ''));
   const [donorName, setDonorName] = useState('');
   const [donorAddress, setDonorAddress] = useState('');
   const [donorMobile, setDonorMobile] = useState('');
   const [donorEmail, setDonorEmail] = useState('');
   const [donorPan, setDonorPan] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
-  const [eventId, setEventId] = useState('');
+  const [eventId, setEventId] = useState<string>(() => (params?.eventId ? String(params.eventId) : ''));
   const [shareCode, setShareCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [providerOrderId, setProviderOrderId] = useState<string | null>(null);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (params?.amount && !amount) setAmount(String(params.amount));
-    if (params?.eventId && !eventId) setEventId(String(params.eventId));
-  }, [params]);
 
   const amtNum = useMemo(() => Number(amount || 0), [amount]);
   const panRequired = amtNum > 1000 && !isAnonymous;
