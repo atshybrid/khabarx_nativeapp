@@ -210,7 +210,18 @@ export default function CreateDonationScreen() {
               <>
                 <LottieView source={require('@/assets/lotti/congratulation.json')} autoPlay loop={false} style={{ width: 140, height: 140 }} />
                 {!!successMessage && <Text style={[styles.overlayTxt, styles.overlayMsg]}>{successMessage}</Text>}
-                <TouchableOpacity onPress={() => router.back()} style={[styles.smallBtn, { marginTop: 10 }] }>
+                <TouchableOpacity
+                  onPress={() => {
+                    // If launched from an event (eventId present), go back to that page.
+                    // Otherwise, ensure we land on the main donations list.
+                    if (lockedEventId) {
+                      router.back();
+                    } else {
+                      router.replace('/hrci/donations');
+                    }
+                  }}
+                  style={[styles.smallBtn, { marginTop: 10 }] }
+                >
                   <Text style={styles.smallBtnText}>Done</Text>
                 </TouchableOpacity>
               </>
