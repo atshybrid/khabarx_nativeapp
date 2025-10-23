@@ -1,9 +1,9 @@
-import { confirmDonation, createDonationOrder, getDonationOrderStatus } from '@/services/donations';
+import { confirmDonation, createDonationOrder } from '@/services/donations';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 
@@ -23,11 +23,7 @@ export default function CreateDonationScreen() {
   // Hide share code in UI; accept via params if provided
   const lockedShareCode = useMemo(() => (params?.shareCode ? String(params.shareCode) : undefined), [params?.shareCode]);
   const [submitting, setSubmitting] = useState(false);
-  const [providerOrderId, setProviderOrderId] = useState<string | null>(null);
-  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
-  const [overlayStep, setOverlayStep] = useState<
-    'idle' | 'creating' | 'paying' | 'confirming' | 'processingReceipt'
-  >('idle');
+  const [overlayStep, setOverlayStep] = useState<'idle' | 'creating' | 'paying' | 'confirming'>('idle');
 
   const amtNum = useMemo(() => Number(amount || 0), [amount]);
   // PAN mandatory for non-anonymous donations above ₹10,000
@@ -62,8 +58,6 @@ export default function CreateDonationScreen() {
         isAnonymous,
         shareCode: lockedShareCode || undefined,
       });
-
-      setProviderOrderId(order.providerOrderId || null);
 
       // If provider is Razorpay, open checkout
       if (order.provider === 'razorpay' && order.providerOrderId && order.providerKeyId) {
@@ -107,8 +101,17 @@ export default function CreateDonationScreen() {
               razorpay_payment_id: result.razorpay_payment_id,
               razorpay_signature: result.razorpay_signature,
             });
-            // After confirming success, start receipt processing
-            setOverlayStep('processingReceipt');
+            // Show success message and return
+            const lines: string[] = ['Thank you for your donation.'];
+            if (!isAnonymous) {
+              if (donorMobile?.trim()) lines.push(`You will receive your 80G receipt on WhatsApp at ${donorMobile}.`);
+              if (donorEmail?.trim()) lines.push(`A copy will also be emailed to ${donorEmail}.`);
+              if (!donorMobile?.trim() && !donorEmail?.trim()) lines.push('Your 80G receipt will be available shortly.');
+            } else {
+              // Anonymous: simple thanks
+              lines.push('Your 80G receipt will be sent to your provided contact if available.');
+            }
+            Alert.alert('Payment Successful', lines.join('\n'), [{ text: 'OK', onPress: () => router.back() }]);
           }
         } catch (err: any) {
           // Cancel or failure
@@ -133,29 +136,7 @@ export default function CreateDonationScreen() {
         Alert.alert('Unsupported Provider', 'This payment provider is not supported.');
       }
 
-      // Poll order status for a short period to check for receipt URL
-      let receiptReady = false;
-      try {
-        const maxAttempts = 6; // ~9s if 1.5s delay
-        const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
-        for (let i = 0; i < maxAttempts; i++) {
-          const st = await getDonationOrderStatus(order.providerOrderId!);
-          if (st?.receiptPdfUrl || st?.receiptHtmlUrl) {
-            const url = (st.receiptPdfUrl || st.receiptHtmlUrl) as string;
-            receiptReady = true;
-            setReceiptUrl(url);
-            // Try opening immediately
-            try { await Linking.openURL(url); } catch {}
-            break;
-          }
-          await delay(1500);
-        }
-      } catch {}
-
-      if (!receiptReady) {
-        // Fallback message if receipt not immediately available
-        Alert.alert('Donation Recorded', 'Payment captured. Your 80G receipt will be ready shortly. You can refresh status below.');
-      }
+      // No manual status UI or polling; success handled above. If provider not razorpay, just show recorded message.
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Could not start donation. Please try again.');
     } finally {
@@ -164,20 +145,7 @@ export default function CreateDonationScreen() {
     }
   };
 
-  const refreshStatus = async () => {
-    if (!providerOrderId) return;
-    try {
-      const st = await getDonationOrderStatus(providerOrderId);
-      if (st?.receiptPdfUrl || st?.receiptHtmlUrl) {
-        setReceiptUrl((st.receiptPdfUrl || st.receiptHtmlUrl) || null);
-        Alert.alert('Receipt Ready', 'Your receipt link is available below.');
-      } else {
-        Alert.alert('Pending', `Status: ${st?.status || 'PENDING'}`);
-      }
-    } catch (e: any) {
-      Alert.alert('Status Error', e?.message || 'Could not fetch donation status.');
-    }
-  };
+  // No manual status refresh; handled server-side via WhatsApp/Email notifications.
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
@@ -228,21 +196,7 @@ export default function CreateDonationScreen() {
             {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaText}>Donate</Text>}
           </TouchableOpacity>
 
-          {providerOrderId && (
-            <View style={styles.statusCard}>
-              <Text style={styles.statusTitle}>Payment Status</Text>
-              <Text style={styles.statusSub}>Order: {providerOrderId}</Text>
-              <View style={{ height: 8 }} />
-              <TouchableOpacity onPress={refreshStatus} style={[styles.smallBtn]}>
-                <Text style={styles.smallBtnText}>Refresh Status</Text>
-              </TouchableOpacity>
-              {receiptUrl ? (
-                <TouchableOpacity onPress={() => Alert.alert('Receipt', 'Open this URL in browser:\n' + receiptUrl)} style={[styles.smallBtn, { backgroundColor: '#16a34a' }]}>
-                  <Text style={styles.smallBtnText}>View Receipt</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          )}
+          {/* No status/refresh UI post-payment; we show a success message and navigate back. */}
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -255,7 +209,7 @@ export default function CreateDonationScreen() {
               {overlayStep === 'creating' && 'Creating donation...'}
               {overlayStep === 'paying' && 'Opening payment...'}
               {overlayStep === 'confirming' && 'Confirming payment...'}
-              {overlayStep === 'processingReceipt' && 'Generating 80G receipt...'}
+              {/* No separate receipt processing step */}
             </Text>
           </View>
         </View>
