@@ -1,4 +1,4 @@
-import BottomSheet from '@/components/ui/BottomSheet';
+import LanguagePickerSheet from '@/components/ui/LanguagePickerSheet';
 import { Loader } from '@/components/ui/Loader';
 import { Colors } from '@/constants/Colors';
 import { LANGUAGES, type Language } from '@/constants/languages';
@@ -7,7 +7,8 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useThemeColor } from '@/hooks/useThemeColor';
 import { afterPreferencesUpdated, getUserPreferences, pickPreferenceLanguage, pickPreferenceLocation, updatePreferences, updateUserProfile, uploadMedia } from '@/services/api';
 import { loadTokens, logoutAndClearProfile, saveTokens } from '@/services/auth';
-import { on } from '@/services/events';
+import { emit, on } from '@/services/events';
+import { getCurrentPushToken, getPushPermissionStatus } from '@/services/notifications';
 import { requestMediaPermissionsOnly } from '@/services/permissions';
 import { makeShadow } from '@/utils/shadow';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
@@ -15,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, Image, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, BackHandler, Image, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AccountScreen() {
@@ -38,6 +39,10 @@ export default function AccountScreen() {
   const [notify, setNotify] = useState(true);
   const [autoplay, setAutoplay] = useState(false);
   const [langSheetOpen, setLangSheetOpen] = useState(false);
+  const langSelectingRef = useRef(false);
+  // Push notifications status/token
+  const [pushStatus, setPushStatus] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
+  const [pushShortToken, setPushShortToken] = useState<string>('');
 
   // Refresh account/profile state from tokens + storage
   const refreshProfile = useCallback(async () => {
@@ -132,8 +137,26 @@ export default function AccountScreen() {
 
   useEffect(() => { refreshProfile(); }, [refreshProfile]);
 
+  // Language list is fetched inside LanguagePickerSheet when opened
+
   // Refresh location when coming back from picker
   useFocusEffect(React.useCallback(() => { refreshProfile(); return () => {}; }, [refreshProfile]));
+
+  // Load push permission status + short token on focus
+  useFocusEffect(React.useCallback(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const s = await getPushPermissionStatus();
+        if (mounted && s?.status) setPushStatus(s.status);
+      } catch {}
+      try {
+        const t = await getCurrentPushToken();
+        if (mounted) setPushShortToken(t ? `${t.slice(0, 10)}…${t.slice(-6)}` : '');
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, []));
 
   // Android back: go to News instead of blank route
   useFocusEffect(
@@ -154,7 +177,7 @@ export default function AccountScreen() {
     // Additionally, if user is MEMBER/HRCI_ADMIN, store a dedicated local-language payload
     try {
       const roleUC = (role || '').toString().trim().toUpperCase();
-      if (roleUC === 'MEMBER' || roleUC === 'HRCI_ADMIN') {
+      if (roleUC === 'MEMBER' || roleUC === 'HRCI_MEMBER' || roleUC === 'HRCI_ADMIN') {
         const payload = { id: lang.id, code: lang.code, name: lang.name };
         await AsyncStorage.multiSet([
           ['language_local', JSON.stringify(payload)],
@@ -198,7 +221,7 @@ export default function AccountScreen() {
         return;
       }
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -232,7 +255,7 @@ export default function AccountScreen() {
       // Check if user has valid HRCI authentication
       const tokens = await loadTokens();
       const hasValidToken = !!(tokens?.jwt);
-      const userRole = tokens?.user?.role;
+      const userRole = (tokens?.user?.role || '').toString().trim().toUpperCase();
       
       console.log('[Tech Tab] Auth check result:', {
         hasValidToken,
@@ -243,9 +266,17 @@ export default function AccountScreen() {
       // Check if token is expired
       const isExpired = tokens?.expiresAt ? Date.now() >= tokens.expiresAt : false;
       
-      if (hasValidToken && !isExpired && (userRole === 'MEMBER' || userRole === 'HRCI_ADMIN')) {
-        console.log('[Tech Tab] Valid HRCI auth found, navigating directly to dashboard');
-        router.push('/hrci' as any);
+      if (hasValidToken && !isExpired) {
+        if (userRole === 'HRCI_ADMIN' || userRole === 'SUPERADMIN') {
+          console.log('[Tech Tab] Admin role detected, navigating to admin dashboard');
+          router.push('/hrci/admin' as any);
+        } else if (userRole === 'MEMBER' || userRole === 'HRCI_MEMBER') {
+          console.log('[Tech Tab] Member role detected, navigating to member dashboard');
+          router.push('/hrci' as any);
+        } else {
+          console.log('[Tech Tab] No HRCI role, navigating to login');
+          router.push('/hrci/login' as any);
+        }
       } else {
         console.log('[Tech Tab] No valid HRCI auth, navigating to login');
         router.push('/hrci/login' as any);
@@ -297,7 +328,7 @@ export default function AccountScreen() {
 
   // Role check for hiding user header when membership is present
   const roleUC = (role || '').toString().trim().toUpperCase();
-  const isMemberOrAdmin = roleUC === 'MEMBER' || roleUC === 'HRCI_ADMIN';
+  const isMemberOrAdmin = roleUC === 'MEMBER' || roleUC === 'HRCI_MEMBER' || roleUC === 'HRCI_ADMIN';
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: bg }]}>
@@ -347,12 +378,12 @@ export default function AccountScreen() {
           </View>
         ) : null}
 
-        {/* HRCI Membership at top (always visible) */}
+        {/* HRCI Member & Admin at top (always visible) */}
         <View style={[styles.card, styles.hrciCard, { backgroundColor: card, borderColor: '#FE0002' }]}>
           <View style={[styles.hrciHeader, { justifyContent: 'space-between', width: '100%' }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <MaterialIcons name="account-balance" size={24} color="#FE0002" />
-              <Text style={[styles.cardTitle, { color: '#FE0002', marginLeft: 8 }]}>HRCI Membership</Text>
+              <Text style={[styles.cardTitle, { color: '#FE0002', marginLeft: 8 }]}>HRCI Member & Admin</Text>
             </View>
             {hrciMembership?.kyc?.status === 'APPROVED' && (
               <View style={styles.kycMiniBadge}>
@@ -409,6 +440,17 @@ export default function AccountScreen() {
         {/* Other Preferences */}
         <View style={[styles.card, { backgroundColor: card, borderColor: border }]}>
           <Text style={[styles.cardTitle, { color: text }]}>Preferences</Text>
+          {/* Push notification status row */}
+          <Pressable onPress={() => { try { Linking.openSettings(); } catch {} }} accessibilityLabel="Open system Settings to manage notifications" style={({ pressed }: { pressed: boolean }) => [styles.rowBetween, pressed && { opacity: 0.85 }]}>
+            <View>
+              <Text style={[styles.label, { color: text }]}>Push notifications</Text>
+              <Text style={[styles.helper, { color: muted }]}>
+                {pushStatus === 'granted' ? 'Allowed' : pushStatus === 'denied' ? 'Blocked' : 'Not determined'}
+                {pushShortToken ? ` • ${pushShortToken}` : ''}
+              </Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
+          </Pressable>
           <View style={styles.rowBetween}>
             <View>
               <Text style={[styles.label, { color: text }]}>Notifications</Text>
@@ -495,55 +537,53 @@ export default function AccountScreen() {
             </View>
             <MaterialIcons name="chevron-right" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
           </Pressable>
+          <Pressable onPress={() => router.push('/settings/notifications' as any)} style={({ pressed }) => [styles.rowBetween, pressed && { opacity: 0.85 }]}>
+            <View>
+              <Text style={[styles.label, { color: text }]}>Push notifications test</Text>
+              <Text style={[styles.helper, { color: muted }]}>View token, local + server test</Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
+          </Pressable>
+          <Pressable onPress={() => router.push('/settings/preferences-debug' as any)} style={({ pressed }) => [styles.rowBetween, pressed && { opacity: 0.85 }]}>
+            <View>
+              <Text style={[styles.label, { color: text }]}>Preferences debug</Text>
+              <Text style={[styles.helper, { color: muted }]}>Show local language id/code from storage</Text>
+            </View>
+            <MaterialIcons name="chevron-right" size={22} color={scheme === 'dark' ? '#fff' : Colors.light.primary} />
+          </Pressable>
         </View>
 
-        {/* Language Picker Bottom Sheet */}
-        <BottomSheet
+        {/* Language Picker Modal Sheet (smoother) */}
+        <LanguagePickerSheet
           visible={langSheetOpen}
           onClose={() => setLangSheetOpen(false)}
-          snapPoints={[400]}
-          initialSnapIndex={0}
-          respectSafeAreaBottom={false}
-          shadowEnabled={false}
-          header={
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.light.primary }}>Select language</Text>
-              <Pressable onPress={() => setLangSheetOpen(false)} accessibilityLabel="Close language picker">
-                <MaterialIcons name="close" size={22} color={Colors.light.primary} />
-              </Pressable>
-            </View>
-          }
-        >
-          <ScrollView style={{ maxHeight: '100%' }} contentContainerStyle={{ paddingBottom: 50 }} keyboardShouldPersistTaps="handled">
-            {LANGUAGES.map((l) => {
-              const active = language?.code === l.code;
-              return (
-                <Pressable
-                  key={l.code}
-                  onPress={async () => {
-                    try { console.log('[AccountTab] Language selected:', l.code); } catch {}
-                    await persistLanguage(l);
-                    try {
-                      await updatePreferences({ languageId: l.id, languageCode: l.code });
-                      await afterPreferencesUpdated({ languageIdChanged: l.id, languageCode: l.code });
-                    } catch {
-                      // likely guest user without userId; ignore
-                    }
-                    setLangSheetOpen(false);
-                    try { await refreshProfile(); } catch {}
-                  }}
-                  style={({ pressed }) => [styles.langRow, { borderBottomColor: border }, active && { backgroundColor: card }, pressed && { opacity: 0.9 }]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.langNative, { color: l.color }]}>{l.nativeName}</Text>
-                    <Text style={[styles.langEnglish, { color: muted }]}>{l.name}</Text>
-                  </View>
-                  {active ? <MaterialIcons name="check-circle" size={22} color={Colors.light.secondary} /> : <View style={{ width: 22, height: 22 }} />}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </BottomSheet>
+          currentCode={language?.code || undefined}
+          onPick={(l) => {
+            if (langSelectingRef.current) return;
+            langSelectingRef.current = true;
+            // Optimistic update
+            persistLanguage(l).catch(() => {});
+            (async () => {
+              try {
+                if (loggedIn) {
+                  await updatePreferences({ languageId: l.id, languageCode: l.code });
+                  await afterPreferencesUpdated({ languageIdChanged: l.id, languageCode: l.code });
+                  const t = await loadTokens();
+                  const uid = (t as any)?.user?.id || (t as any)?.user?._id || (t as any)?.user?.userId;
+                  const prefs = uid ? await getUserPreferences(uid) : null;
+                  const serverLang = pickPreferenceLanguage(prefs) || l;
+                  await persistLanguage(serverLang as Language);
+                  try { emit('toast:show', { message: `Language updated to ${serverLang?.name || l.name}` } as any); } catch {}
+                }
+              } catch (e:any) {
+                try { emit('toast:show', { message: e?.message || 'Failed to update language' } as any); } catch {}
+              } finally {
+                langSelectingRef.current = false;
+                try { await refreshProfile(); } catch {}
+              }
+            })();
+          }}
+        />
       </ScrollView>
     </SafeAreaView>
   );

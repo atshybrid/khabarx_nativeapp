@@ -1,4 +1,5 @@
-import { confirmDonation, createDonationOrder } from '@/services/donations';
+// Switch to member payment-link flow instead of Razorpay checkout
+import { createDonationPaymentLink } from '@/services/hrciDonations';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import LottieView from 'lottie-react-native';
@@ -23,8 +24,7 @@ export default function CreateDonationScreen() {
   // Hide share code in UI; accept via params if provided
   const lockedShareCode = useMemo(() => (params?.shareCode ? String(params.shareCode) : undefined), [params?.shareCode]);
   const [submitting, setSubmitting] = useState(false);
-  const [overlayStep, setOverlayStep] = useState<'idle' | 'creating' | 'paying' | 'confirming' | 'success'>('idle');
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [overlayStep, setOverlayStep] = useState<'idle' | 'creating'>('idle');
 
   const amtNum = useMemo(() => Number(amount || 0), [amount]);
   // PAN mandatory for non-anonymous donations above ₹10,000
@@ -37,7 +37,8 @@ export default function CreateDonationScreen() {
     }
     // For identified donations, require basic info
     if (!donorName.trim()) return false;
-    if (!donorMobile.trim()) return false;
+    const mobileDigits = donorMobile.replace(/\D/g, '');
+    if (mobileDigits.length !== 10) return false;
     if (panRequired && !donorPan.trim()) return false;
     return true;
   }, [amtNum, isAnonymous, donorName, donorMobile, panRequired, donorPan]);
@@ -47,100 +48,48 @@ export default function CreateDonationScreen() {
     setSubmitting(true);
     setOverlayStep('creating');
     try {
-      // Create donation order
-      const order = await createDonationOrder({
+      // Sanitize inputs to avoid backend raw SQL issues (e.g., prisma.$queryRaw with unescaped strings)
+      const sanitize = (v?: string | null) => String(v ?? '')
+        .replace(/[\u0000-\u001F\u007F]+/g, '') // control chars
+        .replace(/["'`\\;]/g, '') // quotes, backslash, semicolon
+        .trim();
+      const mobileDigits = (donorMobile || '').replace(/\D/g, '').slice(0, 10);
+      const nameSan = sanitize(isAnonymous ? '' : donorName);
+      const addrSan = sanitize(isAnonymous ? '' : donorAddress);
+      const emailSanRaw = sanitize(isAnonymous ? '' : donorEmail);
+      const emailSan = emailSanRaw && /.+@.+\..+/.test(emailSanRaw) ? emailSanRaw : '';
+      const panRaw = sanitize(isAnonymous ? '' : donorPan).toUpperCase();
+      const panSan = /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panRaw) ? panRaw : '';
+
+      // Create a member donation payment link instead of redirecting to Razorpay checkout
+      await createDonationPaymentLink({
         eventId: lockedEventId || undefined,
         amount: amtNum,
-        donorName: isAnonymous ? '' : donorName,
-        donorAddress: isAnonymous ? undefined : donorAddress,
-        donorMobile: isAnonymous ? '' : donorMobile,
-        donorEmail: isAnonymous ? undefined : donorEmail,
-        donorPan: isAnonymous ? undefined : (donorPan || undefined),
+        donorName: nameSan,
+        donorAddress: addrSan || undefined,
+        donorMobile: isAnonymous ? '' : mobileDigits,
+        donorEmail: emailSan || undefined,
+        donorPan: panSan || undefined,
         isAnonymous,
         shareCode: lockedShareCode || undefined,
       });
 
-      // If provider is Razorpay, open checkout
-      if (order.provider === 'razorpay' && order.providerOrderId && order.providerKeyId) {
-        if (Platform.OS === 'web') {
-          Alert.alert('Not supported on web', 'Payment is not supported in web builds. Please use the mobile app.');
-          return;
-        }
-        // Ensure SDK exists
-        let checkoutAPI: any;
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const RazorpayCheckout = require('react-native-razorpay');
-          checkoutAPI = RazorpayCheckout.default || RazorpayCheckout;
-        } catch {
-          Alert.alert('Payment Setup Required', 'Razorpay is not available in this build. Please rebuild the development client.');
-          return;
-        }
-        const amountPaise = Math.round(order.amount * 100);
-        const options: any = {
-          key: order.providerKeyId,
-          order_id: order.providerOrderId,
-          amount: amountPaise,
-          name: 'HRCI Donation',
-          description: lockedEventId ? `Event Donation` : 'Direct Donation',
-          theme: { color: '#FE0002' },
-          prefill: isAnonymous ? undefined : { name: donorName, contact: donorMobile, email: donorEmail },
-          retry: { enabled: true, max_count: 1 },
-        };
-        try {
-          setOverlayStep('paying');
-          const result = await checkoutAPI.open(options);
-          // On success
-          if (result && result.razorpay_order_id && result.razorpay_payment_id && result.razorpay_signature) {
-            setOverlayStep('confirming');
-            await confirmDonation({
-              orderId: order.orderId,
-              status: 'SUCCESS',
-              provider: 'razorpay',
-              providerRef: result.razorpay_payment_id,
-              razorpay_order_id: result.razorpay_order_id,
-              razorpay_payment_id: result.razorpay_payment_id,
-              razorpay_signature: result.razorpay_signature,
-            });
-            // Show success overlay with message (no manual refresh UI)
-            const lines: string[] = ['Thank you for your donation.'];
-            if (!isAnonymous) {
-              if (donorMobile?.trim()) lines.push(`You will receive your 80G receipt on WhatsApp at ${donorMobile}.`);
-              if (donorEmail?.trim()) lines.push(`A copy will also be emailed to ${donorEmail}.`);
-              if (!donorMobile?.trim() && !donorEmail?.trim()) lines.push('Your 80G receipt will be available shortly.');
-            } else {
-              // Anonymous: simple thanks
-              lines.push('Your 80G receipt will be sent to your provided contact if available.');
-            }
-            setSuccessMessage(lines.join('\n'));
-            setOverlayStep('success');
-          }
-        } catch (err: any) {
-          // Cancel or failure
-          const msg = String(err?.description || err?.error || err?.message || '').toLowerCase();
-          const isCancelled = err?.code === 0 || msg.includes('cancel');
-          try {
-            await confirmDonation({
-              orderId: order.orderId,
-              status: isCancelled ? 'CANCELLED' : 'FAILED',
-              provider: 'razorpay',
-              providerRef: err?.metadata?.payment_id || undefined,
-              razorpay_order_id: order.providerOrderId || undefined,
-              razorpay_payment_id: err?.metadata?.payment_id || undefined,
-              razorpay_signature: undefined,
-            });
-          } catch {}
-          if (!isCancelled) {
-            Alert.alert('Payment Failed', 'Could not complete the payment. Please try again.');
-          }
-        }
-      } else {
-        Alert.alert('Unsupported Provider', 'This payment provider is not supported.');
-      }
-
-      // No manual status UI or polling; success handled above. If provider not razorpay, just show recorded message.
+      // Immediately go back to the member links list; no success overlay
+      router.replace('/hrci/donations');
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Could not start donation. Please try again.');
+      const msg = String(e?.message || '').toLowerCase();
+      const bodyMsg = String((e?.body?.message ?? e?.body) || '').toLowerCase();
+      const text = msg + ' ' + bodyMsg;
+      if (text.includes('donationdonorprofile') || text.includes('relation') || text.includes('42p01')) {
+        Alert.alert(
+          'Donations Setup Required',
+          'Payment link service is temporarily unavailable on the server (missing database table). Please contact admin to run the latest migrations.'
+        );
+        // Navigate back to list to avoid getting stuck
+        try { router.replace('/hrci/donations'); } catch {}
+      } else {
+        Alert.alert('Error', e?.message || 'Could not start donation. Please try again.');
+      }
     } finally {
       setSubmitting(false);
       setOverlayStep('idle');
@@ -179,7 +128,17 @@ export default function CreateDonationScreen() {
                 <TextInput value={donorName} onChangeText={setDonorName} placeholder="Full name" style={styles.input} />
               </Field>
               <Field label="Mobile">
-                <TextInput keyboardType="phone-pad" value={donorMobile} onChangeText={setDonorMobile} placeholder="10-digit mobile" style={styles.input} />
+                <TextInput
+                  keyboardType="phone-pad"
+                  value={donorMobile}
+                  onChangeText={(t) => {
+                    const digits = t.replace(/\D/g, '').slice(0, 10);
+                    setDonorMobile(digits);
+                  }}
+                  placeholder="10-digit mobile"
+                  style={styles.input}
+                  maxLength={10}
+                />
               </Field>
               <Field label="Email (optional)">
                 <TextInput value={donorEmail} onChangeText={setDonorEmail} placeholder="email@example.com" style={styles.input} />
@@ -206,35 +165,10 @@ export default function CreateDonationScreen() {
       {overlayStep !== 'idle' && (
         <View style={styles.overlay} pointerEvents="none">
           <View style={styles.overlayCard}>
-            {overlayStep === 'success' ? (
-              <>
-                <LottieView source={require('@/assets/lotti/congratulation.json')} autoPlay loop={false} style={{ width: 140, height: 140 }} />
-                {!!successMessage && <Text style={[styles.overlayTxt, styles.overlayMsg]}>{successMessage}</Text>}
-                <TouchableOpacity
-                  onPress={() => {
-                    // If launched from an event (eventId present), go back to that page.
-                    // Otherwise, ensure we land on the main donations list.
-                    if (lockedEventId) {
-                      router.back();
-                    } else {
-                      router.replace('/hrci/donations');
-                    }
-                  }}
-                  style={[styles.smallBtn, { marginTop: 10 }] }
-                >
-                  <Text style={styles.smallBtnText}>Done</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <LottieView source={require('@/assets/lotti/donate.json')} autoPlay loop style={{ width: 120, height: 120 }} />
-                <Text style={styles.overlayTxt}>
-                  {overlayStep === 'creating' && 'Creating donation...'}
-                  {overlayStep === 'paying' && 'Opening payment...'}
-                  {overlayStep === 'confirming' && 'Confirming payment...'}
-                </Text>
-              </>
-            )}
+            <LottieView source={require('@/assets/lotti/donate.json')} autoPlay loop style={{ width: 120, height: 120 }} />
+            <Text style={styles.overlayTxt}>
+              {overlayStep === 'creating' && 'Creating payment link...'}
+            </Text>
           </View>
         </View>
       )}

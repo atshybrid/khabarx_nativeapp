@@ -10,6 +10,10 @@ export type AppEvents = {
   'profile:updated': { photoUrl?: string };
   // Fired after KYC is submitted or status changes; consumers can refresh membership or KYC status
   'kyc:updated': { status: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'NOT_STARTED' };
+  // Show a lightweight in-app toast
+  'toast:show': { message: string };
+  // Ask News tab to reload items (e.g., after login/logout/language change)
+  'news:refresh': { reason?: 'login' | 'logout' | 'language' | 'manual' };
 };
 
 type Handler<T> = (payload: T) => void;

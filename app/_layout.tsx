@@ -9,7 +9,7 @@ import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { LogBox, Platform, StyleSheet, Text, View } from 'react-native';
 // removed duplicate react-native import (merged above)
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
@@ -19,8 +19,21 @@ import { UiPrefsProvider } from '../context/UiPrefsContext';
 import { useColorScheme } from '../hooks/useColorScheme';
 import { ensureNotificationsSetup } from '../services/notifications';
 
-// Keep native splash visible while we boot in app/splash.tsx
+// Keep native splash visible until our root view mounts and/or splash screen routes decide to hide it
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Reduce noisy web warnings from third-party libs while we migrate
+if (Platform.OS === 'web') {
+  try {
+    LogBox.ignoreLogs([
+      // expo-notifications web advisory (harmless, no fix available yet)
+      '[expo-notifications] Listening to push token changes is not yet fully supported on web',
+      // react-native-web deprecations we'll gradually address
+      '"shadow*" style props are deprecated. Use "boxShadow".',
+      'props.pointerEvents is deprecated. Use style.pointerEvents',
+    ]);
+  } catch {}
+}
 
 // Custom Header Component
 const CustomHeader = () => {
@@ -41,6 +54,14 @@ function ThemedApp() {
   const effective = themePref === 'system' ? system : themePref;
   const router = useRouter();
   // Font loading temporarily disabled for debugging blank screen
+
+  // Hide native splash as soon as the root view lays out (safety net to avoid being stuck)
+  const splashHiddenRef = React.useRef(false);
+  const onRootLayout = React.useCallback(() => {
+    if (splashHiddenRef.current) return;
+    splashHiddenRef.current = true;
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
 
   // Dev-only keep-awake guard to avoid activation errors on some devices
   React.useEffect(() => {
@@ -113,7 +134,7 @@ function ThemedApp() {
   }, [router]);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }} onLayout={onRootLayout}>
       <BottomSheetModalProvider>
         <AuthProvider>
           <ThemeProvider value={effective === 'dark' ? DarkTheme : DefaultTheme}>

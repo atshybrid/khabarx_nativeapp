@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui/Button';
+import { Colors } from '@/constants/Colors';
 import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,7 +16,7 @@ type Item = { id: string; name: string; code?: string };
 
 export default function HrciGeoScreen() {
   const router = useRouter();
-  const { level, updateGeo, geo, cellId, designationCode } = useHrciOnboarding();
+  const { level, updateGeo, geo, cellId, designationCode, returnToAfterGeo, setReturnToAfterGeo } = useHrciOnboarding();
   const [query, setQuery] = useState('');
   const insets = useSafeAreaInsets();
   const bottomPad = 16 + 72 + (insets?.bottom || 0);
@@ -41,6 +43,13 @@ export default function HrciGeoScreen() {
   useEffect(() => {
     (async () => {
       try {
+        // Restore fallback target if present so CTA label stays correct
+        if (!returnToAfterGeo) {
+          const savedTarget = await AsyncStorage.getItem('HRCI_RETURN_TO_AFTER_GEO');
+          if (savedTarget) {
+            try { setReturnToAfterGeo(savedTarget); } catch {}
+          }
+        }
         const entries = await AsyncStorage.multiGet([
           'HRCI_COUNTRY_ID','HRCI_COUNTRY_NAME',
           'HRCI_STATE_ID','HRCI_STATE_NAME',
@@ -59,7 +68,7 @@ export default function HrciGeoScreen() {
       } catch {}
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [returnToAfterGeo, setReturnToAfterGeo]);
 
   useEffect(() => { (async () => {
     try {
@@ -209,7 +218,16 @@ export default function HrciGeoScreen() {
     setQuery('');
   };
 
-  const continueNext = () => router.push('/hrci/availability' as any);
+  const continueNext = () => {
+    if (returnToAfterGeo && canContinue) {
+      const target = returnToAfterGeo as any;
+      // Clear the hint so it doesn't affect other flows
+      try { setReturnToAfterGeo(null); AsyncStorage.removeItem('HRCI_RETURN_TO_AFTER_GEO'); } catch {}
+      router.push(target);
+      return;
+    }
+    router.push('/hrci/availability' as any);
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }} edges={['top','left','right']}>
@@ -390,9 +408,13 @@ export default function HrciGeoScreen() {
                 end={{ x: 0, y: 1 }}
                 style={[styles.fadeTop, { pointerEvents: 'none' }]}
               />
-              <TouchableOpacity disabled={!canContinue} onPress={continueNext} style={[styles.cta, { width: '100%' }, !canContinue && styles.ctaDisabled]}>
-                <Text style={styles.ctaText}>Check Availability</Text>
-              </TouchableOpacity>
+              <Button
+                title={returnToAfterGeo ? 'Create meeting' : 'Check Availability'}
+                onPress={continueNext}
+                disabled={!canContinue}
+                backgroundColor={Colors.light.secondary}
+                style={{ width: '100%' }}
+              />
             </View>
           </View>
         </TouchableWithoutFeedback>

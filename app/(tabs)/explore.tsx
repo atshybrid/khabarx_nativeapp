@@ -18,7 +18,7 @@ import { Colors } from '../../constants/Colors';
 import { useTabBarVisibility } from '../../context/TabBarVisibilityContext';
 import { useTransliteration } from '../../hooks/useTransliteration';
 import { checkDuplicateShortNews, createShortNews, getCategories, getLanguages, uploadMedia } from '../../services/api';
-import { loadTokens } from '../../services/auth';
+import { checkPostArticleAccess, loadTokens } from '../../services/auth';
 import { log } from '../../services/logger';
 import { requestAppPermissions, type PermissionStatus } from '../../services/permissions';
 
@@ -37,6 +37,17 @@ export default function PostCreateScreen() {
   const [languageName, setLanguageName] = useState<string>('');
   const titleTx = useTransliteration({ languageCode: languageCode, enabled: true, mode: 'on-boundary', debounceMs: 140 });
   const contentTx = useTransliteration({ languageCode: languageCode, enabled: true, mode: 'on-boundary', debounceMs: 140 });
+  // Enforce max 60 words for content (handles typing and paste)
+  const handleContentChange = useCallback((next: string) => {
+    // Split by whitespace to count words; treat multiple spaces/newlines as a single delimiter
+    const words = next.trim().length ? next.trim().split(/\s+/) : [];
+    if (words.length > 60) {
+      const capped = words.slice(0, 60).join(' ');
+      contentTx.onChangeText(capped);
+      return;
+    }
+    contentTx.onChangeText(next);
+  }, [contentTx]);
   // showLogin state removed - now uses direct navigation to /auth/login
   // showUpgrade state removed - now uses direct navigation to /auth/login
   const [showLottie, setShowLottie] = useState<string | boolean>(false);
@@ -91,7 +102,7 @@ export default function PostCreateScreen() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        mediaTypes: ['images', 'videos'],
         allowsMultipleSelection: true,
         quality: 0.85,
         selectionLimit: 5,
@@ -172,8 +183,6 @@ export default function PostCreateScreen() {
   }, []);
   const { setTabBarVisible } = useTabBarVisibility();
   const [perms, setPerms] = useState<PermissionStatus | null>(null);
-  const [role, setRole] = useState<string>('Guest');
-  const [authLoaded, setAuthLoaded] = useState(false);
 
 
   // Google Auth: set up request using client IDs from centralized config
@@ -297,17 +306,8 @@ export default function PostCreateScreen() {
       if (effLangName) setLanguageName(effLangName);
       if (effLangId) setLanguageId(effLangId);
       if (effLangCode) setLanguageCode(effLangCode);
-      // load current role if any (from tokens or AsyncStorage)
-      try {
-        const t = await loadTokens();
-        const tokenRole = t?.user?.role;
-        if (tokenRole) {
-          setRole(tokenRole);
-        } else {
-          const savedRole = await AsyncStorage.getItem('profile_role');
-          if (savedRole) setRole(savedRole);
-        }
-      } catch {}
+      // load current role if any (from tokens or AsyncStorage) - handled by centralized access checks now
+      try { await loadTokens(); } catch {}
       // request permissions (notif + location) upfront for smoother UX
       try {
         const st = await requestAppPermissions();
@@ -326,7 +326,7 @@ export default function PostCreateScreen() {
           GoogleSignin.configure({ webClientId, forceCodeForRefreshToken: false });
         }
       } catch {}
-      setAuthLoaded(true);
+  // auth context initialized
     })();
   }, [googleMode, webClientId, loadLanguagePrefs]);
 
@@ -380,33 +380,31 @@ export default function PostCreateScreen() {
 
   // Avoid proactively importing expo-image-picker on mount to prevent early native module evaluation.
 
-  // Check authentication when user attempts to publish
-  const checkAuthBeforePublish = () => {
-    if (!authLoaded) {
-      Alert.alert('Please wait', 'Loading authentication status...');
-      return false;
-    }
-    
-    if (role !== 'CITIZEN_REPORTER') {
+  // Check authentication when user attempts to publish (centralized, role-aware)
+  const checkAuthBeforePublish = async () => {
+    try {
+      const result = await checkPostArticleAccess();
+      if (result.canAccess) return true;
+
+      if (result.isGuest || !result.hasToken) {
+        router.push('/auth/login?from=post');
+        return false;
+      }
+
       Alert.alert(
-        'Authentication Required',
-        'You need to be a Citizen Reporter to create posts. Please login or register.',
+        'Access Denied',
+        result.reason || 'Reporter, Member or HRCI Admin role required to create posts.',
         [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-            // Don't navigate away, let user stay on post creation screen
-          },
-          {
-            text: 'Login',
-            onPress: () => router.push('/auth/login?from=post')
-          }
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Login', onPress: () => router.push('/auth/login?from=post') }
         ]
       );
       return false;
+    } catch (e:any) {
+      Alert.alert('Authentication Error', e?.message || 'Please login to continue.');
+      router.push('/auth/login?from=post');
+      return false;
     }
-    
-    return true;
   };
 
   const titleCount = titleTx.value.length;
@@ -451,7 +449,7 @@ export default function PostCreateScreen() {
   // onSubmit handler for publish button and programmatic triggers
   const onSubmit = async () => {
     // Check authentication before any processing
-    if (!checkAuthBeforePublish()) {
+    if (!(await checkAuthBeforePublish())) {
       return;
     }
 
@@ -709,7 +707,7 @@ export default function PostCreateScreen() {
             placeholder="What happened? Keep it concise and objective."
             multiline
             value={contentTx.value}
-            onChangeText={contentTx.onChangeText}
+            onChangeText={handleContentChange}
             placeholderTextColor={theme.muted}
             ref={contentInputRef}
           />

@@ -3,6 +3,7 @@ import { getDonationEvents, getDonationLinkById, getDonationReceiptUrl, getMembe
 import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Clipboard from 'expo-clipboard';
 import { router, useFocusEffect } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -46,6 +47,7 @@ export default function HrciDonationsListPage() {
   // filters moved into app bar with native date pickers
   const [notifyingId, setNotifyingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
   // create donation moved to full page
@@ -108,6 +110,15 @@ export default function HrciDonationsListPage() {
   useEffect(() => { loadEvents(); }, [loadEvents]);
   useEffect(() => { load(); }, [load]);
 
+  // Quick lookup for event titles
+  const eventTitleById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const e of events) {
+      if (e?.id) map[e.id] = e.title;
+    }
+    return map;
+  }, [events]);
+
   // Auto-refresh every 30 seconds when page is focused
   useFocusEffect(
     useCallback(() => {
@@ -160,6 +171,29 @@ export default function HrciDonationsListPage() {
       await notifyDonationLink(String(linkId), 'sms');
     } catch {}
     finally { setNotifyingId(null); }
+  }, []);
+
+  const copyLink = useCallback(async (item: any) => {
+    try {
+      const linkId = item?.providerOrderId || item?.provider_order_id || item?.id;
+      if (!linkId) return;
+      setCopyingId(String(linkId));
+      let url: string | undefined = item?.shortUrl || item?.short_url;
+      if (!url) {
+        try {
+          const details = await getDonationLinkById(String(linkId));
+          url = details?.short_url || details?.shortUrl;
+        } catch {}
+      }
+      if (url) {
+        await Clipboard.setStringAsync(url);
+        Alert.alert('Copied', 'Payment link copied to clipboard');
+      } else {
+        Alert.alert('Link not available', 'Could not find the payment link for this item');
+      }
+    } finally {
+      setCopyingId(null);
+    }
   }, []);
 
   const downloadReceipt = useCallback(async (item: any) => {
@@ -326,10 +360,11 @@ export default function HrciDonationsListPage() {
     const st = String(item?.status || '').toUpperCase();
     const isPending = st === 'PENDING';
     const isSuccess = st === 'SUCCESS';
-    const isAnonymous = item?.isAnonymous === true;
+  const isAnonymous = item?.isAnonymous === true;
     const canNotify = isPending && !!item?.providerOrderId;
     // Show receipt button for all SUCCESS donations
     const canReceipt = isSuccess;
+  const evTitle = item?.eventId ? eventTitleById[item.eventId] : undefined;
     
     return (
       <Pressable onPress={() => openDetails(item)} style={styles.card}>
@@ -338,11 +373,26 @@ export default function HrciDonationsListPage() {
           <View style={styles.cardHeader}>
             <Text style={styles.title}>{isAnonymous ? 'Anonymous Donor' : (item?.donorName || 'Donor')}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={[styles.stBadgeSmall, statusStyle(item.status)]}>{item.status}</Text>
+              <View style={[styles.stBadgeWrap, statusStyle(item.status)]}>
+                <MaterialCommunityIcons
+                  name={isSuccess ? 'check-circle-outline' : isPending ? 'clock-outline' : (st === 'FAILED' ? 'close-circle-outline' : 'information-outline')}
+                  size={14}
+                  color="#111"
+                />
+                <Text style={styles.stBadgeTxt}>{item.status}</Text>
+              </View>
               <Text style={styles.amountLg}>{formatAmount(item.amount)}</Text>
             </View>
           </View>
           <Text style={styles.metaSmall}>Created {new Date(item?.createdAt).toLocaleString()}</Text>
+          {evTitle ? (
+            <View style={styles.inlineChips}>
+              <View style={styles.eventChip}>
+                <MaterialCommunityIcons name="calendar-star" size={12} color="#6b7280" />
+                <Text style={styles.infoChipTxt}>{evTitle}</Text>
+              </View>
+            </View>
+          ) : null}
           
           {/* Show donor info only if not anonymous */}
           {!isAnonymous && (
@@ -376,6 +426,16 @@ export default function HrciDonationsListPage() {
           
           {(canNotify || canReceipt) ? (
             <View style={styles.rowActions}>
+              {isPending ? (
+                <Pressable
+                  onPress={() => copyLink(item)}
+                  disabled={copyingId === (item?.providerOrderId || item?.id)}
+                  style={({ pressed }) => [styles.actionBtn, pressed && { opacity: 0.9 }]}
+                >
+                  <MaterialCommunityIcons name="content-copy" size={16} color="#111" />
+                  <Text style={styles.actionTxt}>{copyingId === (item?.providerOrderId || item?.id) ? 'Copying…' : 'Copy Link'}</Text>
+                </Pressable>
+              ) : null}
               {canNotify ? (
                 <Pressable
                   onPress={() => notifyLink(item)}
@@ -416,6 +476,10 @@ export default function HrciDonationsListPage() {
             <MaterialCommunityIcons name="magnify" size={20} color="#9CA3AF" />
             <TextInput value={query} onChangeText={setQuery} placeholder="Search by name, mobile, address, link or id" placeholderTextColor="#9CA3AF" style={styles.searchInput} />
           </View>
+          {/* Open Stories list */}
+          <Pressable style={styles.iconBtn} onPress={() => router.push('/hrci/donations/stories' as any)}>
+            <MaterialCommunityIcons name="image-multiple" size={18} color="#111" />
+          </Pressable>
           <Pressable 
             style={[styles.iconBtn, refreshing && { opacity: 0.5 }]} 
             onPress={() => !refreshing && onRefresh()}
@@ -536,7 +600,17 @@ export default function HrciDonationsListPage() {
             </View>
           ) : null}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
-          ListEmptyComponent={<Text style={styles.empty}>No donations found</Text>}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <MaterialCommunityIcons name="heart-plus-outline" size={42} color="#9CA3AF" />
+              <Text style={styles.emptyTitle}>No donations yet</Text>
+              <Text style={styles.emptySub}>Create a payment link and share it with a donor to get started.</Text>
+              <Pressable style={styles.emptyCta} onPress={() => router.push('/hrci/donations/create')}>
+                <MaterialCommunityIcons name="plus" size={16} color="#fff" />
+                <Text style={styles.emptyCtaTxt}>Create link</Text>
+              </Pressable>
+            </View>
+          }
         />
       )}
 
@@ -687,7 +761,7 @@ const styles = StyleSheet.create({
   errorTxt: { color: '#b91c1c' },
   retry: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', marginTop: 8 },
   retryTxt: { color: '#111', fontWeight: '700' },
-  card: { borderWidth: 1, borderColor: '#eef0f4', backgroundColor: '#fff', padding: 14, borderRadius: 14, marginBottom: 12, flexDirection: 'row', gap: 12 },
+  card: { borderWidth: 1, borderColor: '#f4f5f7', backgroundColor: '#fff', padding: 14, borderRadius: 14, marginBottom: 12, flexDirection: 'row', gap: 12, ...makeShadow(4, { opacity: 0.06, blur: 12, y: 4 }) },
   accent: { width: 4, borderRadius: 999, backgroundColor: '#f3f4f6' },
   amount: { color: '#111', fontSize: 16, fontWeight: '800' },
   amountLg: { color: '#111', fontSize: 18, fontWeight: '900' },
@@ -702,6 +776,8 @@ const styles = StyleSheet.create({
   metaSmall: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
   stBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, overflow: 'hidden', fontSize: 12, fontWeight: '800', color: '#111' },
   stBadgeSmall: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: 'hidden', fontSize: 11, fontWeight: '800', color: '#111' },
+  stBadgeWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
+  stBadgeTxt: { fontSize: 11, fontWeight: '800', color: '#111' },
   st_SUCCESS: { backgroundColor: '#DCFCE7' },
   st_PENDING: { backgroundColor: '#FEF9C3' },
   st_FAILED: { backgroundColor: '#FEE2E2' },
@@ -714,6 +790,12 @@ const styles = StyleSheet.create({
   actionTxt: { color: '#111', fontWeight: '700', fontSize: 12 },
   actionTxtPrimary: { color: '#fff', fontWeight: '800', fontSize: 12 },
   empty: { color: '#6b7280', textAlign: 'center' },
+  emptyContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48, gap: 10 },
+  emptyTitle: { color: '#111', fontWeight: '900', fontSize: 16, marginTop: 2 },
+  emptySub: { color: '#6b7280', fontSize: 12, textAlign: 'center', paddingHorizontal: 24 },
+  emptyCta: { marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.light.primary, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10 },
+  emptyCtaTxt: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  eventChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#eef2f7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
   modalBackdrop: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.2)', alignItems: 'center', justifyContent: 'flex-end' },
   modalSheet: { backgroundColor: '#fff', width: '100%', maxHeight: '60%', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, ...makeShadow(8, { opacity: 0.1, blur: 20, y: -4 }) },
   eventRow: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f2f2f2' },

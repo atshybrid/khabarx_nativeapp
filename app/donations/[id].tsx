@@ -1,11 +1,13 @@
+import { Skeleton } from '@/components/ui/Skeleton';
 import { Colors } from '@/constants/Colors';
-import { DonationEvent, getDonationEvents } from '@/services/hrciDonations';
+import { DonationEvent, getDonationEventById } from '@/services/hrciDonations';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+// LottieLoader is available for future extended loaders
 
 const PRESETS = [250, 500, 1000, 2000];
 
@@ -14,7 +16,7 @@ export default function CampaignDetail() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [loading, setLoading] = useState(true);
-  const [events, setEvents] = useState<DonationEvent[]>([]);
+  const [event, setEvent] = useState<DonationEvent | undefined>(undefined);
   const [amount, setAmount] = useState<string>('');
   const [inputFocused, setInputFocused] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
@@ -26,16 +28,17 @@ export default function CampaignDetail() {
     (async () => {
       setLoading(true);
       try {
-        const list = await getDonationEvents(50);
-        if (mounted) setEvents(list || []);
+        const d = await getDonationEventById(String(id));
+        if (mounted) {
+          setEvent(d);
+          if (d?.presets && d.presets.length > 0) setAmount(String(d.presets[0]));
+        }
       } finally {
         if (mounted) setLoading(false);
       }
     })();
     return () => { mounted = false; };
   }, [id]);
-
-  const event = useMemo(() => events.find(e => String(e.id) === String(id)), [events, id]);
   const validAmount = useMemo(() => {
     const n = Number(amount);
     return !isNaN(n) && n > 0 ? n : 0;
@@ -53,8 +56,28 @@ export default function CampaignDetail() {
 
   if (loading && !event) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
+      <View style={{ flex: 1, backgroundColor: '#fff' }}>
+        <SafeAreaView />
+        <ScrollView contentContainerStyle={{ paddingBottom: 160 }}>
+          <Skeleton width={'100%'} height={240} borderRadius={0} />
+          <View style={{ padding: 16, gap: 10 }}>
+            <Skeleton width={240} height={18} />
+            <Skeleton width={'80%'} height={12} />
+            <Skeleton width={'60%'} height={12} />
+            <View style={{ marginTop: 8 }}>
+              <Skeleton width={'100%'} height={8} />
+              <Skeleton width={160} height={12} />
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {[1,2,3,4].map(i => (
+                <Skeleton key={i} width={90} height={34} borderRadius={999} />
+              ))}
+            </View>
+            <View style={{ marginTop: 12 }}>
+              <Skeleton width={'100%'} height={44} borderRadius={10} />
+            </View>
+          </View>
+        </ScrollView>
       </View>
     );
   }

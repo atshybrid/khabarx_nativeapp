@@ -1,5 +1,18 @@
 import { request } from './http';
 
+// Local switch to silence noisy console warnings when backend migrations are pending
+const SILENCE_DONATION_WARNINGS = (() => {
+  const raw = String(process.env.EXPO_PUBLIC_SILENCE_DONATION_WARNINGS ?? '').toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+})();
+function donationWarn(msg: string) {
+  if (SILENCE_DONATION_WARNINGS) return;
+  // Only surface in dev to avoid spamming production logs
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    try { console.warn(msg); } catch {}
+  }
+}
+
 export type DonationStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'REFUND' | string;
 
 export type DonationLinkItem = {
@@ -50,15 +63,27 @@ export async function getMemberDonationLinks(params: {
   if (params.eventId) usp.set('eventId', params.eventId);
   usp.set('limit', String(params.limit ?? 50));
   usp.set('offset', String(params.offset ?? 0));
-  const res = await request<DonationListResponse>(`/donations/members/payment-links?${usp.toString()}` as any, { method: 'GET' });
-  return {
-    success: res.success,
-    count: res.count ?? res.data?.length ?? 0,
-    total: res.total,
-    totals: res.totals || {},
-    data: Array.isArray(res.data) ? res.data : [],
-    reconciled: res.reconciled,
-  };
+  try {
+    const res = await request<DonationListResponse>(`/donations/members/payment-links?${usp.toString()}` as any, { method: 'GET' });
+    return {
+      success: res.success,
+      count: res.count ?? res.data?.length ?? 0,
+      total: res.total,
+      totals: res.totals || {},
+      data: Array.isArray(res.data) ? res.data : [],
+      reconciled: res.reconciled,
+    };
+  } catch (e: any) {
+    const msg = String(e?.message || '').toLowerCase();
+    const bodyMsg = String((e?.body?.message ?? e?.body) || '').toLowerCase();
+    const text = msg + ' ' + bodyMsg;
+    // Gracefully handle missing DB relation on server (migration not applied)
+    if (text.includes('donationdonorprofile') || text.includes('relation') || text.includes('42p01')) {
+      donationWarn('[donations] Server missing table DonationDonorProfile; returning empty list');
+      return { success: false, count: 0, total: 0, totals: {}, data: [], reconciled: 0 };
+    }
+    throw e;
+  }
 }
 
 export type DonationEvent = {
@@ -78,8 +103,39 @@ export type DonationEvent = {
 
 export async function getDonationEvents(limit = 20): Promise<DonationEvent[]> {
   const usp = new URLSearchParams({ limit: String(limit) });
-  const res = await request<{ success?: boolean; count?: number; data?: DonationEvent[] }>(`/donations/events?${usp.toString()}` as any, { method: 'GET' });
-  return Array.isArray(res?.data) ? res.data! : [];
+  try {
+    const res = await request<{ success?: boolean; count?: number; data?: DonationEvent[] }>(`/donations/events?${usp.toString()}` as any, { method: 'GET' });
+    return Array.isArray(res?.data) ? res.data! : [];
+  } catch (e: any) {
+    const msg = String(e?.message || '').toLowerCase();
+    const bodyMsg = String((e?.body?.message ?? e?.body) || '').toLowerCase();
+    const text = msg + ' ' + bodyMsg;
+    if (text.includes('donationdonorprofile') || text.includes('relation') || text.includes('42p01')) {
+      donationWarn('[donations] Events suppressed due to missing DB relation');
+      return [];
+    }
+    throw e;
+  }
+}
+
+export async function getDonationEventById(id: string): Promise<DonationEvent | undefined> {
+  if (!id) return undefined;
+  try {
+    const res = await request<{ success?: boolean; data?: DonationEvent }>(
+      `/donations/events/${encodeURIComponent(id)}` as any,
+      { method: 'GET', noAuth: true }
+    );
+    return (res as any)?.data as DonationEvent;
+  } catch (e: any) {
+    const msg = String(e?.message || '').toLowerCase();
+    const bodyMsg = String((e?.body?.message ?? e?.body) || '').toLowerCase();
+    const text = msg + ' ' + bodyMsg;
+    if (text.includes('donationdonorprofile') || text.includes('relation') || text.includes('42p01')) {
+      donationWarn('[donations] Event suppressed due to missing DB relation');
+      return undefined;
+    }
+    throw e;
+  }
 }
 
 export type CreateDonationPayload = {
@@ -175,11 +231,40 @@ export type TopDonor = {
 
 export async function getTopDonors(limit = 20): Promise<TopDonor[]> {
   const usp = new URLSearchParams({ limit: String(limit) });
-  const res = await request<{ success?: boolean; count?: number; data?: TopDonor[] }>(
-    `/donations/top-donors?${usp.toString()}` as any,
-    { method: 'GET', noAuth: true }
-  );
-  return Array.isArray(res?.data) ? (res.data as TopDonor[]) : [];
+  try {
+    const res = await request<{ success?: boolean; count?: number; data?: TopDonor[] }>(
+      `/donations/top-donors?${usp.toString()}` as any,
+      { method: 'GET', noAuth: true }
+    );
+    return Array.isArray(res?.data) ? (res.data as TopDonor[]) : [];
+  } catch (e: any) {
+    const msg = String(e?.message || '').toLowerCase();
+    const bodyMsg = String((e?.body?.message ?? e?.body) || '').toLowerCase();
+    const text = msg + ' ' + bodyMsg;
+    if (text.includes('donationdonorprofile') || text.includes('relation') || text.includes('42p01')) {
+      donationWarn('[donations] Top donors suppressed due to missing DB relation');
+      return [];
+    }
+    throw e;
+  }
+}
+
+/**
+ * Update donor photo for a specific donation. Backend contract can vary; this function
+ * tries a few common patterns. Adjust to the exact PUT endpoint your server expects.
+ * Candidates tried (in order):
+ *  - PUT /donations/{donationId}/photo { photoUrl }
+ *  - PUT /donations/{donationId}       { photoUrl }
+ *  - PUT /donations/admin/donor-photo  { donationId, photoUrl }
+ */
+export async function updateDonorPhoto(donationId: string, photoUrl: string): Promise<boolean> {
+  if (!donationId || !photoUrl) throw new Error('Missing donationId or photoUrl');
+  // Per server contract: PUT /donations/admin/donors/photo { donationId, photoUrl }
+  const res = await request<{ success?: boolean }>(`/donations/admin/donors/photo` as any, {
+    method: 'PUT',
+    body: { donationId, photoUrl },
+  });
+  return Boolean((res as any)?.success !== false);
 }
 
 // Success stories (public read)
@@ -198,18 +283,40 @@ export type DonationStoryDetail = DonationStory & {
 
 export async function getDonationStories(limit = 20, offset = 0): Promise<DonationStory[]> {
   const usp = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  const res = await request<{ success?: boolean; count?: number; total?: number; data?: DonationStory[] }>(
-    `/donations/stories?${usp.toString()}` as any,
-    { method: 'GET', noAuth: true }
-  );
-  return Array.isArray(res?.data) ? (res.data as DonationStory[]) : [];
+  try {
+    const res = await request<{ success?: boolean; count?: number; total?: number; data?: DonationStory[] }>(
+      `/donations/stories?${usp.toString()}` as any,
+      { method: 'GET', noAuth: true }
+    );
+    return Array.isArray(res?.data) ? (res.data as DonationStory[]) : [];
+  } catch (e: any) {
+    const msg = String(e?.message || '').toLowerCase();
+    const bodyMsg = String((e?.body?.message ?? e?.body) || '').toLowerCase();
+    const text = msg + ' ' + bodyMsg;
+    if (text.includes('donationdonorprofile') || text.includes('relation') || text.includes('42p01')) {
+      donationWarn('[donations] Stories suppressed due to missing DB relation');
+      return [];
+    }
+    throw e;
+  }
 }
 
 export async function getDonationStoryById(id: string): Promise<DonationStoryDetail | undefined> {
   if (!id) return undefined;
-  const res = await request<{ success?: boolean; data?: DonationStoryDetail }>(
-    `/donations/stories/${encodeURIComponent(id)}` as any,
-    { method: 'GET', noAuth: true }
-  );
-  return (res as any)?.data as DonationStoryDetail;
+  try {
+    const res = await request<{ success?: boolean; data?: DonationStoryDetail }>(
+      `/donations/stories/${encodeURIComponent(id)}` as any,
+      { method: 'GET', noAuth: true }
+    );
+    return (res as any)?.data as DonationStoryDetail;
+  } catch (e: any) {
+    const msg = String(e?.message || '').toLowerCase();
+    const bodyMsg = String((e?.body?.message ?? e?.body) || '').toLowerCase();
+    const text = msg + ' ' + bodyMsg;
+    if (text.includes('donationdonorprofile') || text.includes('relation') || text.includes('42p01')) {
+      donationWarn('[donations] Story suppressed due to missing DB relation');
+      return undefined;
+    }
+    throw e;
+  }
 }

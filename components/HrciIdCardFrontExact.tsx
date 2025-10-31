@@ -146,13 +146,16 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   <Text style={styles.cellName} numberOfLines={2}>{cellName}</Text>
         {/* Details Area */}
         <View style={styles.detailsArea}>
-          {/* Details table (fixed order) */}
-          <View style={styles.detailsTable}>
-            <DetailRow label="Name" value={memberName} />
-            <DetailRow label="Designation" value={designation} />
-            <DetailRow label="ID No" value={idNumber} />
-            <DetailRow label="Contact No" value={contactNumber} />
-            <DetailRow label="Valid Upto" value={validUpto} />
+          {/* New highlighted container for key identity fields */}
+          <View style={styles.detailsContainer}>
+            {/* Details table (fixed order) */}
+            <View style={styles.detailsTable}>
+              <DetailRow label="Name" value={memberName} />
+              <DetailRow label="Designation" value={designation} />
+              <DetailRow label="ID No" value={idNumber} />
+              <DetailRow label="Contact No" value={contactNumber} />
+              <DetailRow label="Valid Upto" value={validUpto} />
+            </View>
           </View>
         </View>
       </View>
@@ -215,7 +218,7 @@ const DetailRow = ({ label, value }: { label: string; value: string }) => {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#F3F4F6',
     borderColor: '#e5e7eb',
     borderWidth: 1,
     overflow: 'visible',
@@ -227,21 +230,31 @@ const styles = StyleSheet.create({
   bodySection: { flex: 1, alignItems: 'center', paddingTop: 12, paddingHorizontal: 28, position: 'relative', zIndex: 5, elevation: 2, overflow: 'visible' },
   logoWrapper: { marginBottom: 12 },
   logo: { width: 0.22 * 720, height: 0.22 * 720, borderRadius: 0.11 * 720, resizeMode: 'cover', borderWidth: 4, borderColor: '#ffffff' },
-  logoPlaceholder: { width: 0.23 * 720, height: 0.23 * 720, borderRadius: 0.115 * 720, backgroundColor: '#d4d4d8', alignItems: 'center', justifyContent: 'center' },
+  logoPlaceholder: { width: 0.23 * 720, height: 0.23 * 720, borderRadius: 0.115 * 720, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
   placeholderText: { textAlign: 'center', color: '#111827', fontWeight: '700' },
   placeholderTextSmall: { textAlign: 'center', color: '#111827', fontSize: 12, fontWeight: '600' },
   jurisdiction: { fontSize: 26, fontWeight: '900', color: BLUE_TEXT, marginTop: 0, textAlign: 'center', letterSpacing: 0.5, lineHeight: 30 },
   nitiLine: { color: RED, fontWeight: '800', fontSize: 16, textAlign: 'center', marginTop: 6, letterSpacing: 0.15, includeFontPadding: false, lineHeight: 20 },
   identityHeading: { color: RED, fontWeight: '900', fontSize: 24, marginTop: 10, letterSpacing: 0.8, lineHeight: 26 },
   photoStampRow: { marginTop: 6, marginBottom: 8 },
-  photoShell: { backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#e5e7eb' },
+  photoShell: { backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#e5e7eb' },
   cellName: { color: BLUE_TEXT, fontSize: 30, fontWeight: '900', marginTop: 18, textAlign: 'center', letterSpacing: 0.5, lineHeight: 32 },
   detailsArea: { position: 'relative', width: '100%', overflow: 'visible' },
-  detailsTable: { marginTop: 14, alignSelf: 'center', position: 'relative', zIndex: 1 },
-  detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 2, flexWrap: 'nowrap' },
-  detailLabel: { width: 160, fontSize: 20, fontWeight: '700', color: '#111827', letterSpacing: 0.25, textAlign: 'left', lineHeight: 30 },
-  colon: { width: 14, fontSize: 20, fontWeight: '700', color: '#111827', textAlign: 'center', lineHeight: 30 },
-  detailValue: { width: 320, fontSize: 20, fontWeight: '700', color: '#111827', lineHeight: 30, textAlign: 'left' },
+  detailsContainer: {
+    alignSelf: 'stretch',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 12,
+  },
+  detailsTable: { alignSelf: 'center', position: 'relative', zIndex: 1 },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 3, flexWrap: 'nowrap' },
+  detailLabel: { width: 180, fontSize: 24, fontWeight: '800', color: '#111827', letterSpacing: 0.25, textAlign: 'left', lineHeight: 34 },
+  colon: { width: 16, fontSize: 24, fontWeight: '800', color: '#111827', textAlign: 'center', lineHeight: 34 },
+  detailValue: { width: 420, fontSize: 24, fontWeight: '800', color: '#111827', lineHeight: 34, textAlign: 'left' },
   signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: 'auto', marginTop: 0, position: 'absolute', right: 0, bottom: 12, zIndex: 20, elevation: 8 },
   signatureOverlay: { position: 'absolute', alignItems: 'flex-end', zIndex: 999, elevation: 12 },
   signatureContainer: { flexDirection: 'column', alignItems: 'flex-end' },

@@ -117,6 +117,23 @@ export async function updateUserProfile(partial: UserProfileUpdateInput): Promis
 }
 
 // -------- Preferences (language, device, location) --------
+const LAST_SYNC_AT_KEY = 'last_prefs_sync_at';
+
+// Gate initial news load until a first preferences sync has a chance to run (best-effort, timeout-based)
+export async function ensureInitialPreferencesSynced(timeoutMs = 2500): Promise<void> {
+  try {
+    const ts = await AsyncStorage.getItem(LAST_SYNC_AT_KEY);
+    if (ts) return; // some sync has happened in the past; don't block
+  } catch {}
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const ts2 = await AsyncStorage.getItem(LAST_SYNC_AT_KEY);
+      if (ts2) return;
+    } catch {}
+    await new Promise(r => setTimeout(r, 120));
+  }
+}
 export type PreferencesData = {
   user?: {
     id?: string;
@@ -131,6 +148,7 @@ export type PreferencesData = {
     id?: string;
     deviceId?: string;
     deviceModel?: string;
+    pushToken?: string; // optional: if backend returns the stored token
     hasPushToken?: boolean;
     location?: {
       latitude?: number;
@@ -181,7 +199,15 @@ export async function getUserPreferences(userId?: string): Promise<PreferencesDa
       if (DEBUG_API) console.warn('[API] getUserPreferences skipped: missing userId');
       return null; // avoid 400 by not calling without userId
     }
-    const endpoint = `/preferences?userId=${encodeURIComponent(String(uid))}`;
+    // Include deviceId to allow server to resolve device-bound prefs
+    let deviceId: string | undefined;
+    try {
+      const idObj = await getDeviceIdentity();
+      deviceId = idObj?.deviceId;
+    } catch {}
+    const params = new URLSearchParams({ userId: String(uid) });
+    if (deviceId) params.set('deviceId', String(deviceId));
+    const endpoint = `/preferences?${params.toString()}`;
     const res = await request<{ success?: boolean; data?: PreferencesData }>(endpoint, { method: 'GET' });
     return (res as any)?.data || (res as any) || null;
   } catch (e) {
@@ -206,6 +232,166 @@ export function pickPreferenceLocation(p: PreferencesData | null): string | null
   const loc = p.userLocation || p.device?.location;
   const name = loc?.placeName || loc?.address;
   return name || null;
+}
+
+// -------- HRCI Donations: Stories --------
+export type DonationStorySummary = {
+  id: string;
+  title: string;
+  heroImageUrl?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type DonationGalleryImage = {
+  id: string;
+  url: string;
+  caption?: string;
+  order?: number;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type DonationStoryDetail = {
+  id: string;
+  title: string;
+  description?: string;
+  heroImageUrl?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  images: DonationGalleryImage[];
+};
+
+export async function getDonationStories(limit = 20, offset = 0): Promise<{ data: DonationStorySummary[]; total?: number; count?: number }> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const res = await request<{ success?: boolean; total?: number; count?: number; data: DonationStorySummary[] }>(`/donations/stories?${params.toString()}`, { method: 'GET' });
+  return { data: res.data || [], total: (res as any).total, count: (res as any).count };
+}
+
+export async function getDonationStory(id: string): Promise<DonationStoryDetail> {
+  const res = await request<{ success?: boolean; data: DonationStoryDetail }>(`/donations/stories/${id}`, { method: 'GET' });
+  return (res as any).data || (res as any);
+}
+
+export async function uploadDonationStoryImage(
+  id: string,
+  file: { uri: string; name: string; type: string },
+  opts: { caption?: string; isActive?: boolean } = {}
+): Promise<{ data: DonationGalleryImage[]; count?: number; skipped?: number }>{
+  const fd = new FormData();
+  // @ts-ignore - React Native FormData file shape
+  fd.append('images', { uri: file.uri, name: file.name, type: file.type });
+  if (opts.caption !== undefined) fd.append('caption', String(opts.caption));
+  if (opts.isActive !== undefined) fd.append('isActive', String(opts.isActive));
+  const res = await request<{ success?: boolean; count?: number; skipped?: number; data: DonationGalleryImage[] }>(
+    `/donations/admin/stories/${id}/gallery/upload`,
+    { method: 'POST', body: fd }
+  );
+  return { data: res.data || [], count: (res as any).count, skipped: (res as any).skipped };
+}
+
+// Upload multiple images to a story gallery in a single request (max ~10 recommended)
+export async function uploadDonationStoryImages(
+  id: string,
+  files: { uri: string; name: string; type: string }[],
+  opts: { caption?: string; isActive?: boolean } = {}
+): Promise<{ data: DonationGalleryImage[]; count?: number; skipped?: number }>{
+  if (!Array.isArray(files) || files.length === 0) return { data: [], count: 0, skipped: 0 };
+  const fd = new FormData();
+  const limited = files.slice(0, 10); // enforce soft cap of 10
+  for (const f of limited) {
+    // @ts-ignore RN FormData file
+    fd.append('images', { uri: f.uri, name: f.name, type: f.type });
+  }
+  if (opts.caption !== undefined) fd.append('caption', String(opts.caption));
+  if (opts.isActive !== undefined) fd.append('isActive', String(opts.isActive));
+  const res = await request<{ success?: boolean; count?: number; skipped?: number; data: DonationGalleryImage[] }>(
+    `/donations/admin/stories/${id}/gallery/upload`,
+    { method: 'POST', body: fd }
+  );
+  return { data: res.data || [], count: (res as any).count, skipped: (res as any).skipped };
+}
+
+export async function updateDonationStoryGallery(
+  id: string,
+  body: { add?: Pick<DonationGalleryImage, 'url' | 'caption' | 'order' | 'isActive'>[]; delete?: string[] }
+): Promise<{ data?: any }>{
+  const res = await request<{ success?: boolean; data?: any }>(
+    `/donations/admin/stories/${id}/gallery`,
+    { method: 'PUT', body }
+  );
+  return res;
+}
+
+// Delete a single image from a story gallery
+export async function deleteDonationStoryImage(
+  id: string,
+  imageId: string
+): Promise<boolean> {
+  if (!id || !imageId) throw new Error('Story id and image id are required');
+  try {
+    const res = await request<{ success?: boolean } | undefined>(
+      `/donations/admin/stories/${encodeURIComponent(id)}/gallery/${encodeURIComponent(imageId)}`,
+      { method: 'DELETE' }
+    );
+    // Treat 2xx with or without body as success
+    if (res === undefined) return true; // 204 No Content
+    return Boolean((res as any)?.success !== false);
+  } catch (e) {
+    // Do not silently succeed on errors; surface failure to UI
+    if ((e as any)?.status === 204) return true;
+    return false;
+  }
+}
+
+// Create a new donation story (admin)
+export type CreateDonationStoryInput = {
+  title: string;
+  description?: string;
+  heroImageUrl?: string;
+  isActive?: boolean; // will be forced to true by client by default
+};
+
+export async function createDonationStory(input: CreateDonationStoryInput): Promise<DonationStoryDetail> {
+  if (!input?.title || !String(input.title).trim()) {
+    throw new Error('Title is required');
+  }
+  const body = {
+    title: String(input.title).trim(),
+    description: input.description || undefined,
+    heroImageUrl: input.heroImageUrl || undefined,
+    isActive: true, // per requirement: always true
+  } as any;
+  const res = await request<{ success?: boolean; data: DonationStoryDetail }>(
+    `/donations/admin/stories`,
+    { method: 'POST', body }
+  );
+  return (res as any).data || (res as any);
+}
+
+// Update an existing donation story (admin)
+export type UpdateDonationStoryInput = {
+  title?: string;
+  description?: string;
+  heroImageUrl?: string;
+  isActive?: boolean;
+};
+
+export async function updateDonationStory(id: string, input: UpdateDonationStoryInput): Promise<DonationStoryDetail> {
+  if (!id) throw new Error('Story id is required');
+  const body: any = {};
+  if (typeof input.title === 'string') body.title = input.title.trim();
+  if (typeof input.description === 'string') body.description = input.description;
+  if (typeof input.heroImageUrl === 'string') body.heroImageUrl = input.heroImageUrl;
+  if (typeof input.isActive === 'boolean') body.isActive = input.isActive;
+  if (!Object.keys(body).length) throw new Error('Nothing to update');
+  const res = await request<{ success?: boolean; data: DonationStoryDetail }>(
+    `/donations/admin/stories/${encodeURIComponent(id)}`,
+    { method: 'PUT', body }
+  );
+  return (res as any).data || (res as any);
 }
 
 // -------- Update Preferences --------
@@ -258,6 +444,11 @@ export async function afterPreferencesUpdated(opts: { languageIdChanged?: string
   } catch (e) {
     if (DEBUG_API) console.warn('[API] refreshLanguageDependentCaches failed', (e as any)?.message || e);
   }
+  // Notify UI to refresh language-dependent screens (e.g., News tab)
+  try {
+    const { emit } = await import('./events');
+    emit('news:refresh' as any, { reason: 'language' } as any);
+  } catch {}
 }
 
 // Resolve effective language from storage/tokens with local-first priority
@@ -265,6 +456,17 @@ export async function resolveEffectiveLanguage(): Promise<{ id?: string; code?: 
   let id: string | undefined;
   let code: string | undefined;
   let name: string | undefined;
+  // 0) Environment override takes highest precedence (useful for QA / hotfix)
+  try {
+    const envId = String(process.env.EXPO_PUBLIC_FORCE_LANGUAGE_ID ?? '').trim();
+    const envCode = String(process.env.EXPO_PUBLIC_FORCE_LANGUAGE_CODE ?? '').trim();
+    if (envId) {
+      id = envId;
+      code = code || envCode || code;
+    } else if (envCode) {
+      code = envCode;
+    }
+  } catch {}
   // 1) Prefer local override (set for MEMBER/HRCI_ADMIN)
   try {
     const ll = await AsyncStorage.getItem('language_local');
@@ -438,8 +640,14 @@ function normalizeArticleFromAny(a: any): Article {
   return articleObj;
 }
 
-export const getNews = async (lang: string, category?: string, cursor?: string): Promise<Article[]> => {
+export const getNews = async (
+  lang: string,
+  category?: string,
+  cursorOrOptions?: string | { cursor?: string; latitude?: number; longitude?: number; radiusKm?: number }
+): Promise<Article[]> => {
   try {
+    // Wait briefly for initial preferences sync so language/prefs align before first fetch
+    await ensureInitialPreferencesSynced().catch(() => {});
     // If mock mode is forced, skip network and return mock
     if (await getMockMode()) {
       try { console.warn('[API] getNews returning mockArticles due to mock mode', { reason: mockModeReason }); } catch {}
@@ -460,94 +668,100 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
         try { console.log('[API] getNews: effective language', { languageId, languageCode, fromArg: lang }); } catch {}
       }
     } catch {}
-  // Build parameter variants to maximize compatibility across deployments
-  const buildParams = (kv: Record<string, string | undefined>): URLSearchParams => {
-    const p = new URLSearchParams({ limit: '10' });
-    Object.entries(kv).forEach(([k, v]) => { if (v) p.set(k, v); });
-    if (cursor) p.set('cursor', cursor);
-    return p;
-  };
-  const paramVariants: { label: string; params: URLSearchParams }[] = [];
-  // Preferred: lang=<languageId>
-  if (languageId) paramVariants.push({ label: 'lang=id', params: buildParams({ lang: String(languageId) }) });
-  // Next: languageId=<id>
-  if (languageId) paramVariants.push({ label: 'languageId=id', params: buildParams({ languageId: String(languageId) }) });
-  // Next: language=<id> (older gateways)
-  if (languageId) paramVariants.push({ label: 'language=id', params: buildParams({ language: String(languageId) }) });
-  // Only if no id resolved, fall back to code-based params
-  if (!languageId && languageCode) {
-    paramVariants.push({ label: 'lang=code', params: buildParams({ lang: String(languageCode) }) });
-    paramVariants.push({ label: 'language=code', params: buildParams({ language: String(languageCode) }) });
-  }
-  // Last resort: no lang at all (server default)
-  if (!paramVariants.length) paramVariants.push({ label: 'no-lang', params: buildParams({}) });
-  if (DEBUG_API) {
-    try {
-      console.log('[API] getNews param variants', paramVariants.map(v => ({ label: v.label, qs: v.params.toString() })));
-    } catch {}
-  }
-  // Generate endpoint candidates across param variants (prefer the only public endpoint that works)
-  const candidates: string[] = [];
-  for (const v of paramVariants) {
-    const qs = v.params.toString();
-    // Public feed (works without auth) — primary and only target
-    candidates.push(`/shortnews/public?${qs}`);
-  }
-    let json: any = null;
-    let lastErr: any = null;
-    for (const ep of candidates) {
-      try {
-        json = await request<any>(ep as any, { timeoutMs: 30000, noAuth: true });
-        // Accept multiple shapes: array at top-level or nested in data/items
-        const arrTop = (json as any)?.data ?? (json as any)?.items ?? null;
-        const arrNested = (json as any)?.data?.items ?? (json as any)?.data?.data ?? (json as any)?.result?.items ?? null;
-        const listRawTry = Array.isArray(arrTop) ? arrTop : (Array.isArray(arrNested) ? arrNested : null);
-        if (Array.isArray(listRawTry)) {
-          // success path: keep endpoint in debug log
-          try {
-            console.log('[API] shortnews endpoint OK', ep, 'items=', listRawTry.length);
-            if (LOG_SHORTNEWS || DEBUG_API) {
-              const bodyPreview = (() => { try { return JSON.stringify(json).slice(0, 4000); } catch { return '(stringify failed)'; } })();
-              console.log('[API] shortnews RAW', {
-                endpoint: ep,
-                languageId,
-                languageCode,
-                count: listRawTry.length,
-                bodyPreview,
-              });
-              // Try to surface any language-related fields from the first item for quick inspection
-              const sample = listRawTry[0] || null;
-              if (sample && typeof sample === 'object') {
-                const langHints = {
-                  itemLanguageId: (sample as any).languageId || (sample as any)?.language?.id || null,
-                  itemLanguageCode: (sample as any)?.language?.code || null,
-                  itemCategory: (sample as any)?.category?.name || (sample as any)?.category || null,
-                  itemTitle: (sample as any)?.title || null,
-                };
-                console.log('[API] shortnews sample', langHints);
-              }
-            }
-          } catch {}
-          break;
-        }
-        // If not an array, continue trying others
-        try {
-          const keys = json && typeof json === 'object' ? Object.keys(json) : [];
-          console.warn('[API] shortnews unexpected shape; trying next', ep, { keys, hasTopArray: Array.isArray(arrTop), hasNestedArray: Array.isArray(arrNested) });
-        } catch {}
-      } catch (e) {
-        lastErr = e;
-        try { console.warn('[API] shortnews endpoint failed; trying next', ep, (e as any)?.message || e); } catch {}
+    // Interpret 3rd arg as cursor or options
+    let cursor: string | undefined;
+    let latitude: number | undefined;
+    let longitude: number | undefined;
+    let radiusKm: number | undefined;
+    if (typeof cursorOrOptions === 'string') {
+      cursor = cursorOrOptions;
+    } else if (cursorOrOptions && typeof cursorOrOptions === 'object') {
+      cursor = cursorOrOptions.cursor;
+      latitude = cursorOrOptions.latitude;
+      longitude = cursorOrOptions.longitude;
+      radiusKm = cursorOrOptions.radiusKm;
+    }
+    // Helper to add numeric params
+    const addNumParam = (params: URLSearchParams, k: string, v?: number) => {
+      if (typeof v === 'number' && Number.isFinite(v)) params.set(k, String(v));
+    };
+    // Attempt calls in compatibility order to handle backend variants
+  const tryFetch = async (): Promise<{ json: any; endpoint: string }> => {
+      const baseParams = new URLSearchParams({ limit: '10' });
+      if (cursor) baseParams.set('cursor', cursor);
+      addNumParam(baseParams, 'latitude', latitude);
+      addNumParam(baseParams, 'longitude', longitude);
+      if (typeof radiusKm === 'number' && Number.isFinite(radiusKm)) {
+        const clamped = Math.min(200, Math.max(1, radiusKm));
+        baseParams.set('radiusKm', String(clamped));
       }
-      json = null;
-    }
-    if (!json) {
-      // All attempts failed: do NOT fallback to mock when anonymous.
-      // Surface the error so UI can show an error/empty state.
+      const code = (languageCode || lang || '').trim();
+      const idStr = (languageId ? String(languageId) : '').trim();
+
+      const attempts: { path: string; params: URLSearchParams }[] = [];
+      // Heuristic: if languageId looks like a non-numeric key (e.g., "cmha..."), try it first
+      const idLooksNonNumeric = !!idStr && /[A-Za-z]/.test(idStr);
+      if (idLooksNonNumeric) {
+        const p = new URLSearchParams(baseParams); p.set('languageId', idStr);
+        attempts.push({ path: '/shortnews/public', params: p });
+      }
+      // Then try with language code variants
+      if (code) {
+        const p1 = new URLSearchParams(baseParams); p1.set('languageCode', code);
+        attempts.push({ path: '/shortnews/public', params: p1 });
+        const p2 = new URLSearchParams(baseParams); p2.set('language', code);
+        attempts.push({ path: '/shortnews/public', params: p2 });
+      }
+      // If we didn't already try id first (numeric ids may fail on some envs), do it now as a fallback
+      if (idStr && !idLooksNonNumeric) {
+        const p = new URLSearchParams(baseParams); p.set('languageId', idStr);
+        attempts.push({ path: '/shortnews/public', params: p });
+      }
+      // Legacy compatibility
+      if (code) {
+        const p = new URLSearchParams(baseParams); p.set('languageCode', code);
+        attempts.push({ path: '/news/public', params: p });
+      }
+
+      let lastErr: any = null;
+      let lastEmptyOk: { json: any; endpoint: string } | null = null;
+      for (const att of attempts) {
+        const url = `${att.path}?${att.params.toString()}`;
+        try {
+          const j = await request<any>(url as any, { timeoutMs: 30000, noAuth: true });
+          // Determine item count; if empty, try next attempt before accepting
+          const candidate = (j as any)?.data ?? (j as any)?.items ?? (j as any)?.data?.items ?? (j as any)?.data?.data ?? null;
+          let count = Array.isArray(candidate) ? candidate.length : 0;
+          // Mixed feed shape: [{ kind, data }]
+          if (Array.isArray(candidate) && candidate.length && typeof candidate[0] === 'object' && 'kind' in (candidate[0] as any) && 'data' in (candidate[0] as any)) {
+            const onlyNews = (candidate as any[]).filter((x) => (x?.kind || '').toLowerCase() === 'news');
+            count = onlyNews.length;
+          }
+          if (count > 0) {
+            return { json: j, endpoint: url };
+          }
+          // Remember first empty-success to return if all attempts are empty
+          if (!lastEmptyOk) lastEmptyOk = { json: j, endpoint: url };
+          if (__DEV__) try { console.warn('[API] getNews attempt returned empty list', url); } catch {}
+          continue;
+        } catch (e: any) {
+          lastErr = e;
+          if (__DEV__) try { console.warn('[API] getNews attempt failed', url, (e as any)?.message || e); } catch {}
+          // Continue trying other variants
+        }
+      }
+      if (lastEmptyOk) return lastEmptyOk; // all attempts succeeded but empty; let caller decide
       if (lastErr) throw lastErr;
-      throw new Error('Shortnews endpoint not available');
+      throw new Error('Failed to fetch shortnews');
+    };
+
+    const { json, endpoint } = await tryFetch();
+    if (LOG_SHORTNEWS || DEBUG_API) {
+      try {
+        const bodyPreview = (() => { try { return JSON.stringify(json).slice(0, 4000); } catch { return '(stringify failed)'; } })();
+        console.log('[API] shortnews RAW', { endpoint, languageId, languageCode, bodyPreview });
+      } catch {}
     }
-    const endpoint = 'multi';
     if (DEBUG_API || LOG_SHORTNEWS) {
       const keys = json && typeof json === 'object' ? Object.keys(json as any) : [];
       const dataArr = Array.isArray((json as any)?.data) ? (json as any).data : null;
@@ -578,7 +792,7 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
         } : null,
       });
     }
-    const listRaw = (json as any)?.data ?? (json as any)?.items ?? (json as any)?.data?.items ?? (json as any)?.data?.data ?? null;
+  const listRaw = (json as any)?.data ?? (json as any)?.items ?? (json as any)?.data?.items ?? (json as any)?.data?.data ?? null;
     if (!Array.isArray(listRaw)) {
       // Hard fail if unexpected shape; caller decides what to do
       throw new Error('Invalid shortnews response');
@@ -800,23 +1014,114 @@ export const getNews = async (lang: string, category?: string, cursor?: string):
   }
 };
 
-export const getNewsFeed = async (lang: string, category?: string, cursor?: string): Promise<{ items: FeedItem[]; nextCursor?: string | null; hasMore?: boolean } > => {
+export const getNewsFeed = async (
+  lang: string,
+  category?: string,
+  cursorOrOptions?: string | { cursor?: string; latitude?: number; longitude?: number; radiusKm?: number }
+): Promise<{ items: FeedItem[]; nextCursor?: string | null; hasMore?: boolean } > => {
   // Reuse the same network logic as getNews but keep kind=ad items too
+  await ensureInitialPreferencesSynced().catch(() => {});
   const itemsArticles = await (async () => {
-    // Call the same endpoint resolution logic via getNews but we need raw JSON; to avoid duplication, repeat minimal request logic
-    let languageId: string | undefined; let languageCode: string | undefined = lang;
-    try { const eff = await resolveEffectiveLanguage(); languageId = eff.id; languageCode = eff.code || languageCode; } catch {}
-    const buildParams = (kv: Record<string, string | undefined>): URLSearchParams => { const p = new URLSearchParams({ limit: '10' }); Object.entries(kv).forEach(([k, v]) => { if (v) p.set(k, v); }); if (cursor) p.set('cursor', cursor); return p; };
-    const paramVariants: { label: string; params: URLSearchParams }[] = [];
-    if (languageId) paramVariants.push({ label: 'lang=id', params: buildParams({ lang: String(languageId) }) });
-    if (languageId) paramVariants.push({ label: 'languageId=id', params: buildParams({ languageId: String(languageId) }) });
-    if (languageId) paramVariants.push({ label: 'language=id', params: buildParams({ language: String(languageId) }) });
-    if (!languageId && languageCode) { paramVariants.push({ label: 'lang=code', params: buildParams({ lang: String(languageCode) }) }); paramVariants.push({ label: 'language=code', params: buildParams({ language: String(languageCode) }) }); }
-    if (!paramVariants.length) paramVariants.push({ label: 'no-lang', params: buildParams({}) });
-    const candidates: string[] = []; for (const v of paramVariants) { const qs = v.params.toString(); candidates.push(`/shortnews/public?${qs}`); }
-    let json: any = null; let lastErr: any = null;
-    for (const ep of candidates) { try { json = await request<any>(ep as any, { timeoutMs: 30000, noAuth: true }); break; } catch (e) { lastErr = e; json = null; } }
-    if (!json) { if (lastErr) throw lastErr; throw new Error('Shortnews endpoint not available'); }
+    // Build the correct endpoint with ONLY languageId per backend contract
+    let languageId: string | undefined;
+    let languageCode: string | undefined;
+    try {
+      const eff = await resolveEffectiveLanguage();
+      languageId = eff.id;
+      languageCode = eff.code;
+    } catch {}
+    if (!languageId) {
+      // Do not call backend without languageId; callers must ensure language is chosen
+      // For compatibility, allow using languageCode via fallback attempts below
+    }
+    // Interpret 3rd arg as cursor or options
+    let cursor: string | undefined;
+    let latitude: number | undefined;
+    let longitude: number | undefined;
+    let radiusKm: number | undefined;
+    if (typeof cursorOrOptions === 'string') {
+      cursor = cursorOrOptions;
+    } else if (cursorOrOptions && typeof cursorOrOptions === 'object') {
+      cursor = cursorOrOptions.cursor;
+      latitude = cursorOrOptions.latitude;
+      longitude = cursorOrOptions.longitude;
+      radiusKm = cursorOrOptions.radiusKm;
+    }
+    const addNum = (p: URLSearchParams, k: string, v?: number) => {
+      if (typeof v === 'number' && Number.isFinite(v)) p.set(k, String(v));
+    };
+  const tryFetch = async (): Promise<{ json: any; endpoint: string }> => {
+      const base = new URLSearchParams({ limit: '10' });
+      if (cursor) base.set('cursor', cursor);
+      addNum(base, 'latitude', latitude);
+      addNum(base, 'longitude', longitude);
+      if (typeof radiusKm === 'number' && Number.isFinite(radiusKm)) {
+        const clamped = Math.min(200, Math.max(1, radiusKm));
+        base.set('radiusKm', String(clamped));
+      }
+      const code = (languageCode || lang || '').trim();
+      const idStr = (languageId ? String(languageId) : '').trim();
+  const attempts: { path: string; params: URLSearchParams }[] = [];
+  const idLooksNonNumeric = !!idStr && /[A-Za-z]/.test(idStr);
+  // Prefer id first if it looks like a real key
+  if (idLooksNonNumeric) { const p = new URLSearchParams(base); p.set('languageId', idStr); attempts.push({ path: '/shortnews/public', params: p }); }
+  // Then code variants
+  if (code) { const p = new URLSearchParams(base); p.set('languageCode', code); attempts.push({ path: '/shortnews/public', params: p }); }
+  if (code) { const p = new URLSearchParams(base); p.set('language', code); attempts.push({ path: '/shortnews/public', params: p }); }
+  // Finally id if numeric/unknown
+  if (idStr && !idLooksNonNumeric) { const p = new URLSearchParams(base); p.set('languageId', idStr); attempts.push({ path: '/shortnews/public', params: p }); }
+  // Legacy
+  if (code) { const p = new URLSearchParams(base); p.set('languageCode', code); attempts.push({ path: '/news/public', params: p }); }
+
+      let lastErr: any = null;
+      let lastEmptyOk: { json: any; endpoint: string } | null = null;
+      for (const att of attempts) {
+        const url = `${att.path}?${att.params.toString()}`;
+        if (LOG_SHORTNEWS || DEBUG_API) {
+          try { console.log('[API] getNewsFeed request', { endpoint: url, languageId, languageCode: code, latitude, longitude, radiusKm, cursor }); } catch {}
+        }
+        try {
+          const j = await request<any>(url as any, { timeoutMs: 30000, noAuth: true });
+          const candidate = (j as any)?.data ?? (j as any)?.items ?? (j as any)?.data?.items ?? (j as any)?.data?.data ?? null;
+          let count = Array.isArray(candidate) ? candidate.length : 0;
+          if (Array.isArray(candidate) && candidate.length && typeof candidate[0] === 'object' && 'kind' in (candidate[0] as any) && 'data' in (candidate[0] as any)) {
+            const onlyNews = (candidate as any[]).filter((x) => (x?.kind || '').toLowerCase() === 'news');
+            count = onlyNews.length;
+          }
+          if (count > 0) {
+            return { json: j, endpoint: url };
+          }
+          if (!lastEmptyOk) lastEmptyOk = { json: j, endpoint: url };
+          if (__DEV__) try { console.warn('[API] getNewsFeed attempt returned empty list', url); } catch {}
+          continue;
+        } catch (e: any) {
+          lastErr = e;
+          if (__DEV__) try { console.warn('[API] getNewsFeed attempt failed', url, (e as any)?.message || e); } catch {}
+        }
+      }
+      if (lastEmptyOk) return lastEmptyOk;
+      if (lastErr) throw lastErr;
+      throw new Error('Failed to fetch shortnews feed');
+    };
+
+    const { json, endpoint } = await tryFetch();
+    if (LOG_SHORTNEWS || DEBUG_API) {
+      try {
+        const pageInfo = (json as any)?.pageInfo || null;
+        const dataArr = Array.isArray((json as any)?.data) ? (json as any).data : null;
+        const itemsArr = Array.isArray((json as any)?.items) ? (json as any).items : null;
+        const nestedArr = Array.isArray((json as any)?.data?.items) ? (json as any).data.items : (Array.isArray((json as any)?.data?.data) ? (json as any).data.data : null);
+        const arr = dataArr || itemsArr || nestedArr;
+        console.log('[API] getNewsFeed response', {
+          endpoint,
+          hasDataArray: Array.isArray(dataArr),
+          hasItemsArray: Array.isArray(itemsArr),
+          hasNestedArray: Array.isArray(nestedArr),
+          length: Array.isArray(arr) ? arr.length : null,
+          pageInfo,
+        });
+      } catch {}
+    }
     const pageInfo = (json as any)?.pageInfo || null;
     const listRaw = (json as any)?.data ?? (json as any)?.items ?? (json as any)?.data?.items ?? (json as any)?.data?.data ?? null;
     const out: { items: FeedItem[]; nextCursor?: string | null; hasMore?: boolean } = { items: [], nextCursor: pageInfo?.nextCursor || null, hasMore: Boolean(pageInfo?.hasMore) };
@@ -1821,43 +2126,52 @@ const CATEGORIES_CACHE_KEY = (langId: string) => `categories_cache:${langId}`;
 
 
 export async function getCategories(languageId?: string): Promise<CategoryItem[]> {
-  // Resolve the effective language consistently across app
+  // Resolve the effective language and normalize id/code using languages list
   let langId: string | undefined = languageId;
+  let langCode: string | undefined;
   try {
-    if (!langId) {
-      const eff = await resolveEffectiveLanguage();
-      langId = eff.id;
-    }
-    // If code was passed by mistake, map to id
-    if (langId && !/^cmf/i.test(String(langId))) {
-      const list = await getLanguages();
-      const found = list.find(l => (l.code || '').toLowerCase() === String(langId).toLowerCase());
-      if (found?.id) {
-        try { console.log('[CAT] getCategories: normalize code→id', { code: langId, id: found.id }); } catch {}
-        langId = String(found.id);
+    const eff = await resolveEffectiveLanguage();
+    langId = langId || eff.id;
+    langCode = eff.code;
+  } catch {}
+
+  // Normalize provided value: if it's a code, map to id; if it's an id, keep; if neither, try from effective code
+  try {
+    const langs = await getLanguages();
+    if (langId) {
+      const byId = langs.find((l) => String(l.id) === String(langId));
+      if (!byId) {
+        const byCode = langs.find((l) => String(l.code).toLowerCase() === String(langId).toLowerCase());
+        if (byCode?.id) {
+          try { console.log('[CAT] normalize code→id', { code: langId, id: byCode.id }); } catch {}
+          langId = String(byCode.id);
+          langCode = byCode.code || langCode;
+        }
+      } else {
+        langCode = langCode || byId.code;
       }
+    } else if (!langId && langCode) {
+      const byCode = langs.find((l) => String(l.code).toLowerCase() === String(langCode).toLowerCase());
+      if (byCode?.id) langId = String(byCode.id);
     }
   } catch {}
-  if (!langId) {
-    try { console.warn('[CAT] getCategories: no languageId resolved'); } catch {}
+
+  if (!langId && !langCode) {
+    try { console.warn('[CAT] getCategories: no language resolved'); } catch {}
     return [];
   }
 
   // Mock mode short-circuit to cached data (if any)
-  const cacheKey = CATEGORIES_CACHE_KEY(langId);
+  const cacheKey = CATEGORIES_CACHE_KEY(String(langId || langCode));
   const cachedRaw = await AsyncStorage.getItem(cacheKey);
   const cached: CategoryItem[] | null = cachedRaw ? (() => { try { return JSON.parse(cachedRaw) as CategoryItem[]; } catch { return null; } })() : null;
 
   if (await getMockMode()) {
-    try { console.log('[CAT] getCategories: mock mode, cached', { langId, count: cached?.length || 0 }); } catch {}
+    try { console.log('[CAT] getCategories: mock mode, cached', { lang: langId || langCode, count: cached?.length || 0 }); } catch {}
     return cached || [];
   }
 
-  try {
-    const params = new URLSearchParams({ languageId: langId });
-    const url = `/categories?${params.toString()}`;
-    try { console.log('[CAT] GET', url); } catch {}
-    const res = await request<any>(url, { noAuth: true });
+  const parseList = (res: any): any[] | null => {
     const arr = Array.isArray(res)
       ? res
       : Array.isArray(res?.data)
@@ -1871,11 +2185,11 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
       : Array.isArray(res?.data?.categories)
       ? res.data.categories
       : null;
-    if (!arr) {
-      try { console.warn('[CAT] categories: invalid response shape', Object.keys(res || {})); } catch {}
-      throw new Error('Invalid categories response');
-    }
-    const list: CategoryItem[] = (arr as any[]).map((x) => ({
+    return arr || null;
+  };
+
+  const toCategoryItems = (arr: any[]): CategoryItem[] =>
+    (arr as any[]).map((x) => ({
       id: String(x?.id || x?._id || x?.value || x?.key || x?.slug || x?.name),
       name: String(x?.name || x?.title || x?.label || x?.slug || 'Category'),
       slug: x?.slug,
@@ -1889,14 +2203,36 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
           }))
         : [],
     }));
-    try { await AsyncStorage.setItem(cacheKey, JSON.stringify(list)); } catch {}
-    try { console.log('[CAT] categories loaded', { langId, count: list.length }); } catch {}
-    return list;
-  } catch (err) {
-    if (cached && Array.isArray(cached)) return cached;
-    console.warn('getCategories failed', err);
-    return [];
+
+  // Attempt sequence: languageId → language(code) → no param
+  const attempts: { label: string; url: string }[] = [];
+  if (langId) attempts.push({ label: 'languageId', url: `/categories?${new URLSearchParams({ languageId: String(langId) }).toString()}` });
+  if (langCode) attempts.push({ label: 'language', url: `/categories?${new URLSearchParams({ language: String(langCode) }).toString()}` });
+  attempts.push({ label: 'fallback', url: `/categories` });
+
+  for (const a of attempts) {
+    try {
+      try { console.log('[CAT] GET', a.url); } catch {}
+      const res = await request<any>(a.url, { noAuth: true });
+      const arr = parseList(res);
+      if (!arr) {
+        try { console.warn('[CAT] invalid response shape', { attempt: a.label, keys: Object.keys(res || {}) }); } catch {}
+        continue;
+      }
+      const list = toCategoryItems(arr);
+      if (Array.isArray(list) && list.length > 0) {
+        try { await AsyncStorage.setItem(cacheKey, JSON.stringify(list)); } catch {}
+        try { console.log('[CAT] categories loaded', { attempt: a.label, count: list.length }); } catch {}
+        return list;
+      }
+    } catch (e) {
+      try { console.warn('[CAT] attempt failed', { attempt: a.label, message: (e as any)?.message || e }); } catch {}
+      continue;
+    }
   }
+
+  if (cached && Array.isArray(cached)) return cached;
+  return [];
 }
 
 // Auth APIs

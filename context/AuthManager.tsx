@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useReducer, u
 import { AppState, AppStateStatus } from 'react-native';
 import { clearTokens, isExpired, loadTokens, refreshTokens, saveTokens, type Tokens } from '../services/auth';
 import { AuthErrorCode, AuthErrorHandler } from '../services/authErrors';
+import { registerPushTokenWithBackend } from '../services/notifications';
 
 // Auth state types
 export interface User {
@@ -243,8 +244,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           payload: { tokens, user },
         });
 
-        // Schedule refresh for valid token
-        scheduleTokenRefresh(tokens.expiresAt);
+  // Schedule refresh for valid token
+  scheduleTokenRefresh(tokens.expiresAt);
+  // Best-effort: register device push token with backend (async, non-blocking)
+  try { registerPushTokenWithBackend().catch(() => {}); } catch {}
         
       } catch (error) {
         console.error('[AUTH] Initialization failed:', error);
@@ -298,8 +301,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         payload: { tokens, user },
       });
 
-      // Schedule token refresh
-      scheduleTokenRefresh(tokens.expiresAt);
+  // Schedule token refresh
+  scheduleTokenRefresh(tokens.expiresAt);
+  // After login, register device push token with backend (async, non-blocking)
+  try { registerPushTokenWithBackend().catch(() => {}); } catch {}
       
       console.log('[AUTH] Login successful', { role: user.role, userId: user.id });
       

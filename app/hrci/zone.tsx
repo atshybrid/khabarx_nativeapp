@@ -1,3 +1,4 @@
+import { makeShadow } from '@/utils/shadow';
 import { useRouter } from 'expo-router';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { HrciLevel, useHrciOnboarding } from '../../context/HrciOnboardingContext';
@@ -49,10 +50,8 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 14,
     width: '100%',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 2,
+    // Cross-platform shadow (uses boxShadow on web)
+    ...makeShadow(4, { opacity: 0.08, blur: 16, y: 2 }),
     borderWidth: 1,
     borderColor: '#eef0f4',
     marginRight: 12,

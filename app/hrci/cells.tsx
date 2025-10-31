@@ -23,7 +23,7 @@ function classifyCell(name?: string): Exclude<FilterKey, 'all'> {
 
 export default function HrciCellsScreen() {
   const router = useRouter();
-  const { setCell } = useHrciOnboarding();
+  const { setCell, returnToAfterGeo } = useHrciOnboarding();
   const [loading, setLoading] = useState(true);
   const [cells, setCells] = useState<Cell[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -55,10 +55,21 @@ export default function HrciCellsScreen() {
     setRefreshing(false);
   }, [fetchCells]);
 
-  const choose = (c: Cell) => {
+  const choose = async (c: Cell) => {
     setCell(c.id, c.name, c.code);
-    try { AsyncStorage.multiSet([[ 'HRCI_CELL_ID', c.id ], [ 'HRCI_CELL_NAME', c.name || '' ], [ 'HRCI_CELL_CODE', c.code || '' ]]); } catch {}
-    router.push('/hrci/designations' as any);
+    try { await AsyncStorage.multiSet([[ 'HRCI_CELL_ID', c.id ], [ 'HRCI_CELL_NAME', c.name || '' ], [ 'HRCI_CELL_CODE', c.code || '' ]]); } catch {}
+    let meetingFlow = !!returnToAfterGeo;
+    if (!meetingFlow) {
+      try { const saved = await AsyncStorage.getItem('HRCI_RETURN_TO_AFTER_GEO'); meetingFlow = !!saved; } catch {}
+    }
+    let isEdit = false;
+    try { const edit = await AsyncStorage.getItem('HRCI_EDIT_AFTER_SELECT'); isEdit = edit === '1'; } catch {}
+    if (meetingFlow && isEdit) {
+      try { await AsyncStorage.removeItem('HRCI_EDIT_AFTER_SELECT'); } catch {}
+      router.replace('/hrci/admin/meeting-create' as any);
+    } else {
+      router.push('/hrci/designations' as any);
+    }
   };
 
   const filtered = useMemo(() => {

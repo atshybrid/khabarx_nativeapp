@@ -22,19 +22,29 @@ export type DonationOrder = {
 };
 
 export async function createDonationOrder(payload: CreateDonationOrderPayload): Promise<DonationOrder> {
+  // Build body by including only defined, meaningful values to avoid sending empty strings ('')
+  // Some backends using Prisma treat empty strings as invalid values for nullable columns or UUIDs
+  const body: Record<string, any> = {
+    amount: Number(payload.amount),
+    donorName: String(payload.donorName || '').trim(),
+    isAnonymous: Boolean(payload.isAnonymous),
+  };
+  const donorMobile = (payload.donorMobile ?? '').trim();
+  const eventId = (payload.eventId ?? undefined) ? String(payload.eventId) : undefined;
+  const donorAddress = (payload.donorAddress ?? '').trim() || undefined;
+  const donorEmail = (payload.donorEmail ?? '').trim() || undefined;
+  const donorPan = (payload.donorPan ?? '').trim() || undefined;
+  const shareCode = (payload.shareCode ?? '').trim() || undefined;
+  if (eventId) body.eventId = eventId;
+  if (donorMobile) body.donorMobile = donorMobile;
+  if (donorAddress) body.donorAddress = donorAddress;
+  if (donorEmail) body.donorEmail = donorEmail;
+  if (donorPan) body.donorPan = donorPan;
+  if (shareCode) body.shareCode = shareCode;
+
   const res = await request<{ success?: boolean; data?: { order: DonationOrder } }>(`/donations/orders` as any, {
     method: 'POST',
-    body: {
-      eventId: payload.eventId || '',
-      amount: Number(payload.amount || 0),
-      donorName: payload.donorName,
-      donorAddress: payload.donorAddress || '',
-      donorMobile: payload.donorMobile,
-      donorEmail: payload.donorEmail || '',
-      donorPan: payload.donorPan || '',
-      isAnonymous: Boolean(payload.isAnonymous),
-      shareCode: payload.shareCode || '',
-    },
+    body,
     noAuth: true,
   });
   const order = (res?.data as any)?.order || (res as any)?.order;

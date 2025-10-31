@@ -1,3 +1,4 @@
+import { on as onEvent } from '@/services/events';
 import { onHttpError } from '@/services/http';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated as RNAnimated, StyleSheet, Text } from 'react-native';
@@ -22,22 +23,28 @@ export default function Toast() {
     }
 
     function mapMessage(err: any, ctx?: { path: string; method: string }): string | null {
+      const bodyMsg: string | undefined = err?.body?.message || err?.body?.error || undefined;
+      const errMsg: string = err?.message || bodyMsg || '';
+      const raw = (bodyMsg || errMsg || '').toLowerCase();
+
       // Suppress very common / noisy validation 400 toasts; UI often handles them locally
       if (err?.status === 400) {
-        const raw = (err?.body?.message || err?.message || '').toLowerCase();
         if (raw.startsWith('http 400')) return null; // generic
         if (raw.includes('validation') || raw.includes('invalid')) return null; // let field-level errors surface
+        // Otherwise show server-provided message or fallback
+        return bodyMsg || errMsg || 'Request error';
       }
+
       // Suppress expected 404s for membership/profile bootstrap (we handle fallback silently)
       if (err?.status === 404 && ctx?.path) {
         const p = ctx.path;
         if (p === '/memberships/me' || p === '/memberships/me/profile' || p === '/profiles/me') return null;
       }
       if (err?.status === 401 || err?.status === 403) return 'Session expired. Please sign in again.';
-      if (err?.status === 404) return 'Resource not found.';
-      if (err?.status === 429) return 'Too many requests. Slow down a bit.';
-      if (err?.status >= 500) return 'Server error. Please try again shortly.';
-      const msg = err?.message || err?.body?.message || 'Network error';
+      if (err?.status === 404) return bodyMsg || 'Resource not found.';
+      if (err?.status === 429) return bodyMsg || 'Too many requests. Slow down a bit.';
+      if (err?.status >= 500) return bodyMsg || 'Server error. Please try again shortly.';
+      const msg = bodyMsg || errMsg || 'Network error';
       return String(msg);
     }
 
@@ -46,7 +53,12 @@ export default function Toast() {
       if (!mapped) return; // suppressed
       showToast(mapped);
     });
-    return () => { if (hideTimer.current) clearTimeout(hideTimer.current); unsubscribe(); };
+    // Also listen for explicit toast events
+    const offToast = onEvent('toast:show', ({ message }) => {
+      if (message) showToast(message);
+    });
+
+    return () => { if (hideTimer.current) clearTimeout(hideTimer.current); unsubscribe(); offToast(); };
   }, [opacity]);
 
   if (!visible) return null;

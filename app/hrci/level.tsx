@@ -1,3 +1,4 @@
+import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
@@ -12,7 +13,7 @@ const LEVELS: HrciLevel[] = ['NATIONAL', 'ZONE', 'STATE', 'DISTRICT', 'MANDAL'];
 
 export default function HrciLevelScreen() {
   const router = useRouter();
-  const { setLevel } = useHrciOnboarding();
+  const { setLevel, returnToAfterGeo } = useHrciOnboarding();
   const screen = Dimensions.get('window');
   // Use two columns only on sufficiently wide screens to avoid title wrapping
   const twoCol = screen.width >= 400;
@@ -22,23 +23,45 @@ export default function HrciLevelScreen() {
     return LEVELS.filter(l => l.toLowerCase().includes(q));
   }, [query]);
 
-  // On Android, make sure hardware back from this screen returns to HRCI login
+  // On Android, if meeting-create flow is active, back should go to previous page; else return to HRCI login
   useFocusEffect(
     useCallback(() => {
       const back = () => {
-        try { router.replace('/hrci/login'); } catch {}
+        try {
+          if (returnToAfterGeo) {
+            router.back();
+          } else {
+            // also check fallback key if context lost
+            AsyncStorage.getItem('HRCI_RETURN_TO_AFTER_GEO').then((val: string | null) => {
+              if (val) router.back(); else router.replace('/hrci/login');
+            });
+          }
+        } catch {}
         return true;
       };
   const sub = BackHandler.addEventListener('hardwareBackPress', back);
   return () => sub.remove();
-    }, [router])
+    }, [router, returnToAfterGeo])
   );
 
   const choose = async (lvl: HrciLevel) => {
     try { await Haptics.selectionAsync(); } catch {}
     setLevel(lvl);
     try { await AsyncStorage.setItem('HRCI_SELECTED_LEVEL', lvl); } catch {}
-    router.push('/hrci/cells' as any);
+    // Determine if we are in meeting flow and whether this is an edit hop
+    let meetingFlow = !!returnToAfterGeo;
+    if (!meetingFlow) {
+      try { const saved = await AsyncStorage.getItem('HRCI_RETURN_TO_AFTER_GEO'); meetingFlow = !!saved; } catch {}
+    }
+    let isEdit = false;
+    try { const edit = await AsyncStorage.getItem('HRCI_EDIT_AFTER_SELECT'); isEdit = edit === '1'; } catch {}
+    if (meetingFlow && isEdit) {
+      try { await AsyncStorage.removeItem('HRCI_EDIT_AFTER_SELECT'); } catch {}
+      router.replace('/hrci/admin/meeting-create' as any);
+    } else {
+      // In new create flow (or non-meeting flow), continue sequence
+      router.push('/hrci/cells' as any);
+    }
   };
 
   return (
@@ -46,7 +69,16 @@ export default function HrciLevelScreen() {
       <StatusBar style="dark" backgroundColor="#ffffff" />
       <View style={styles.headerWrap}>
         <View style={styles.searchBox}>
-          <TouchableOpacity onPress={() => router.replace('/hrci/login')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity
+            onPress={() => {
+              if (returnToAfterGeo) {
+                router.back();
+              } else {
+                router.replace('/hrci/login');
+              }
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <MaterialCommunityIcons name="arrow-left" size={22} color="#374151" />
           </TouchableOpacity>
           <MaterialCommunityIcons name="magnify" size={20} color="#9CA3AF" />
@@ -113,10 +145,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 14,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 2,
+    // Cross-platform shadow: uses boxShadow on web (no deprecation warn) and native shadow props on mobile
+    ...makeShadow(2, { color: '0,0,0', opacity: 0.06, blur: 10, y: 4 }),
     borderWidth: 1,
     borderColor: '#eef0f4',
     flexDirection: 'row',

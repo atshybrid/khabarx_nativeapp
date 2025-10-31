@@ -51,7 +51,7 @@ export const HrciIdCardFrontStandard: React.FC<HrciIdCardFrontStandardProps> = (
         <View style={styles.pBlueBand}>
           <Text style={styles.pBlueBandText} numberOfLines={3}>REGD NO: 4396/2022 • TRUST ACT 1882{"\n"}NITI AAYOG UID:{"\n"}AP/2022/0324217 / 0326782</Text>
         </View>
-        <View style={styles.pLogoWrap}>{logoUri ? <Image source={{ uri: logoUri }} style={styles.pLogo} /> : <View style={[styles.pLogo, styles.placeholder]}><Text style={styles.phSmall}>LOGO</Text></View>}</View>
+  <View style={styles.pLogoWrap}>{logoUri ? <Image source={{ uri: logoUri }} style={styles.pLogo} /> : <View style={[styles.pLogo, styles.placeholder, { backgroundColor: 'transparent' }]}><Text style={styles.phSmall}>LOGO</Text></View>}</View>
         <View style={styles.pPhotoWrap}>
           {photoUri ? <Image source={{ uri: photoUri }} style={styles.pPhoto} /> : <View style={[styles.pPhoto, styles.placeholder]}><Text style={styles.phSmall}>PHOTO</Text></View>}
           {stampUri ? <Image source={{ uri: stampUri }} style={styles.pStamp} /> : <View style={[styles.pStamp, styles.placeholder]}><Text style={styles.phTiny}>STAMP</Text></View>}
@@ -80,7 +80,7 @@ export const HrciIdCardFrontStandard: React.FC<HrciIdCardFrontStandardProps> = (
       </View>
       <View style={styles.mainRow}>
         <View style={styles.leftCol}>
-          <View style={styles.logoWrap}>{logoUri ? <Image source={{ uri: logoUri }} style={styles.logo} /> : <View style={[styles.logo, styles.placeholder]}><Text style={styles.phSmall}>LOGO</Text></View>}</View>
+          <View style={styles.logoWrap}>{logoUri ? <Image source={{ uri: logoUri }} style={styles.logo} /> : <View style={[styles.logo, styles.placeholder, { backgroundColor: 'transparent' }]}><Text style={styles.phSmall}>LOGO</Text></View>}</View>
           <View style={styles.photoWrap}>
             {photoUri ? <Image source={{ uri: photoUri }} style={styles.photo} /> : <View style={[styles.photo, styles.placeholder]}><Text style={styles.phSmall}>PHOTO</Text></View>}
             {stampUri ? <Image source={{ uri: stampUri }} style={styles.stamp} /> : <View style={[styles.stamp, styles.placeholder]}><Text style={styles.phTiny}>STAMP</Text></View>}
@@ -110,7 +110,7 @@ const Detail = ({ label, value }: { label: string; value: string }) => (
 );
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#ffffff', overflow: 'hidden' },
+  card: { borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#F3F4F6', overflow: 'hidden' },
   topRed: { backgroundColor: RED, paddingHorizontal: 6, paddingVertical: 4 },
   topTitle: { color: '#fff', fontSize: 10, fontWeight: '800', textAlign: 'center', letterSpacing: 0.5 },
   blueBand: { backgroundColor: BLUE, paddingHorizontal: 6, paddingVertical: 4 },

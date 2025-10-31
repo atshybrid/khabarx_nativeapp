@@ -23,7 +23,7 @@ type LoaderProps = {
 // File: assets/lotti/hrci_loader_svg.json
 export function Loader({ size = 40, containerStyle, testID }: LoaderProps) {
   return (
-    <View style={[{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }, containerStyle]} pointerEvents="none">
+    <View style={[{ width: size, height: size, alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' as any }, containerStyle]}>
       <LottieView
         source={require('@/assets/lotti/hrci_loader_svg.json')}
         autoPlay

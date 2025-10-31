@@ -15,10 +15,10 @@ function randomId(len = 24) {
   return out;
 }
 
+// Persist a stable deviceId in AsyncStorage (can be upgraded to SecureStore if dependency is added)
 export async function getDeviceIdentity(): Promise<DeviceIdentity> {
   let deviceId = (await AsyncStorage.getItem(DEVICE_ID_KEY)) || '';
   if (!deviceId) {
-    // Generate and persist a stable random ID (privacy-safe)
     deviceId = randomId();
     await AsyncStorage.setItem(DEVICE_ID_KEY, deviceId);
   }

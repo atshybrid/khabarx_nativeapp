@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Transparent base to allow shaped background -->
+    <item android:drawable="@android:color/transparent"/>
+    <!-- Centered circular disc with insets so it appears round on any mask -->
+    <item>
+        <inset
+            android:insetLeft="18dp"
+            android:insetRight="18dp"
+            android:insetTop="18dp"
+            android:insetBottom="18dp">
+            <shape android:shape="oval">
+                <solid android:color="@color/iconBackground"/>
+            </shape>
+        </inset>
+    </item>
+</layer-list>

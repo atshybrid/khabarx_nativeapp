@@ -4,6 +4,8 @@ import React, { createContext, useCallback, useContext, useEffect, useReducer, u
 import { AppState, AppStateStatus } from 'react-native';
 import { clearTokens, isExpired, loadTokens, refreshTokens, saveTokens, type Tokens } from '../services/auth';
 import { AuthErrorCode, AuthErrorHandler } from '../services/authErrors';
+import { emit } from '../services/events';
+import { autoSyncPreferences } from '../services/loginSync';
 
 // Auth state types
 export interface User {
@@ -258,6 +260,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (mounted) {
           dispatch({ type: 'LOGIN_SUCCESS', payload: { tokens, user } });
           scheduleRef.current?.(tokens.expiresAt);
+          // Background preference sync on app start when already authenticated
+          autoSyncPreferences('app_start').catch(() => {});
         }
       } catch (error) {
         console.error('[AUTH] Initialization failed:', error);
@@ -291,7 +295,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Schedule token refresh
       scheduleTokenRefresh(tokens.expiresAt);
       
-      console.log('[AUTH] Login successful', { role: user.role, userId: user.id });
+  console.log('[AUTH] Login successful', { role: user.role, userId: user.id });
+
+  // After login, reconcile push token, language, and location with server
+  autoSyncPreferences('login').catch(() => {});
+
+  // Ask News tab to refresh after login
+  try { emit('news:refresh', { reason: 'login' }); } catch {}
       
     } catch (error) {
       const authError = AuthErrorHandler.handle(error, 'login');
@@ -310,6 +320,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: 'LOGOUT' });
       
       console.log('[AUTH] Logout completed', { reason });
+  // Ask News tab to refresh in guest mode
+  try { emit('news:refresh', { reason: 'logout' }); } catch {}
       
       // Navigate to appropriate screen
       try {
@@ -380,6 +392,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               await logout('Session expired while app was in background');
             }
           }
+          // Also reconcile preferences (language, push token, location) after foreground
+          try { await autoSyncPreferences('foreground'); } catch {}
         }
       }
     };

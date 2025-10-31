@@ -309,21 +309,28 @@ export default function HrciLoginScreen() {
       try {
         const tokens = await loadTokens();
         const hasValidToken = !!(tokens?.jwt);
-        const userRole = tokens?.user?.role;
+        const userRole = (tokens?.user?.role || '').toString().trim().toUpperCase();
         const isExpired = tokens?.expiresAt ? Date.now() >= tokens.expiresAt : false;
         
         console.log('[HRCI Login] Auth status check:', {
           hasValidToken,
           userRole,
           isExpired,
-          shouldRedirect: hasValidToken && !isExpired && (userRole === 'MEMBER' || userRole === 'HRCI_ADMIN')
+          shouldRedirect: hasValidToken && !isExpired && (userRole === 'MEMBER' || userRole === 'HRCI_MEMBER' || userRole === 'HRCI_ADMIN' || userRole === 'SUPERADMIN')
         });
         
-        if (hasValidToken && !isExpired && (userRole === 'MEMBER' || userRole === 'HRCI_ADMIN')) {
-          console.log('[HRCI Login] Valid auth found, redirecting to dashboard');
-          router.replace('/hrci' as any);
+        if (hasValidToken && !isExpired) {
+          if (userRole === 'HRCI_ADMIN' || userRole === 'SUPERADMIN') {
+            console.log('[HRCI Login] Valid admin auth found, redirecting to admin dashboard');
+            router.replace('/hrci/admin' as any);
+          } else if (userRole === 'MEMBER' || userRole === 'HRCI_MEMBER') {
+            console.log('[HRCI Login] Valid member auth found, redirecting to member dashboard');
+            router.replace('/hrci' as any);
+          } else {
+            console.log('[HRCI Login] Valid auth but not HRCI role:', userRole);
+          }
         } else if (hasValidToken && !isExpired) {
-          console.log('[HRCI Login] Valid auth but not HRCI role:', userRole);
+          console.log('[HRCI Login] Valid auth but not HRCI role (no redirect):', userRole);
         } else {
           console.log('[HRCI Login] No valid auth or expired, staying on login');
         }
@@ -435,16 +442,18 @@ export default function HrciLoginScreen() {
         console.error('[HRCI Login] Failed to save tokens:', tokenError);
       }
 
-      // Role-based navigation: HRCI_ADMIN -> admin area, otherwise dashboard
+      // Role-based navigation: HRCI_ADMIN/SUPERADMIN -> admin area, MEMBER/HRCI_MEMBER -> member dashboard
       try {
-        const userRole = (data as any)?.user?.role || undefined;
+        const userRole = ((data as any)?.user?.role || '').toString().trim().toUpperCase();
         console.log('[HRCI Login] Determining navigation target. Role:', userRole);
-        if (userRole === 'HRCI_ADMIN') {
+        if (userRole === 'HRCI_ADMIN' || userRole === 'SUPERADMIN') {
           console.log('[HRCI Login] Navigating to HRCI Admin home');
-          // If admin route exists, navigate there; else fallback to dashboard
+          router.replace('/hrci/admin' as any);
+        } else if (userRole === 'MEMBER' || userRole === 'HRCI_MEMBER') {
+          console.log('[HRCI Login] Navigating to HRCI member dashboard');
           router.replace('/hrci' as any);
         } else {
-          console.log('[HRCI Login] Navigating to HRCI dashboard');
+          console.log('[HRCI Login] Unknown or unsupported role, defaulting to member dashboard');
           router.replace('/hrci' as any);
         }
       } catch (navErr) {

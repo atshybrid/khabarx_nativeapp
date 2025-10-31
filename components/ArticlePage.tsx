@@ -8,6 +8,7 @@ import { Ramabhadra_400Regular, useFonts } from '@expo-google-fonts/ramabhadra';
 // Vector icons from @expo/vector-icons no longer used for engagement rail
 import { Feather } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { useVideoPlayer } from 'expo-video';
@@ -42,20 +43,20 @@ import { on } from '@/services/events';
 // Native-only modules: wrap in try/catch so web build doesn't crash if polyfill missing
 // Lazy holders for native-only modules; populated on first share attempt to satisfy lint (no top-level require)
 let ShareLib: any; // react-native-share
-let ViewShot: any; // react-native-view-shot
 const ensureNativeShareLibs = async () => {
-  if (Platform.OS === 'web') return;
   if (!ShareLib) {
-    try { ShareLib = (await import('react-native-share')) as any; } catch {}
-  }
-  if (!ViewShot) {
-    try { const vs: any = await import('react-native-view-shot'); ViewShot = (vs as any)?.default || vs; } catch {}
+    try {
+      // Only attempt dynamic import if native module is present in the dev client
+      const { NativeModules } = await import('react-native');
+      const hasNative = !!(NativeModules as any)?.RNShare;
+      if (!hasNative) return; // skip import when not linked to avoid Metro unknown module errors
+      ShareLib = (await import('react-native-share')) as any;
+    } catch {}
   }
 };
 const shareRuntimeGetter = () => (ShareLib && (ShareLib as any).open ? ShareLib : undefined);
 // Fallback lightweight placeholder if ViewShot not available (web or load failure)
 const ViewShotFallback: React.FC<any> = ({ children, style }) => <View style={style}>{children}</View>;
-const ResolvedViewShot: any = (ViewShot ? ViewShot : ViewShotFallback);
 // Optional navigation/logging debug flag
 const NAV_DEBUG = (() => {
   const raw = String(process.env.EXPO_PUBLIC_NAV_DEBUG ?? '').toLowerCase();
@@ -113,6 +114,20 @@ const EngagementButton: React.FC<EngagementButtonProps> = ({ icon, text, onPress
 };
 
 const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles }) => {
+  // Dynamically load react-native-view-shot after mount so captures work on native.
+  const [ViewShotComp, setViewShotComp] = useState<any>(() => ViewShotFallback);
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let mounted = true;
+    (async () => {
+      try {
+        const vs: any = await import('react-native-view-shot');
+        const C = (vs as any)?.default || vs;
+        if (mounted) setViewShotComp(() => C);
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, []);
   // ...existing code...
   // ...existing code...
   // Prepare video players for each video slide
@@ -139,6 +154,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   const heroCaptureRef = useRef<any>(null); // wraps hero media for image capture
   const fullShareRef = useRef<any>(null); // off-screen full article capture (hero + title + body, no engagement)
   const [shareMode, setShareMode] = useState(false); // toggled briefly during capture (could show watermark if desired)
+  const [shareImageReady, setShareImageReady] = useState(false); // off-screen image loaded
   // Transliteration for place + tagline
   // Language handling: prefer languageId, derive code only for transliteration/labels.
   const [resolvedLang, setResolvedLang] = useState<string | undefined>(undefined);
@@ -171,7 +187,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
     return () => { mounted = false; };
   }, [article?.id]);
   const tPart = React.useCallback(<K extends keyof typeof GLOBAL_TAG_PARTS>(k: K) => GLOBAL_TAG_PARTS[k][lang as keyof typeof GLOBAL_TAG_PARTS[K]] || GLOBAL_TAG_PARTS[k].en, [lang, GLOBAL_TAG_PARTS]);
-  // Load user place from storage; fallback to article author place if none
+  // Load user place from storage; fallback to article address if available, then author address/placeName
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -179,13 +195,22 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
         const locObjRaw = await AsyncStorage.getItem('profile_location_obj');
         let candidate = '';
         if (locObjRaw) {
-          try { candidate = JSON.parse(locObjRaw)?.name || ''; } catch {}
+          try {
+            const parsed = JSON.parse(locObjRaw);
+            // Prefer address over name/placeName
+            candidate = parsed?.address || parsed?.name || parsed?.placeName || '';
+          } catch {}
         }
         if (!candidate) {
+          // Legacy key may contain either a name or full address string
           candidate = (await AsyncStorage.getItem('profile_location')) || '';
         }
         if (!candidate) {
-          candidate = (article as any)?.author?.placeName || '';
+          // Prefer article-scoped location address, then author address, then author placeName
+          candidate = (article as any)?.location?.address
+            || (article as any)?.author?.address
+            || (article as any)?.author?.placeName
+            || '';
         }
         if (mounted) {
           setUserPlace(candidate);
@@ -370,45 +395,79 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   };
 
   // Tap share: capture hero image ONLY (no text baked) and attempt to send image + caption.
+  const waitFor = (cond: () => boolean, ms: number, tries: number) => new Promise<void>(async (res) => {
+    let left = tries;
+    while (left-- > 0) {
+      if (cond()) break;
+      await new Promise(r => setTimeout(r, ms));
+    }
+    res();
+  });
+
   const handleShareTap = async () => {
     try {
       setShareMode(true);
       // allow any pending hero rendering (video poster/image) to stabilize
-      await new Promise(r => setTimeout(r, 80));
+      await new Promise(r => setTimeout(r, 120));
+      // Give the off-screen full-share image a moment to load to avoid falling back to hero-only
+      await waitFor(() => shareImageReady, 120, 6); // up to ~720ms
   const { shareTitle, message } = buildSharePayload();
   // Capture full article (hero + title + body) from off-screen composition
-  const capturedUri = await fullShareRef.current?.capture?.();
+      let capturedUri = await fullShareRef.current?.capture?.();
       if (!capturedUri) {
-        // Web fallback: try navigator.share if available
-        if (Platform.OS === 'web' && (navigator as any)?.share) {
-          try { await (navigator as any).share({ title: shareTitle, text: message }); return; } catch {}
+        // Fallback: capture just the hero area if full composition isn't ready
+        try { capturedUri = await heroCaptureRef.current?.capture?.(); } catch {}
+      }
+      if (!capturedUri) {
+        // Try downloading the primary image as a last resort to ensure we share an image
+        const firstImage = heroSlides.find((s) => s.type === 'image')?.src || article.image || (Array.isArray(article.images) ? article.images[0] : null);
+        if (firstImage) {
+          try {
+            const ext = (firstImage.split('?')[0].split('.').pop() || 'jpg').toLowerCase();
+            const fileName = `khabarx-share-${article.id}.${['jpg','jpeg','png','webp'].includes(ext) ? ext : 'jpg'}`;
+            const baseDir = (((FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory || '')) as string;
+            const dest = baseDir + fileName;
+            const dl = await FileSystem.downloadAsync(firstImage, dest);
+            if (dl?.uri) {
+              capturedUri = dl.uri;
+            }
+          } catch (dlErr) {
+            console.warn('[Share] image download fallback failed', dlErr);
+          }
         }
-        await RnShare.share({ title: shareTitle, message }, { dialogTitle: 'Share article' });
-        return;
+        if (!capturedUri) {
+          // Web fallback: try navigator.share if available
+          if (Platform.OS === 'web' && (navigator as any)?.share) {
+            try { await (navigator as any).share({ title: shareTitle, text: message }); return; } catch {}
+          }
+          // As a last resort, share text only
+          await RnShare.share({ title: shareTitle, message }, { dialogTitle: 'Share article' });
+          return;
+        }
       }
       // Normalize URI (react-native-share expects file://)
       const imgUri = capturedUri.startsWith('file://') ? capturedUri : `file://${capturedUri}`;
-      // Prefer react-native-share (supports EXTRA_STREAM + EXTRA_TEXT properly on Android)
+      // Prefer react-native-share (supports EXTRA_STREAM + EXTRA_TEXT properly on Android) when available
       try {
         await ensureNativeShareLibs();
         const runtime = shareRuntimeGetter();
         if (runtime?.open) {
-          await runtime.open({
-          url: imgUri,
-          type: 'image/jpeg',
-          message,
-          title: shareTitle,
-          failOnCancel: false,
-          // subject could be added for email clients
-          });
-        } else {
-          throw new Error('react-native-share not available');
+          let didWhatsApp = false;
+          try {
+            const Social = (ShareLib as any)?.Social || (runtime as any)?.Social;
+            if (runtime.shareSingle && Social?.WHATSAPP && Platform.OS === 'android') {
+              await runtime.shareSingle({ social: Social.WHATSAPP, url: imgUri, type: 'image/jpeg', message, filename: 'khabarx-news.jpg' });
+              didWhatsApp = true;
+            }
+          } catch (waErr) { console.warn('[Share] WhatsApp shareSingle failed, falling back to generic share', waErr); }
+          if (!didWhatsApp) {
+            await runtime.open({ url: imgUri, type: 'image/jpeg', message, title: shareTitle, failOnCancel: false });
+          }
+          if (Platform.OS === 'android') {
+            try { await Clipboard.setStringAsync(message); ToastAndroid.show('Caption copied (paste if missing)', ToastAndroid.SHORT); } catch {}
+          }
+          return; // success path using react-native-share
         }
-        // Android: still copy caption so user can paste if target strips it
-        if (Platform.OS === 'android') {
-          try { await Clipboard.setStringAsync(message); ToastAndroid.show('Caption copied (paste if missing)', ToastAndroid.SHORT); } catch {}
-        }
-        return; // success path
       } catch (primaryErr) {
         console.warn('[Share] react-native-share open failed, fallback to RN Share', primaryErr);
       }
@@ -424,20 +483,18 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
         } catch (errWeb) {
           console.warn('[Share:web] fallback failed', errWeb);
         }
-      } else if (Platform.OS === 'ios') {
-        await RnShare.share({ title: shareTitle, url: imgUri, message }, { dialogTitle: 'Share article' });
       } else {
-        // Android fallback chain: RN Share -> expo-sharing image-only
-        try {
-          await RnShare.share({ title: shareTitle, message, url: imgUri }, { dialogTitle: 'Share article' });
-        } catch (err2) {
-          console.warn('[Share] RN Share fallback failed, trying expo-sharing', err2);
-          const available = await Sharing.isAvailableAsync();
-          if (available) {
-            try { await Sharing.shareAsync(imgUri, { mimeType: 'image/jpeg', dialogTitle: shareTitle }); } catch (ee) { console.error('expo-sharing failed', ee); }
-          }
+        // Prefer expo-sharing with a local image when react-native-share isn't available
+        const available = await Sharing.isAvailableAsync();
+        if (available) {
+          try { await Sharing.shareAsync(imgUri, { mimeType: 'image/jpeg', dialogTitle: shareTitle }); } catch (ee) { console.error('expo-sharing failed', ee); }
+        } else {
+          // As a fallback, try RN Share API (may share text only on Android)
+          try { await RnShare.share({ title: shareTitle, url: imgUri, message }, { dialogTitle: 'Share article' }); } catch {}
         }
-        try { await Clipboard.setStringAsync(message); ToastAndroid.show('Caption copied (paste if missing)', ToastAndroid.SHORT); } catch {}
+        if (Platform.OS === 'android') {
+          try { await Clipboard.setStringAsync(message); ToastAndroid.show('Caption copied (paste if missing)', ToastAndroid.SHORT); } catch {}
+        }
       }
     } catch (e) {
       console.error('Tap share failed', e);
@@ -482,7 +539,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   }, [footerBottomOffset, footerHeight, titleHeight, isSmallScreen, displayBody]);
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-  <ResolvedViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }} style={{ flex: 1 }}>
+  <ViewShotComp ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }} style={{ flex: 1 }}>
       <ScrollView
         style={styles.scrollContainer}
         contentContainerStyle={[styles.scrollContentContainer, { paddingTop: insets.top }]}
@@ -511,7 +568,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
         scrollEventThrottle={16}
       >
           {/* Hero carousel: images and optional video */}
-          <ResolvedViewShot ref={heroCaptureRef} options={{ format: 'jpg', quality: 0.9 }} style={styles.heroContainer}>
+          <ViewShotComp ref={heroCaptureRef} options={{ format: 'jpg', quality: 0.9 }} style={styles.heroContainer} collapsable={false}>
             {heroSlides.length === 0 && (
               <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ color: '#fff' }}>No media</Text>
@@ -563,7 +620,8 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
                 const fullName: string = a.fullName || a.name || 'Reporter';
                 const photo: string | null = a.profilePhotoUrl || a.avatar || null;
                 const roleName: string | null = a.roleName || null;
-                const placeName: string | null = a.placeName || null;
+                // Prefer address fields for location display
+                const address: string | null = a.address || (article as any)?.location?.address || a.placeName || null;
                 const initials = fullName
                   .split(/\s+/)
                   .filter(Boolean)
@@ -584,11 +642,11 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
                     {humanRole && (
                       <Text style={styles.roleTiny} numberOfLines={1}>{humanRole}</Text>
                     )}
-                    {placeName && (
+                    {address && (
                       <View style={styles.dotSep} />
                     )}
-                    {placeName && (
-                      <Text style={styles.placeTiny} numberOfLines={1}>{placeName}</Text>
+                    {address && (
+                      <Text style={styles.placeTiny} numberOfLines={1}>{address}</Text>
                     )}
                   </View>
                 );
@@ -601,7 +659,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
                 ))}
               </View>
             )}
-          </ResolvedViewShot>
+          </ViewShotComp>
 
           <View style={[styles.articleArea, { backgroundColor: bg }] }>
             <View
@@ -743,17 +801,29 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
       {/* No bottom promo banner; promo appears in the author area during shareMode */}
       {/* Off-screen branded card for sharing */}
       {/* Card composition removed: sharing hero image + real text caption */}
-  </ResolvedViewShot>
+  </ViewShotComp>
       {/* Off-screen full share composition (no engagement bar, no footer) */}
-  <View style={{ position: 'absolute', top: -99999, left: -99999, pointerEvents: 'none' }}>
-  <ResolvedViewShot ref={fullShareRef} options={{ format: 'jpg', quality: 0.9 }}>
+  <View style={{ position: 'absolute', top: 0, left: 0, right: 0, opacity: 0, pointerEvents: 'none' }}>
+  <ViewShotComp ref={fullShareRef} options={{ format: 'jpg', quality: 0.9 }} collapsable={false}>
           <View style={{ width, backgroundColor: bg }}>
             <View style={styles.heroContainer}>
               {heroSlides.length > 0 ? (
                 heroSlides[slideIndex].type === 'image' ? (
-                  <Image source={{ uri: heroSlides[slideIndex].src }} style={styles.heroMediaImage} cachePolicy="memory-disk" />
+                  <Image
+                    source={{ uri: heroSlides[slideIndex].src }}
+                    style={styles.heroMediaImage}
+                    cachePolicy="memory-disk"
+                    onLoadEnd={() => setShareImageReady(true)}
+                    onError={() => setShareImageReady(false)}
+                  />
                 ) : (
-                  <Image source={{ uri: heroSlides[slideIndex].src }} style={styles.heroMediaImage} cachePolicy="memory-disk" />
+                  <Image
+                    source={{ uri: heroSlides[slideIndex].src }}
+                    style={styles.heroMediaImage}
+                    cachePolicy="memory-disk"
+                    onLoadEnd={() => setShareImageReady(true)}
+                    onError={() => setShareImageReady(false)}
+                  />
                 )
               ) : (
                 <View style={{ flex:1, alignItems:'center', justifyContent:'center' }}>
@@ -779,7 +849,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
               <Text style={[styles.body, { color: textColor }]}>{article.body}</Text>
             </View>
           </View>
-  </ResolvedViewShot>
+  </ViewShotComp>
       </View>
     </View>
   );

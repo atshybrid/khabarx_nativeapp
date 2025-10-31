@@ -14,7 +14,7 @@ type Designation = { id?: string; code: string; name: string };
 
 export default function HrciDesignationsScreen() {
   const router = useRouter();
-  const { setDesignation } = useHrciOnboarding();
+  const { setDesignation, returnToAfterGeo } = useHrciOnboarding();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Designation[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -45,11 +45,22 @@ export default function HrciDesignationsScreen() {
     setRefreshing(false);
   }, [fetchDesignations]);
 
-  const choose = (d: Designation) => {
+  const choose = async (d: Designation) => {
     // Store both id and code properly
     setDesignation(d.id || d.code, d.code, d.name);
-    try { AsyncStorage.multiSet([[ 'HRCI_DESIGNATION_ID', (d.id || d.code) ], [ 'HRCI_DESIGNATION_CODE', d.code ], [ 'HRCI_DESIGNATION_NAME', d.name || '' ]]); } catch {}
-    router.push('/hrci/geo' as any);
+    try { await AsyncStorage.multiSet([[ 'HRCI_DESIGNATION_ID', (d.id || d.code) ], [ 'HRCI_DESIGNATION_CODE', d.code ], [ 'HRCI_DESIGNATION_NAME', d.name || '' ]]); } catch {}
+    let meetingFlow = !!returnToAfterGeo;
+    if (!meetingFlow) {
+      try { const saved = await AsyncStorage.getItem('HRCI_RETURN_TO_AFTER_GEO'); meetingFlow = !!saved; } catch {}
+    }
+    let isEdit = false;
+    try { const edit = await AsyncStorage.getItem('HRCI_EDIT_AFTER_SELECT'); isEdit = edit === '1'; } catch {}
+    if (meetingFlow && isEdit) {
+      try { await AsyncStorage.removeItem('HRCI_EDIT_AFTER_SELECT'); } catch {}
+      router.replace('/hrci/admin/meeting-create' as any);
+    } else {
+      router.push('/hrci/geo' as any);
+    }
   };
 
   const filtered = useMemo(() => {

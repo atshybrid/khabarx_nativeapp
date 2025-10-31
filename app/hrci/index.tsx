@@ -1,3 +1,4 @@
+import { safeBack } from '@/utils/navigation';
 import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -5,15 +6,15 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    Animated,
-    Image,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Animated,
+  Image,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
@@ -122,6 +123,7 @@ export default function HrciDashboard() {
   const [usingFallbackMembership, setUsingFallbackMembership] = useState(false);
   const [cardInfo, setCardInfo] = useState<CardInfo | null>(null);
   const [kycOverride, setKycOverride] = useState<'PENDING' | 'VERIFIED' | 'REJECTED' | 'NOT_STARTED' | undefined>(undefined);
+  const photoPromptShownRef = useRef(false);
 
 
   const loadProfile = async () => {
@@ -154,9 +156,10 @@ export default function HrciDashboard() {
       
       setProfile(profileData);
       
-      // Check if profile photo is missing and show popup
-      if (!profileData?.profilePhotoUrl) {
-        console.log('[Dashboard] ⚠️  Profile photo missing - showing upload prompt');
+      // Check if profile photo is missing and show popup (only once per session)
+      if (!profileData?.profilePhotoUrl && !photoPromptShownRef.current) {
+        photoPromptShownRef.current = true;
+        console.log('[Dashboard] ⚠️  Profile photo missing - showing upload prompt (once)');
         setTimeout(() => {
           Alert.alert(
             'Complete Your Profile',
@@ -169,7 +172,7 @@ export default function HrciDashboard() {
               }}
             ]
           );
-        }, 1000);
+        }, 800);
       } else {
         console.log('[Dashboard] ✅ Profile photo exists:', profileData.profilePhotoUrl?.slice(0, 50) + '...');
       }
@@ -460,7 +463,7 @@ export default function HrciDashboard() {
           <View style={styles.headerContent}>
             <View style={styles.headerTop}>
               <TouchableOpacity 
-                onPress={() => router.back()}
+                onPress={() => safeBack(router, '/news')}
                 style={styles.backBtn}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
@@ -482,7 +485,7 @@ export default function HrciDashboard() {
                 {profile?.profilePhotoUrl ? (
                   <View>
                     <Image source={{ uri: profile.profilePhotoUrl }} style={styles.avatar} />
-                    {membership?.kyc?.status === 'APPROVED' && (
+                    {normalizeKycStatus(membership?.kyc?.status) === 'VERIFIED' && (
                       <View style={styles.kycBadge}>
                         <MaterialCommunityIcons name="check" size={14} color="#ffffff" />
                       </View>
@@ -594,40 +597,49 @@ export default function HrciDashboard() {
         <View style={styles.actionsContainer}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
-            {/* KYC card logic: use override from /memberships/kyc/me when available */}
+            {/* KYC status card: show name and color based on status */}
             {(() => {
-              const statusRaw = (kycOverride || String(membership?.kyc?.status || '')).toUpperCase();
-              const hasKycFlag = membership?.kyc?.hasKyc === true || kycOverride === 'VERIFIED';
-              const kycOk = hasKycFlag || (statusRaw === 'APPROVED' || statusRaw === 'VERIFIED');
-              if (kycOk) return null; // Verified: no card
-
-              // Pending: show status and don't navigate to submit
-              if (statusRaw === 'PENDING' || statusRaw === 'SUBMITTED') {
-                return (
-                  <ActionCard
-                    title="KYC Pending"
-                    subtitle="Under verification"
-                    icon="shield-sync"
-                    onPress={() => Alert.alert('KYC Pending', 'Your KYC is under verification. You will be notified once it is approved.')}
-                  />
-                );
-              }
-
-              // Rejected or not started: allow completing KYC
+              const raw = (kycOverride || String(membership?.kyc?.status || '')).toUpperCase();
+              const status = normalizeKycStatus(raw);
+              const conf = kycCardConfig(status);
+              const onPress = () => {
+                if (status === 'NOT_STARTED' || status === 'REJECTED') {
+                  router.push('/hrci/kyc/complete' as any);
+                } else if (status === 'PENDING') {
+                  Alert.alert('KYC Pending', 'Your KYC is under verification. You will be notified once it is approved.');
+                } else {
+                  // VERIFIED: take to ID Card as a handy next step
+                  router.push('/hrci/id-card' as any);
+                }
+              };
               return (
-                <ActionCard
-                  title="Complete KYC"
-                  subtitle={statusRaw === 'REJECTED' ? 'Rejected — resubmit details' : 'Verify to unlock features'}
-                  icon={statusRaw === 'REJECTED' ? 'shield-alert' : 'shield-check'}
-                  onPress={() => router.push('/hrci/kyc/complete' as any)}
-                />
+                <TouchableOpacity style={[styles.kycStatusCard, conf.containerStyle]} onPress={onPress} activeOpacity={0.85}>
+                  <MaterialCommunityIcons name={conf.icon as any} size={28} color={conf.fg} />
+                  <View style={{ marginLeft: 10, flex: 1 }}>
+                    <Text style={[styles.kycTitle, { color: conf.fg }]}>{conf.title}</Text>
+                    <Text style={[styles.kycSubtitle, { color: conf.fgMuted }]}>{conf.subtitle}</Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={24} color={conf.fg} />
+                </TouchableOpacity>
               );
             })()}
             {(() => {
               const statusRaw = (kycOverride || String(membership?.kyc?.status || '')).toUpperCase();
-              const hasKycFlag = membership?.kyc?.hasKyc === true || kycOverride === 'VERIFIED';
-              const kycOk = hasKycFlag || (statusRaw === 'APPROVED' || statusRaw === 'VERIFIED');
-              const guard = (fn: () => void) => kycOk ? fn : () => Alert.alert('KYC Required', 'Please complete your KYC to access this feature.');
+              const norm = normalizeKycStatus(statusRaw);
+              const isVerified = norm === 'VERIFIED';
+              // Only allow access after approval (active)
+              const guard = (fn: () => void) => isVerified ? fn : () => {
+                let title = 'KYC Required';
+                let msg = 'Please complete your KYC to access this feature.';
+                if (norm === 'PENDING') {
+                  title = 'KYC Pending';
+                  msg = 'Your KYC is under verification. Access will be available after approval.';
+                } else if (norm === 'REJECTED') {
+                  title = 'KYC Rejected';
+                  msg = 'Your KYC was rejected. Please review remarks and resubmit.';
+                }
+                Alert.alert(title, msg);
+              };
               return (
                 <>
                   <ActionCard
@@ -807,5 +819,59 @@ const styles = StyleSheet.create({
     ...makeShadow(2, { opacity: 0.05, y: 1, blur: 12 })
   },
   actionTitle: { fontSize: 14, fontWeight: '700', color: '#111827', marginTop: 8, textAlign: 'center' },
-  actionSubtitle: { fontSize: 12, color: '#6b7280', marginTop: 2, textAlign: 'center' }
+  actionSubtitle: { fontSize: 12, color: '#6b7280', marginTop: 2, textAlign: 'center' },
+  kycStatusCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, marginBottom: 12, flexBasis: '100%' },
+  kycTitle: { fontSize: 16, fontWeight: '700' },
+  kycSubtitle: { fontSize: 12, marginTop: 2 }
 });
+
+// KYC helpers for consistent status & styling
+function normalizeKycStatus(s?: string): 'NOT_STARTED' | 'PENDING' | 'VERIFIED' | 'REJECTED' {
+  const v = String(s || '').toUpperCase();
+  if (v === 'APPROVED' || v === 'VERIFIED') return 'VERIFIED';
+  if (v === 'PENDING' || v === 'SUBMITTED') return 'PENDING';
+  if (v === 'REJECTED') return 'REJECTED';
+  return 'NOT_STARTED';
+}
+
+function kycCardConfig(status: ReturnType<typeof normalizeKycStatus>) {
+  switch (status) {
+    case 'NOT_STARTED':
+      return {
+        title: 'KYC Not Started',
+        subtitle: 'Verify to unlock features',
+        icon: 'shield-outline',
+        fg: '#92400E',
+        fgMuted: '#B45309',
+        containerStyle: { backgroundColor: '#FFFBEB', borderColor: '#FDE68A', borderWidth: 1 },
+      };
+    case 'PENDING':
+      return {
+        title: 'KYC Pending',
+        subtitle: 'Under verification',
+        icon: 'shield-sync',
+        fg: '#1F2937',
+        fgMuted: '#6B7280',
+        containerStyle: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', borderWidth: 1 },
+      };
+    case 'VERIFIED':
+      return {
+        title: 'KYC Approved',
+        subtitle: 'You’re verified. Tap to view ID Card',
+        icon: 'shield-check',
+        fg: '#064E3B',
+        fgMuted: '#047857',
+        containerStyle: { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1 },
+      };
+    case 'REJECTED':
+    default:
+      return {
+        title: 'KYC Rejected',
+        subtitle: 'Resubmit details',
+        icon: 'shield-alert',
+        fg: '#7F1D1D',
+        fgMuted: '#B91C1C',
+        containerStyle: { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1 },
+      };
+  }
+}

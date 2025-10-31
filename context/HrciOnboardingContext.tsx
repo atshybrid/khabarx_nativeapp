@@ -56,6 +56,9 @@ interface Ctx extends HrciSelection {
   setRazorpayResult: (r: HrciSelection['razorpayResult']) => void;
   clearPayment: () => void;
   reset: () => void;
+  // When set, geo page should navigate to this path after completion (not persisted)
+  returnToAfterGeo?: string | null;
+  setReturnToAfterGeo: (path: string | null) => void;
 }
 
 const HrciOnboardingContext = createContext<Ctx | undefined>(undefined);
@@ -66,6 +69,8 @@ export function HrciOnboardingProvider({ children }: { children: React.ReactNode
   const [state, setState] = useState<HrciSelection>({ geo: {}, payOrder: null, razorpayResult: null });
   // Track whether we attempted payOrder restore (so consumers can know it's final)
   const [loaded, setLoaded] = useState(false);
+  // Non-persisted redirect hint for flows that reuse onboarding (e.g., admin meeting)
+  const [returnToAfterGeo, setReturnToAfterGeo] = useState<string | null>(null);
 
   // Load persisted data on mount (core selection excluding payment)
   useEffect(() => {
@@ -184,7 +189,9 @@ export function HrciOnboardingProvider({ children }: { children: React.ReactNode
     setRazorpayResult,
     clearPayment,
     reset,
-  }), [state, setMobileNumber, setLevel, setCell, setDesignation, updateGeo, setPayOrder, setRazorpayResult, clearPayment, reset]);
+    returnToAfterGeo,
+    setReturnToAfterGeo,
+  }), [state, setMobileNumber, setLevel, setCell, setDesignation, updateGeo, setPayOrder, setRazorpayResult, clearPayment, reset, returnToAfterGeo, setReturnToAfterGeo]);
 
   return (
     <HrciOnboardingContext.Provider value={value}>{children}</HrciOnboardingContext.Provider>

@@ -4,10 +4,20 @@ import { getBaseUrl } from '@/services/http';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import * as ExpoSplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
-import { View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Animated, Easing, Image, StyleSheet, Text, View } from 'react-native';
 
 export default function SplashScreen() {
+  const scaleRef = useRef(new Animated.Value(0.86));
+  // Simple zoom-in animation for top KhabarX logo
+  useEffect(() => {
+    try {
+      Animated.sequence([
+        Animated.timing(scaleRef.current, { toValue: 1.06, duration: 520, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.spring(scaleRef.current, { toValue: 1, friction: 8, tension: 80, useNativeDriver: true })
+      ]).start();
+    } catch {}
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -78,6 +88,7 @@ export default function SplashScreen() {
             // Best-effort warmup (non-blocking)
             getNews(lang).catch((e) => console.warn('[BOOT] Warmup shortnews failed (ignored)', e?.message || e));
           } catch {}
+          // Do not auto-route members/admins to dashboards from splash; always land on news
           await ensureMinSplash();
           try { await ExpoSplashScreen.hideAsync(); } catch {}
           router.replace('/news');
@@ -120,7 +131,39 @@ export default function SplashScreen() {
   }, []);
 
   return (
-    <View style={{ flex: 1 }} />
+    <View style={styles.root}>
+      {/* Top KhabarX logo with gentle zoom-in */}
+      <View style={styles.topWrap}>
+        <Animated.View style={{ transform: [{ scale: scaleRef.current }] }}>
+          <Image
+            source={require('@/assets/images/icon.png')}
+            style={styles.kxLogo}
+            resizeMode="contain"
+          />
+        </Animated.View>
+      </View>
+      {/* Bottom powered-by HRCI */}
+      <View style={styles.bottomWrap}>
+        <Text style={styles.poweredBy} numberOfLines={2}>
+          Powered By
+          {'\n'}HUMAN RIGHTS COUNCIL FOR INDIA (HRCI)
+        </Text>
+        <Image
+          source={require('@/assets/images/hrci_logo.png')}
+          style={styles.hrciLogo}
+          resizeMode="contain"
+        />
+      </View>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#ffffff', alignItems: 'center', paddingBottom: 36 },
+  topWrap: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+  bottomWrap: { width: '100%', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  kxLogo: { width: 160, height: 160 },
+  poweredBy: { textAlign: 'center', fontSize: 12, color: '#334155', fontWeight: '800', letterSpacing: 0.4, marginBottom: 8 },
+  hrciLogo: { width: 120, height: 56 },
+});
 

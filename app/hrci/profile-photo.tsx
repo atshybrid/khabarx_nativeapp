@@ -1,5 +1,6 @@
 import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Camera } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -7,11 +8,13 @@ import { useState } from 'react';
 import {
     Alert,
     Image,
+    Linking,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { refreshTokens } from '../../services/auth';
 import { emit } from '../../services/events';
@@ -28,7 +31,7 @@ export default function ProfilePhotoScreen() {
     
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -63,16 +66,28 @@ export default function ProfilePhotoScreen() {
     console.log('[ProfilePhoto] 📷 Camera launch requested');
     
     try {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      console.log('[ProfilePhoto] 🔐 Camera permission:', {
-        granted: permission.granted,
-        status: permission.status,
-        timestamp: new Date().toISOString()
-      });
-      
-      if (!permission.granted) {
-        console.log('[ProfilePhoto] ❌ Camera permission denied');
-        Alert.alert('Permission Required', 'Camera access is needed to take photos.');
+      // Prefer expo-camera for permission status; fallback to picker
+      const current = await Camera.getCameraPermissionsAsync();
+      console.log('[ProfilePhoto] 🔐 Camera permission (current):', current);
+      if (current.granted || current.status === 'granted') {
+        // proceed
+      } else if (current.canAskAgain) {
+        const req = await Camera.requestCameraPermissionsAsync();
+        console.log('[ProfilePhoto] 🔐 Camera permission (requested):', req);
+        if (!(req.granted || req.status === 'granted')) {
+          Alert.alert('Permission Required', 'Camera access is needed to take photos.');
+          return;
+        }
+      } else {
+        console.log('[ProfilePhoto] ❌ Camera permission denied permanently (canAskAgain=false)');
+        Alert.alert(
+          'Camera Permission Required',
+          'Camera access is blocked. Please enable it in Settings to take a photo.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings?.() }
+          ]
+        );
         return;
       }
 

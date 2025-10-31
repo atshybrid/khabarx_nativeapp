@@ -1,5 +1,5 @@
 import { useThemeColor } from '@/hooks/useThemeColor';
-import { ensureNotificationsSetup, getCurrentPushToken, scheduleLocalTestNotification } from '@/services/notifications';
+import { ensureNotificationsSetup, getCurrentPushToken, scheduleLocalTestNotification, sendExpoDirectTestNotification, sendServerTestNotification } from '@/services/notifications';
 import React from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -12,6 +12,7 @@ export default function NotificationTester() {
 
 	const [status, setStatus] = React.useState<string>('unknown');
 	const [expoToken, setExpoToken] = React.useState<string>('');
+    const [sending, setSending] = React.useState<boolean>(false);
 
 	const init = async () => {
 		const res = await ensureNotificationsSetup();
@@ -32,6 +33,36 @@ export default function NotificationTester() {
 		} catch {}
 	};
 
+	const sendServer = async () => {
+		try {
+			setSending(true);
+			const token = expoToken || (await getCurrentPushToken()) || '';
+			if (!token) return Alert.alert('No token', 'No Expo push token yet');
+			const res = await sendServerTestNotification(token);
+			if (res.ok) Alert.alert('Requested', `Server push requested via ${res.endpoint || 'default'} endpoint.`);
+			else Alert.alert('Server test failed', res.message || `Status: ${res.status || 'unknown'}`);
+		} catch (e: any) {
+			Alert.alert('Server test failed', e?.message || 'Unknown error');
+		} finally {
+			setSending(false);
+		}
+	};
+
+	const sendExpoDirect = async () => {
+		try {
+			setSending(true);
+			const token = expoToken || (await getCurrentPushToken()) || '';
+			if (!token) return Alert.alert('No token', 'No Expo push token yet');
+			const res = await sendExpoDirectTestNotification(token);
+			if (res.ok) Alert.alert('Requested', `Expo push requested${res.id ? ` (id: ${res.id})` : ''}.`);
+			else Alert.alert('Expo test failed', res.message || `Status: ${res.status || 'unknown'}`);
+		} catch (e: any) {
+			Alert.alert('Expo test failed', e?.message || 'Unknown error');
+		} finally {
+			setSending(false);
+		}
+	};
+
 	return (
 		<View style={[styles.safe, { backgroundColor: bg }]}>
 			<ScrollView contentContainerStyle={styles.content}>
@@ -43,7 +74,13 @@ export default function NotificationTester() {
 					<View style={styles.row}> 
 						<Pressable onPress={init} style={[styles.btn, { borderColor: border }]}><Text style={[styles.btnText, { color: text }]}>Refresh</Text></Pressable>
 						<Pressable onPress={copyToken} style={[styles.btn, { borderColor: border }]}><Text style={[styles.btnText, { color: text }]}>Copy token</Text></Pressable>
-						<Pressable onPress={() => scheduleLocalTestNotification(3)} style={[styles.btn, { borderColor: border }]}><Text style={[styles.btnText, { color: text }]}>Send test</Text></Pressable>
+						<Pressable onPress={() => scheduleLocalTestNotification(3)} style={[styles.btn, { borderColor: border }]}><Text style={[styles.btnText, { color: text }]}>Local test</Text></Pressable>
+						<Pressable disabled={sending} onPress={sendExpoDirect} style={[styles.btn, { borderColor: border, opacity: sending ? 0.6 : 1 }]}>
+							<Text style={[styles.btnText, { color: text }]}>{sending ? 'Sending…' : 'Expo test'}</Text>
+						</Pressable>
+						<Pressable disabled={sending} onPress={sendServer} style={[styles.btn, { borderColor: border, opacity: sending ? 0.6 : 1 }]}>
+							<Text style={[styles.btnText, { color: text }]}>{sending ? 'Sending…' : 'Server test'}</Text>
+						</Pressable>
 					</View>
 				</View>
 			</ScrollView>

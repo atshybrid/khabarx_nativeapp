@@ -1,13 +1,17 @@
 import AnimatedArticle from '@/components/AnimatedArticle';
+import { ArticleListSkeleton } from '@/components/ui/ArticleListSkeleton';
 import { ArticleSkeleton } from '@/components/ui/ArticleSkeleton';
 import { Colors } from '@/constants/Colors';
 import { useCategory } from '@/context/CategoryContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import AnimatedAd from '../../components/AnimatedAd';
 // import { sampleArticles } from '@/data/sample-articles';
+import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { getNewsFeed, resolveEffectiveLanguage } from '@/services/api';
+import { on } from '@/services/events';
 import type { FeedItem } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 import LottieView from 'lottie-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LayoutChangeEvent, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -20,6 +24,7 @@ const NEWS_SAFE_MODE = (() => {
 const NewsScreen = () => {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
+  const { setTabBarVisible } = useTabBarVisibility();
   useEffect(() => {
     console.log('[NAV] ArticleScreen (news) mounted');
   }, []);
@@ -86,6 +91,15 @@ const NewsScreen = () => {
     loadNews();
   }, [loadNews]);
 
+  // Refresh news when global event is emitted (e.g., login/logout/language change)
+  useEffect(() => {
+    const off = on('news:refresh', () => {
+      if (__DEV__) try { console.log('[News] news:refresh event received → reloading'); } catch {}
+      loadNews();
+    });
+    return () => { try { off(); } catch {} };
+  }, [loadNews]);
+
   const handleSwipeUp = () => {
   if (activeIndex < items.length - 1) {
       const newIndex = activeIndex + 1;
@@ -118,7 +132,7 @@ const NewsScreen = () => {
       )}
       <View style={[styles.container, { backgroundColor: theme.background }]}>
         {loading && (
-          <ArticleSkeleton />
+          NEWS_SAFE_MODE ? <ArticleListSkeleton /> : <ArticleSkeleton />
         )}
         {!loading && !error && !NEWS_SAFE_MODE && items.map((it, index) => (
           it.type === 'news' ? (
@@ -166,12 +180,34 @@ const NewsScreen = () => {
           </View>
         )}
         {!loading && !error && items.length === 0 && (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-            <Text style={{ color: theme.text, opacity: 0.85, marginBottom: 12 }}>No news available.</Text>
-            <TouchableOpacity onPress={loadNews} style={{ backgroundColor: theme.tint, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}>
-              <Text style={{ color: '#fff', fontWeight: '600' }}>Reload</Text>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}
+            onPress={() => {
+              try { setTabBarVisible(true); } catch {}
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Open bottom navigation"
+          >
+            <LottieView
+              source={require('@/assets/lotti/Coming Soon.json')}
+              autoPlay
+              loop
+              style={{ width: 320, height: 320 }}
+            />
+            <Text style={{ marginTop: 6, fontSize: 13, color: theme.text, opacity: 0.6 }}>Tap anywhere to open navigation</Text>
+            <TouchableOpacity
+              onPress={() => {
+                try { setTabBarVisible(true); } catch {}
+                try { router.push('/language'); } catch {}
+              }}
+              style={{ marginTop: 16, backgroundColor: theme.tint, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Change language"
+            >
+              <Text style={{ color: '#fff', fontWeight: '700' }}>Change language</Text>
             </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
         )}
         {!loading && error && (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>

@@ -19,7 +19,15 @@
       "edgeToEdgeEnabled": true,
       "package": "com.amoghnya.khabarx",
       "googleServicesFile": "./google-services.json",
-      "softwareKeyboardLayoutMode": "pan"
+  "softwareKeyboardLayoutMode": "resize",
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -38,6 +46,8 @@
         }
       ],
       "expo-notifications",
+      "expo-camera",
+      "expo-media-library",
       [
         "expo-image-picker",
         {

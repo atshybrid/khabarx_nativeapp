@@ -1,6 +1,6 @@
 import * as Sharing from 'expo-sharing';
 import React, { useCallback, useImperativeHandle, useRef } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import { HrciIdCardFrontExact, HrciIdCardFrontProps } from './HrciIdCardFrontExact';
 
@@ -42,7 +42,7 @@ export interface HrciIdCardExportHandle {
  * Wrapper that renders the HRCI front card and provides high‑resolution JPEG export + share.
  * It renders a hidden high‑DPI card for capture to ensure print-friendly quality.
  */
-export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdCardExportProps>(({ previewWidth = 360, exportWidth = 1440, showActions = true, ...cardProps }, ref) => {
+export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdCardExportProps>(({ previewWidth = 360, exportWidth = 2160, showActions = true, ...cardProps }, ref) => {
   const shotRef = useRef<ViewShot>(null);
   const {
     widthInInches,
@@ -110,12 +110,20 @@ export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdC
     const uri = await onCapture();
     if (!uri) return;
     try {
-      // Dynamically import to avoid crashing when native module isn't present yet
+      // Preflight: only import expo-media-library if the native module exists in this dev client
+      const EMC: any = await import('expo-modules-core');
+      const NativeModulesProxy = EMC?.NativeModulesProxy ?? EMC?.default?.NativeModulesProxy;
+      const hasNative = !!(NativeModulesProxy?.ExpoMediaLibrary || NativeModulesProxy?.ExponentMediaLibrary);
+      if (!hasNative) {
+        throw new Error('MediaLibrary native module not available');
+      }
+
+      // Dynamically import after confirming native presence to avoid Metro unknown module errors
       const ML: any = await import('expo-media-library');
       const requestPermissionsAsync = ML?.requestPermissionsAsync ?? ML?.default?.requestPermissionsAsync;
       const saveToLibraryAsync = ML?.saveToLibraryAsync ?? ML?.default?.saveToLibraryAsync;
       if (!requestPermissionsAsync || !saveToLibraryAsync) {
-        throw new Error('MediaLibrary native module not available');
+        throw new Error('MediaLibrary JS API not available');
       }
       const { status } = await requestPermissionsAsync();
       if (status !== 'granted') {
@@ -126,8 +134,57 @@ export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdC
       Alert.alert('Saved', 'ID card saved to Photos.');
     } catch (e: any) {
       console.warn('Save to Photos failed', e);
-      // Helpful fallback if native module missing
-      Alert.alert('Save unavailable', 'The Save to Photos feature requires rebuilding the dev client with expo-media-library. Falling back to Share.');
+      // Fallbacks on Android: try Storage Access Framework to save to user-selected folder (e.g., Downloads)
+      if (Platform.OS === 'android') {
+        try {
+          const FS: any = await import('expo-file-system');
+          const SAF = FS?.StorageAccessFramework;
+          if (SAF) {
+            const perm = await SAF.requestDirectoryPermissionsAsync();
+            if (perm?.granted && perm.directoryUri) {
+              const filename = `HRCI_ID_Front_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}.jpg`;
+              const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
+              const destUri = await SAF.createFileAsync(perm.directoryUri, filename, 'image/jpeg');
+              await FS.writeAsStringAsync(destUri, base64, { encoding: FS.EncodingType.Base64 });
+              Alert.alert('Saved', 'ID card saved to the selected folder.');
+              return;
+            }
+          }
+        } catch (safErr) {
+          console.warn('SAF fallback failed', safErr);
+        }
+      }
+      // Last resort: share sheet
+      try {
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share ID Card (JPEG)', UTI: 'public.jpeg' });
+      } catch {}
+    }
+  }, [onCapture]);
+
+  const onSaveToFiles = useCallback(async () => {
+    if (Platform.OS !== 'android') {
+      Alert.alert('Not available', 'Save to Files is only available on Android here.');
+      return;
+    }
+    const uri = await onCapture();
+    if (!uri) return;
+    try {
+      const FS: any = await import('expo-file-system');
+      const SAF = FS?.StorageAccessFramework;
+      if (!SAF) throw new Error('Storage Access Framework API not available');
+      const perm = await SAF.requestDirectoryPermissionsAsync();
+      if (!perm?.granted || !perm.directoryUri) {
+        Alert.alert('Cancelled', 'No folder selected.');
+        return;
+      }
+      const filename = `HRCI_ID_Front_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}.jpg`;
+      const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
+      const destUri = await SAF.createFileAsync(perm.directoryUri, filename, 'image/jpeg');
+      await FS.writeAsStringAsync(destUri, base64, { encoding: FS.EncodingType.Base64 });
+      Alert.alert('Saved', 'ID card saved to the selected folder.');
+    } catch (e: any) {
+      console.warn('Save to Files failed', e);
       try {
         const canShare = await Sharing.isAvailableAsync();
         if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share ID Card (JPEG)', UTI: 'public.jpeg' });
@@ -178,8 +235,8 @@ export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdC
           style={[
             styles.captureWrapper,
             doPad
-              ? { width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', overflow: fitMode === 'cover' ? 'hidden' : 'visible' as any }
-              : { width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#ffffff' },
+              ? { width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', overflow: fitMode === 'cover' ? 'hidden' : 'visible' as any }
+              : { width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#F3F4F6' },
           ]}
         >
           {doPad ? (
@@ -227,6 +284,14 @@ export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdC
           <TouchableOpacity style={[styles.actionBtn, styles.download]} onPress={onDownload}>
             <Text style={styles.actionText}>Download JPEG</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionBtn, styles.save]} onPress={onSaveToPhotos}>
+            <Text style={styles.actionText}>Save to Photos</Text>
+          </TouchableOpacity>
+          {Platform.OS === 'android' && (
+            <TouchableOpacity style={[styles.actionBtn, styles.save]} onPress={onSaveToFiles}>
+              <Text style={styles.actionText}>Save to Files</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={[styles.actionBtn, styles.share]} onPress={onShare}>
             <Text style={styles.actionText}>Share</Text>
           </TouchableOpacity>
@@ -263,6 +328,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   download: { backgroundColor: '#111827' },
+  save: { backgroundColor: '#10b981' },
   share: { backgroundColor: '#0ea5e9' },
   actionText: { color: '#fff', fontWeight: '800' },
   exportInfo: { marginTop: 8, fontSize: 12, color: '#6b7280', fontWeight: '600', textAlign: 'center' },

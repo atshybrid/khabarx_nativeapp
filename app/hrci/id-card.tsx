@@ -9,6 +9,8 @@ import {
   Alert,
   Animated,
   Image,
+  NativeModules,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -21,6 +23,47 @@ import { HrciIdCardExport, HrciIdCardExportHandle } from '../../components/HrciI
 import { HrciIdCardFrontExact } from '../../components/HrciIdCardFrontExact';
 import { request } from '../../services/http';
 
+async function hasMediaLibraryNative(): Promise<boolean> {
+  try {
+    const EMC: any = await import('expo-modules-core');
+    const NativeModulesProxy = EMC?.NativeModulesProxy ?? EMC?.default?.NativeModulesProxy;
+    return !!(NativeModulesProxy?.ExpoMediaLibrary || NativeModulesProxy?.ExponentMediaLibrary);
+  } catch {
+    return false;
+  }
+}
+
+async function onBackSaveToFiles(ref: React.RefObject<ViewShot | null>) {
+  const uri = await onBackCapture(ref);
+  if (!uri) return;
+  try {
+    const FS: any = await import('expo-file-system');
+    const SAF = FS?.StorageAccessFramework;
+    if (!SAF) {
+      // Graceful fallback if SAF isn't available: share the image instead
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Back ID Card (JPEG)', UTI: 'public.jpeg' });
+      else Alert.alert('Not supported', 'Save to Files is not available on this device. Use Share instead.');
+      return;
+    }
+    const perm = await SAF.requestDirectoryPermissionsAsync();
+    if (!perm?.granted || !perm.directoryUri) {
+      Alert.alert('Cancelled', 'No folder selected.');
+      return;
+    }
+    const filename = `HRCI_ID_Back_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}.jpg`;
+    const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
+    const destUri = await SAF.createFileAsync(perm.directoryUri, filename, 'image/jpeg');
+    await FS.writeAsStringAsync(destUri, base64, { encoding: FS.EncodingType.Base64 });
+    Alert.alert('Saved', 'Back ID card saved to the selected folder.');
+  } catch (e: any) {
+    console.warn('Back save to Files failed', e);
+    try {
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Back ID Card (JPEG)', UTI: 'public.jpeg' });
+    } catch {}
+  }
+}
 
 type Profile = {
   id?: string;
@@ -47,6 +90,8 @@ export default function HrciIdCardScreen() {
   const [idCardData, setIdCardData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'front' | 'back'>('front');
+  const [canSAF, setCanSAF] = useState<boolean>(false);
+  const [hasML, setHasML] = useState<boolean>(false);
   // Responsive width: scale down to fit mobile screens, never exceed design base (720) nor stretch too small
   const { width: screenWidth } = useWindowDimensions();
   const exactCardWidth = Math.max(Math.min(screenWidth - 32, 720), 320); // clamp for readability
@@ -82,6 +127,25 @@ export default function HrciIdCardScreen() {
 
   // Fetch composite ID card data AFTER membership/profile load
   useEffect(() => {
+    // Detect Storage Access Framework availability on Android
+    (async () => {
+      if (Platform.OS === 'android') {
+        try {
+          const FS: any = await import('expo-file-system');
+          setCanSAF(!!FS?.StorageAccessFramework);
+        } catch {
+          setCanSAF(false);
+        }
+      }
+      // Detect MediaLibrary native module availability
+      try {
+        const ok = await hasMediaLibraryNative();
+        setHasML(ok);
+      } catch {
+        setHasML(false);
+      }
+    })();
+
     const loadIdCard = async () => {
       try {
         const start = Date.now();
@@ -268,12 +332,11 @@ export default function HrciIdCardScreen() {
               <HrciIdCardExport
                 ref={exportRef}
                 previewWidth={exactCardWidth}
-                // Target physical size: 85mm x 55mm (portrait). Short edge = 55mm.
-                widthInInches={55 / 25.4}
+                // CR80 wallet card: 3.375in × 2.125in @ 600 DPI
+                widthInInches={2.125}
                 dpi={600}
-                // Custom aspect for 85mm x 55mm
-                targetAspect={85 / 55}
-                fitMode="cover"
+                padToCR80
+                fitMode="pad"
                 showExportInfo
                 exportFormat="jpg"
                 jpegQuality={1}
@@ -337,19 +400,24 @@ export default function HrciIdCardScreen() {
 
             {/* Download/Share Actions (fixed at bottom) */}
             <View style={styles.actionsContainerFixed}>
-              <TouchableOpacity 
+              {/* Save Photo (current side) */}
+              <TouchableOpacity
                 style={styles.actionBtn}
-                onPress={() => {
-                  if (exportRef.current?.saveToPhotos) {
-                    exportRef.current.saveToPhotos();
-                  } else if (exportRef.current?.download) {
-                    exportRef.current.download();
+                onPress={async () => {
+                  if (hasML && exportRef.current?.saveToPhotos) {
+                    await exportRef.current.saveToPhotos();
+                  } else if (Platform.OS === 'android' && canSAF) {
+                    await onFrontSaveToFiles(frontShotRef);
+                  } else {
+                    await shareSingle(frontShotRef, 'Share Front ID Card (JPEG)');
                   }
                 }}
               >
-                <MaterialCommunityIcons name="download" size={20} color="#ffffff" />
-                <Text style={styles.actionText}>Save to Photos</Text>
+                <MaterialCommunityIcons name={'download' as any} size={20} color="#ffffff" />
+                <Text style={styles.actionText}>Save Photo</Text>
               </TouchableOpacity>
+
+              {/* Share (two images when possible; falls back internally) */}
               <TouchableOpacity 
                 style={styles.actionBtn}
                 onPress={() => onShareTwoImages(frontShotRef, backShotRef, bothShotRef)}
@@ -416,13 +484,24 @@ export default function HrciIdCardScreen() {
 
             {/* Download/Share Actions (fixed at bottom) */}
             <View style={styles.actionsContainerFixed}>
-              <TouchableOpacity 
+              {/* Save Photo (current side) */}
+              <TouchableOpacity
                 style={styles.actionBtn}
-                onPress={() => onBackSaveToPhotos(backShotRef)}
+                onPress={async () => {
+                  if (hasML) {
+                    await onBackSaveToPhotos(backShotRef);
+                  } else if (Platform.OS === 'android' && canSAF) {
+                    await onBackSaveToFiles(backShotRef);
+                  } else {
+                    await shareSingle(backShotRef, 'Share Back ID Card (JPEG)');
+                  }
+                }}
               >
-                <MaterialCommunityIcons name="download" size={20} color="#ffffff" />
-                <Text style={styles.actionText}>Save to Photos</Text>
+                <MaterialCommunityIcons name={'download' as any} size={20} color="#ffffff" />
+                <Text style={styles.actionText}>Save Photo</Text>
               </TouchableOpacity>
+
+              {/* Share (two images when possible; falls back internally) */}
               <TouchableOpacity 
                 style={styles.actionBtn}
                 onPress={() => onShareTwoImages(frontShotRef, backShotRef, bothShotRef)}
@@ -704,6 +783,7 @@ function IdCardBack({ width, secondLogoUrl, headOfficeAddress, qrValue }: { widt
 
 // Back capture helpers (same print sizing and fit as front: 85mm x 55mm @ 600DPI, cover)
 const BACK_WIDTH_IN_INCHES = 55 / 25.4;
+// Increase hidden capture DPI to improve shared image quality
 const BACK_DPI = 600;
 const BASE_ASPECT = 1.42;
 const TARGET_ASPECT = 85 / 55;
@@ -715,22 +795,19 @@ function BackHiddenCapture({ shotRef, secondLogoUrl, headOfficeAddress, qrValue 
   const doPad = Math.abs(TARGET_ASPECT - BASE_ASPECT) > 0.001;
   const exportHeightPx = Math.round(effectiveExportWidth * (doPad ? TARGET_ASPECT : BASE_ASPECT));
 
-  // cover fit
-  const innerW0 = effectiveExportWidth;
-  const innerH0 = Math.round(effectiveExportWidth * BASE_ASPECT);
-  const scale = exportHeightPx / innerH0;
-  const scaledW = Math.round(innerW0 * scale);
-  const scaledH = Math.round(innerH0 * scale);
+  // pad (contain) fit: show full card without cropping; center within target aspect
+  const innerW = effectiveExportWidth;
+  const innerH = Math.round(effectiveExportWidth * BASE_ASPECT);
 
   return (
     <View style={{ position: 'absolute', left: -9999, top: -9999, width: 1, height: 1, opacity: 0 }}>
       <ViewShot
         ref={shotRef}
         options={{ format: 'jpg', quality: 1, result: 'tmpfile' }}
-        style={{ width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+        style={{ width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' }}
       >
-        <View style={{ width: scaledW, height: scaledH, alignItems: 'center', justifyContent: 'center' }}>
-          <IdCardBack width={scaledW} secondLogoUrl={secondLogoUrl} headOfficeAddress={headOfficeAddress} qrValue={qrValue} />
+        <View style={{ width: innerW, height: innerH, alignItems: 'center', justifyContent: 'center' }}>
+          <IdCardBack width={innerW} secondLogoUrl={secondLogoUrl} headOfficeAddress={headOfficeAddress} qrValue={qrValue} />
         </View>
       </ViewShot>
     </View>
@@ -757,23 +834,20 @@ function FrontHiddenCapture(props: {
   const doPad = Math.abs(TARGET_ASPECT - BASE_ASPECT) > 0.001;
   const exportHeightPx = Math.round(effectiveExportWidth * (doPad ? TARGET_ASPECT : BASE_ASPECT));
 
-  // cover fit
-  const innerW0 = effectiveExportWidth;
-  const innerH0 = Math.round(effectiveExportWidth * BASE_ASPECT);
-  const scale = exportHeightPx / innerH0;
-  const scaledW = Math.round(innerW0 * scale);
-  const scaledH = Math.round(innerH0 * scale);
+  // pad (contain) fit: show full card without cropping; center within target aspect
+  const innerW = effectiveExportWidth;
+  const innerH = Math.round(effectiveExportWidth * BASE_ASPECT);
 
   return (
     <View style={{ position: 'absolute', left: -9999, top: -9999, width: 1, height: 1, opacity: 0 }}>
       <ViewShot
         ref={props.shotRef}
         options={{ format: 'jpg', quality: 1, result: 'tmpfile' }}
-        style={{ width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+        style={{ width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' }}
       >
-        <View style={{ width: scaledW, height: scaledH, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: innerW, height: innerH, alignItems: 'center', justifyContent: 'center' }}>
           <HrciIdCardFrontExact
-            width={scaledW}
+            width={innerW}
             memberName={props.memberName}
             designation={props.designation}
             cellName={props.cellName}
@@ -802,15 +876,53 @@ async function onBackCapture(ref: React.RefObject<ViewShot | null>): Promise<str
   }
 }
 
+async function onFrontSaveToFiles(ref: React.RefObject<ViewShot | null>) {
+  const uri = await onBackCapture(ref);
+  if (!uri) return;
+  try {
+    const FS: any = await import('expo-file-system');
+    const SAF = FS?.StorageAccessFramework;
+    if (!SAF) {
+      // Graceful fallback if SAF isn't available: share the image instead
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Front ID Card (JPEG)', UTI: 'public.jpeg' });
+      else Alert.alert('Not supported', 'Save to Files is not available on this device. Use Share instead.');
+      return;
+    }
+    const perm = await SAF.requestDirectoryPermissionsAsync();
+    if (!perm?.granted || !perm.directoryUri) {
+      Alert.alert('Cancelled', 'No folder selected.');
+      return;
+    }
+    const filename = `HRCI_ID_Front_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}.jpg`;
+    const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
+    const destUri = await SAF.createFileAsync(perm.directoryUri, filename, 'image/jpeg');
+    await FS.writeAsStringAsync(destUri, base64, { encoding: FS.EncodingType.Base64 });
+    Alert.alert('Saved', 'Front ID card saved to the selected folder.');
+  } catch (e: any) {
+    console.warn('Front save to Files failed', e);
+    try {
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Front ID Card (JPEG)', UTI: 'public.jpeg' });
+    } catch {}
+  }
+}
+
 
 async function onBackSaveToPhotos(ref: React.RefObject<ViewShot | null>) {
   const uri = await onBackCapture(ref);
   if (!uri) return;
   try {
+    // Preflight check for native module presence
+    const EMC: any = await import('expo-modules-core');
+    const NativeModulesProxy = EMC?.NativeModulesProxy ?? EMC?.default?.NativeModulesProxy;
+    const hasNative = !!(NativeModulesProxy?.ExpoMediaLibrary || NativeModulesProxy?.ExponentMediaLibrary);
+    if (!hasNative) throw new Error('MediaLibrary native module not available');
+
     const ML: any = await import('expo-media-library');
     const requestPermissionsAsync = ML?.requestPermissionsAsync ?? ML?.default?.requestPermissionsAsync;
     const saveToLibraryAsync = ML?.saveToLibraryAsync ?? ML?.default?.saveToLibraryAsync;
-    if (!requestPermissionsAsync || !saveToLibraryAsync) throw new Error('MediaLibrary native module not available');
+    if (!requestPermissionsAsync || !saveToLibraryAsync) throw new Error('MediaLibrary JS API not available');
     const { status } = await requestPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission required', 'Allow Photos/Media permission to save the image.');
@@ -820,7 +932,27 @@ async function onBackSaveToPhotos(ref: React.RefObject<ViewShot | null>) {
     Alert.alert('Saved', 'Back ID card saved to Photos.');
   } catch (e: any) {
     console.warn('Back save to Photos failed', e);
-    Alert.alert('Save unavailable', 'The Save to Photos feature requires rebuilding the dev client with expo-media-library. Falling back to Share.');
+    // Android fallback: Storage Access Framework to let user pick folder (e.g., Downloads)
+    if (Platform.OS === 'android') {
+      try {
+        const FS: any = await import('expo-file-system');
+        const SAF = FS?.StorageAccessFramework;
+        if (SAF) {
+          const perm = await SAF.requestDirectoryPermissionsAsync();
+          if (perm?.granted && perm.directoryUri) {
+            const filename = `HRCI_ID_Back_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}.jpg`;
+            const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
+            const destUri = await SAF.createFileAsync(perm.directoryUri, filename, 'image/jpeg');
+            await FS.writeAsStringAsync(destUri, base64, { encoding: FS.EncodingType.Base64 });
+            Alert.alert('Saved', 'Back ID card saved to the selected folder.');
+            return;
+          }
+        }
+      } catch (safErr) {
+        console.warn('Back SAF fallback failed', safErr);
+      }
+    }
+    // Last resort: share sheet
     try {
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Back ID Card (JPEG)', UTI: 'public.jpeg' });
@@ -853,25 +985,22 @@ function BothHiddenCapture(props: {
   const doPad = Math.abs(TARGET_ASPECT - BASE_ASPECT) > 0.001;
   const exportHeightPx = Math.round(effectiveExportWidth * (doPad ? TARGET_ASPECT : BASE_ASPECT));
 
-  // cover fit dimensions for inner cards
-  const innerW0 = effectiveExportWidth;
-  const innerH0 = Math.round(effectiveExportWidth * BASE_ASPECT);
-  const scale = exportHeightPx / innerH0;
-  const scaledW = Math.round(innerW0 * scale);
-  const scaledH = Math.round(innerH0 * scale);
+  // pad (contain) for both halves: keep full front/back without crop
+  const innerW = effectiveExportWidth;
+  const innerH = Math.round(effectiveExportWidth * BASE_ASPECT);
 
   return (
     <View style={{ position: 'absolute', left: -9999, top: -9999, width: 1, height: 1, opacity: 0 }}>
       <ViewShot
         ref={props.shotRef}
         options={{ format: 'jpg', quality: 1, result: 'tmpfile' }}
-        style={{ width: effectiveExportWidth, height: exportHeightPx * 2, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'flex-start', overflow: 'hidden' }}
+        style={{ width: effectiveExportWidth, height: exportHeightPx * 2, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'flex-start' }}
       >
-        {/* Front (cover fit) */}
-        <View style={{ width: effectiveExportWidth, height: exportHeightPx, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-          <View style={{ width: scaledW, height: scaledH, alignItems: 'center', justifyContent: 'center' }}>
+        {/* Front (pad/contain) */}
+        <View style={{ width: effectiveExportWidth, height: exportHeightPx, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: innerW, height: innerH, alignItems: 'center', justifyContent: 'center' }}>
             <HrciIdCardFrontExact
-              width={scaledW}
+              width={innerW}
               memberName={props.memberName}
               designation={props.designation}
               cellName={props.cellName}
@@ -886,10 +1015,10 @@ function BothHiddenCapture(props: {
           </View>
         </View>
 
-        {/* Back (cover fit) */}
-        <View style={{ width: effectiveExportWidth, height: exportHeightPx, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-          <View style={{ width: scaledW, height: scaledH, alignItems: 'center', justifyContent: 'center' }}>
-            <IdCardBack width={scaledW} secondLogoUrl={props.secondLogoUrl} headOfficeAddress={props.headOfficeAddress} qrValue={props.qrValue} />
+        {/* Back (pad/contain) */}
+        <View style={{ width: effectiveExportWidth, height: exportHeightPx, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: innerW, height: innerH, alignItems: 'center', justifyContent: 'center' }}>
+            <IdCardBack width={innerW} secondLogoUrl={props.secondLogoUrl} headOfficeAddress={props.headOfficeAddress} qrValue={props.qrValue} />
           </View>
         </View>
       </ViewShot>
@@ -918,26 +1047,34 @@ async function onShareTwoImages(
     const backUri = ensureFileUri(backUriRaw);
 
     if (frontUri && backUri) {
-      // Dynamically import react-native-share at runtime (only if available in Dev Client)
+      // Try react-native-share for multi-image share if available
       let RNShare: any = null;
       try {
-        const mod = await import('react-native-share');
-        RNShare = (mod as any)?.default ?? mod;
+        // Strict native preflight: only attempt dynamic import if the native module exists
+        const hasNative = !!(NativeModules && (NativeModules as any).RNShare);
+        if (hasNative) {
+          const mod = await import('react-native-share');
+          RNShare = (mod as any)?.default ?? mod;
+        }
       } catch {}
 
       if (RNShare?.open) {
-        await RNShare.open({
-          urls: [frontUri, backUri],
-          type: 'image/*',
-          showAppsToView: true,
-          failOnCancel: false,
-          title: 'Share ID Card (Front & Back)'
-        });
-        return;
+        try {
+          await RNShare.open({
+            urls: [frontUri, backUri],
+            type: 'image/*',
+            showAppsToView: true,
+            failOnCancel: false,
+            title: 'Share ID Card (Front & Back)'
+          });
+          return;
+        } catch (e) {
+          console.warn('react-native-share open failed, falling back to combined', e);
+        }
       }
     }
 
-    // If either capture failed, fall back to sharing combined image
+    // Fallback: share combined tall image via expo-sharing
     await onShareBoth(bothRef);
   } catch (e: any) {
     console.warn('Multi-image share failed, falling back to combined image', e);
@@ -960,3 +1097,22 @@ async function onShareBoth(ref: React.RefObject<ViewShot | null>) {
     Alert.alert('Share failed', e?.message ?? String(e));
   }
 }
+
+// Share a single captured image (used as a fallback for Save Photo when no Photos/Files)
+async function shareSingle(ref: React.RefObject<ViewShot | null>, title: string) {
+  try {
+    const uri = await ref.current?.capture?.();
+    if (!uri) return;
+    const available = await Sharing.isAvailableAsync();
+    if (available) {
+      await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: title, UTI: 'public.jpeg' });
+    } else {
+      Alert.alert('Sharing not available', 'Your device does not support the native share sheet.');
+    }
+  } catch (e: any) {
+    console.warn('Share single failed', e);
+    Alert.alert('Share failed', e?.message ?? String(e));
+  }
+}
+
+// Save Both helpers removed as UI now shows only Save Photo and Share

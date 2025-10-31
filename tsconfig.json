@@ -34,7 +34,8 @@
     "types",
     "scripts/**/*.ts",
     ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+    "expo-env.d.ts",
+    "temp_fetch_articlepage.tsx"
   ],
   "exclude": [
     "node_modules",

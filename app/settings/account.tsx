@@ -1,16 +1,21 @@
 import SettingsRow from '@/components/settings/SettingsRow';
 import { Colors } from '@/constants/Colors';
-import { LANGUAGES } from '@/constants/languages';
-import { getUserPreferences, pickPreferenceLanguage, pickPreferenceLocation } from '@/services/api';
+import { Language, LANGUAGES } from '@/constants/languages';
+import { afterPreferencesUpdated, getLanguages, getUserPreferences, pickPreferenceLanguage, pickPreferenceLocation, resolveEffectiveLanguage, updatePreferences } from '@/services/api';
 import { checkPostArticleAccess, isCitizenReporter, loadTokens, logoutAndClearProfile } from '@/services/auth';
-import { on } from '@/services/events';
+import { emit, on } from '@/services/events';
+
 import { getMembershipProfile, MembershipProfileData } from '@/services/membership';
 import { Feather } from '@expo/vector-icons';
+import { BottomSheetFlatList, BottomSheetModal, BottomSheetModalProvider, BottomSheetView } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Image, LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, Text, UIManager, useWindowDimensions, View } from 'react-native';
 import { HrciIdCardFrontExact } from '../../components/HrciIdCardFrontExact';
+
+import LottieLoader from '@/components/ui/LottieLoader';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Enable LayoutAnimation only on Old Architecture (Bridged) Android.
 // On New Architecture (Fabric), this API is a no-op and logs a warning.
@@ -33,6 +38,16 @@ export default function AccountScreen() {
   const [roleReporter, setRoleReporter] = useState<boolean>(false);
   const [developerMode, setDeveloperMode] = useState<boolean>(false);
   const [tokenRole, setTokenRole] = useState<string>('');
+  // Debug: surface language storage sources
+  const [selectedLangObj, setSelectedLangObj] = useState<any>(null);
+  const [localLangObj, setLocalLangObj] = useState<any>(null);
+  const [prefLangObj, setPrefLangObj] = useState<any>(null);
+  const [effectiveLangObj, setEffectiveLangObj] = useState<any>(null);
+  // Bottom sheet state
+  const bottomSheetRef = React.useRef<BottomSheetModal>(null);
+  const [langList, setLangList] = useState<Language[]>([]);
+  const [loadingLangList, setLoadingLangList] = useState<boolean>(false);
+  const [updatingLanguage, setUpdatingLanguage] = useState<boolean>(false);
   // Profile welcome card removed per request
 
   const fetchPrefs = useCallback(async () => {
@@ -43,7 +58,12 @@ export default function AccountScreen() {
       const loc = pickPreferenceLocation(prefs);
       if (pl) {
         setLangName(pl.name);
-        try { await AsyncStorage.setItem('selectedLanguage', JSON.stringify(pl)); } catch {}
+        try {
+          await AsyncStorage.setItem('selectedLanguage', JSON.stringify(pl));
+          // Also mirror to language_local so member/admin override stays consistent
+          await AsyncStorage.setItem('language_local', JSON.stringify(pl));
+        } catch {}
+        setPrefLangObj(pl);
       } else {
         const raw = await AsyncStorage.getItem('selectedLanguage');
         if (raw) {
@@ -51,6 +71,7 @@ export default function AccountScreen() {
             const j = JSON.parse(raw);
             if (j && typeof j === 'object' && j.name) {
               setLangName(j.name);
+              setSelectedLangObj(j);
             } else if (typeof j === 'string') {
               const found = LANGUAGES.find(l => l.code === j);
               if (found) setLangName(found.name);
@@ -62,10 +83,10 @@ export default function AccountScreen() {
           }
         }
       }
-      // Prefer local language override for MEMBER/HRCI_ADMIN
+      // Prefer local language override for MEMBER/HRCI_MEMBER/HRCI_ADMIN
       try {
         const roleUC = (t?.user?.role || '').toString().trim().toUpperCase();
-        if (roleUC === 'MEMBER' || roleUC === 'HRCI_ADMIN') {
+        if (roleUC === 'MEMBER' || roleUC === 'HRCI_MEMBER' || roleUC === 'HRCI_ADMIN') {
           const ll = await AsyncStorage.getItem('language_local');
           if (ll) {
             try {
@@ -75,6 +96,7 @@ export default function AccountScreen() {
                 const found = LANGUAGES.find(l => l.code === obj.code);
                 if (found) setLangName(found.name);
               }
+              setLocalLangObj(obj);
             } catch {}
           }
         }
@@ -93,6 +115,13 @@ export default function AccountScreen() {
           setLocation(l || '');
         }
       }
+    } catch {}
+    // Update debug AsyncStorage mirrors regardless of role
+    try {
+      const rawSel = await AsyncStorage.getItem('selectedLanguage');
+      if (rawSel) { try { setSelectedLangObj(JSON.parse(rawSel)); } catch { setSelectedLangObj(rawSel); } }
+      const rawLocal = await AsyncStorage.getItem('language_local');
+      if (rawLocal) { try { setLocalLangObj(JSON.parse(rawLocal)); } catch { setLocalLangObj(rawLocal); } }
     } catch {}
   }, []);
 
@@ -116,6 +145,8 @@ export default function AccountScreen() {
       } catch {}
       try { setRoleReporter(await isCitizenReporter()); } catch {}
       await refreshMembershipProfile();
+  // Resolve effective language (merged view)
+  try { const eff = await resolveEffectiveLanguage(); setEffectiveLangObj(eff); } catch {}
       // Initialize developer mode from env/AsyncStorage
       try {
         const raw = String(process.env.EXPO_PUBLIC_DEVELOPER_MODE ?? '').toLowerCase();
@@ -160,17 +191,33 @@ export default function AccountScreen() {
           onPress={async () => {
             if (loggedIn) {
               try {
-                await logoutAndClearProfile();
+                Alert.alert(
+                  'Logout',
+                  'Are you sure you want to logout?',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Logout',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await logoutAndClearProfile();
+                        } catch {}
+                        // Reset local UI state
+                        try {
+                          setMp(null);
+                          setTokenRole('');
+                          setLocExpanded(false);
+                          setPhotoVersion(0);
+                        } catch {}
+                        // Navigate to language (existing behavior)
+                        try { router.replace('/language'); } catch {}
+                      },
+                    },
+                  ],
+                  { cancelable: true }
+                );
               } catch {}
-              // Reset local UI state
-              try {
-                setMp(null);
-                setTokenRole('');
-                setLocExpanded(false);
-                setPhotoVersion(0);
-              } catch {}
-              // Navigate to language (existing behavior)
-              router.replace('/language');
             } else {
               router.push('/auth/login');
             }
@@ -190,8 +237,73 @@ export default function AccountScreen() {
     try { Alert.alert('Developer mode', next ? 'Enabled' : 'Disabled'); } catch {}
   };
 
+  const formatLang = (x: any) => {
+    try {
+      if (!x) return '—';
+      const obj = typeof x === 'string' ? JSON.parse(x) : x;
+      const name = obj?.nativeName || obj?.name || '';
+      const code = obj?.code || '';
+      const id = obj?.id || '';
+      const parts = [name && `${name}`, code && `(${code})`, id && `id=${id}`].filter(Boolean);
+      return parts.length ? parts.join(' ') : JSON.stringify(obj);
+    } catch {
+      return String(x);
+    }
+  };
+
+  const openLanguageSheet = async () => {
+    try {
+      setLoadingLangList(true);
+      const list = await getLanguages();
+      setLangList(list || LANGUAGES);
+    } catch {
+      setLangList(LANGUAGES);
+    } finally {
+      setLoadingLangList(false);
+      try { bottomSheetRef.current?.present(); } catch {}
+    }
+  };
+
+  const handleSelectLanguage = async (language: Language) => {
+    if (!language) return;
+    // Update UI immediately
+    setLangName(language.name);
+    setSelectedLangObj(language);
+    setLocalLangObj(language);
+    setUpdatingLanguage(true);
+    try {
+      await AsyncStorage.setItem('selectedLanguage', JSON.stringify(language));
+      await AsyncStorage.setItem('language_local', JSON.stringify(language));
+      // Mirror split keys for compatibility with other code paths
+      await AsyncStorage.multiSet([
+        ['language_local_id', String(language.id)],
+        ['language_local_code', String(language.code)],
+        ['language_local_name', String(language.name || language.nativeName || '')],
+      ]);
+      if (loggedIn) {
+        try {
+          await updatePreferences({ languageId: language.id, languageCode: language.code });
+          await afterPreferencesUpdated({ languageIdChanged: language.id, languageCode: language.code });
+        } catch (e:any) {
+          try { Alert.alert('Language', e?.message || 'Failed to update on server.'); } catch {}
+        }
+      } else {
+        // Even for guests, refresh language-dependent caches (news, etc.)
+        try { await afterPreferencesUpdated({ languageIdChanged: String(language.id), languageCode: language.code }); } catch {}
+      }
+      // Resolve effective language after change
+      try { const eff = await resolveEffectiveLanguage(); setEffectiveLangObj(eff); } catch {}
+      // Ask News screen to refresh feed immediately
+      try { emit('news:refresh', { reason: 'language' } as any); } catch {}
+      try { bottomSheetRef.current?.dismiss(); } catch {}
+    } finally {
+      setUpdatingLanguage(false);
+    }
+  };
+
   return (
-    <View style={styles.safe}>
+  <BottomSheetModalProvider>
+  <SafeAreaView style={styles.safe}>
       {/* App Bar */}
       <View style={styles.appBar}>
         <Pressable onLongPress={toggleDeveloperMode} delayLongPress={600} hitSlop={8}>
@@ -206,8 +318,9 @@ export default function AccountScreen() {
           // Use user.role, fallback to membership.level, then tokens role; normalize by trimming and uppercasing
           const roleRaw = (mp?.user?.role || mp?.membership?.level || tokenRole || '').toString();
           const roleUC = roleRaw.trim().toUpperCase();
-          // Only hide top user card for exact roles: MEMBER or HRCI_ADMIN
-          const isMemberOrAdmin = roleUC === 'MEMBER' || roleUC === 'HRCI_ADMIN';
+          const isAdmin = roleUC === 'HRCI_ADMIN' || roleUC === 'SUPERADMIN';
+          // Only hide top user card for exact roles: MEMBER/HRCI_MEMBER or HRCI_ADMIN
+          const isMemberOrAdmin = roleUC === 'MEMBER' || roleUC === 'HRCI_MEMBER' || roleUC === 'HRCI_ADMIN';
           if (__DEV__) {
             try { console.log('[Account] Role resolution', { userRole: mp?.user?.role, membershipLevel: mp?.membership?.level, tokenRole, roleUC, isMemberOrAdmin }); } catch {}
           }
@@ -235,6 +348,16 @@ export default function AccountScreen() {
 
             return (
               <View style={styles.profileCard}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: Colors.light.primary }}>HRCI Member & Admin</Text>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    if (isAdmin) router.push('/hrci/admin' as any);
+                    else router.push('/hrci' as any);
+                  }}
+                  style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
+                >
                 <HrciIdCardFrontExact
                   width={cardWidth}
                   memberName={memberName}
@@ -246,13 +369,16 @@ export default function AccountScreen() {
                   logoUri={logoUri}
                   photoUri={photoUri}
                 />
+                </Pressable>
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-                  <Pressable
-                    onPress={() => router.push('/hrci/id-card' as any)}
-                    style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.8 }]}
-                  >
-                    <Text style={styles.primaryBtnText}>View ID Card</Text>
-                  </Pressable>
+                  {!isAdmin && (
+                    <Pressable
+                      onPress={() => router.push('/hrci/id-card' as any)}
+                      style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.8 }]}
+                    >
+                      <Text style={styles.primaryBtnText}>View ID Card</Text>
+                    </Pressable>
+                  )}
                   <Pressable
                     onPress={async () => {
                       const res = await checkPostArticleAccess();
@@ -328,13 +454,22 @@ export default function AccountScreen() {
 
         {/* Preferences section */}
         <Text style={styles.sectionTitle}>Preferences</Text>
+        {developerMode ? (
+          <View style={styles.card}>
+            <Text style={[styles.locTitle, { marginBottom: 6 }]}>Language Debug</Text>
+            <Text style={styles.locValue}>selectedLanguage: {formatLang(selectedLangObj)}</Text>
+            <Text style={styles.locValue}>language_local: {formatLang(localLangObj)}</Text>
+            <Text style={styles.locValue}>prefs (server): {formatLang(prefLangObj)}</Text>
+            <Text style={styles.locValue}>effective: {formatLang(effectiveLangObj)}</Text>
+          </View>
+        ) : null}
         {/* Language */}
         <View style={styles.card}>
           <SettingsRow
             icon={<Feather name="globe" size={20} color={Colors.light.primary} />}
             title="Language"
             subtitle={langName || 'Select your app language'}
-            onPress={() => router.push('/language')}
+            onPress={openLanguageSheet}
           />
         </View>
 
@@ -378,7 +513,52 @@ export default function AccountScreen() {
         ) : null}
 
       </ScrollView>
-    </View>
+      {/* Language bottom sheet */}
+      <BottomSheetModal ref={bottomSheetRef} snapPoints={["40%", "80%"]} enablePanDownToClose>
+        <BottomSheetView style={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: 12, flex: 1 }}>
+          <Text style={{ fontWeight: '900', color: '#111', marginBottom: 10 }}>Choose Language</Text>
+          {loadingLangList ? (
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 24 }}>
+              <LottieLoader size={72} />
+              <Text style={{ color: '#6b7280', marginTop: 8 }}>Loading…</Text>
+            </View>
+          ) : (
+            <BottomSheetFlatList
+              data={langList}
+              keyExtractor={(l:any, i:number) => String(l?.id ?? l?.code ?? l?.name ?? i)}
+              contentContainerStyle={{ gap: 8, paddingBottom: 24 }}
+              renderItem={({ item: l }: { item: Language }) => (
+                <Pressable onPress={() => handleSelectLanguage(l)} style={({ pressed }) => [styles.langItem, pressed && { opacity: 0.7 }] }>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={[styles.langDot, { backgroundColor: l.color || '#ddd' }]} />
+                      <Text style={styles.langNative}>{l.nativeName || l.name}</Text>
+                      <Text style={styles.langCode}>{l.code?.toUpperCase()}</Text>
+                    </View>
+                    {Boolean((l?.name || '').toLowerCase() === (langName || '').toLowerCase()) ? (
+                      <Feather name="check" size={18} color={Colors.light.primary} />
+                    ) : null}
+                  </View>
+                  <Text style={styles.langEnglish}>{l.name}</Text>
+                </Pressable>
+              )}
+            />
+          )}
+        </BottomSheetView>
+      </BottomSheetModal>
+
+      {/* Overlay during update */}
+      {updatingLanguage && (
+        <View style={styles.overlayFull} pointerEvents="auto">
+          <View style={styles.overlayCardCenter}>
+            <LottieLoader size={72} />
+            <Text style={{ marginTop: 8, color: '#111', fontWeight: '700' }}>Applying language…</Text>
+          </View>
+        </View>
+      )}
+
+    </SafeAreaView>
+    </BottomSheetModalProvider>
   );
 }
 
@@ -406,4 +586,11 @@ const styles = StyleSheet.create({
   changeBtn: { marginTop: 8, alignSelf: 'flex-start', backgroundColor: Colors.light.secondary, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12 },
   changeBtnTxt: { color: '#fff', fontWeight: '800' },
   // Removed avatar styles with welcome card
+  langItem: { paddingVertical: 12, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: '#eef2f7', backgroundColor: '#fff' },
+  langDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
+  langNative: { color: '#111', fontWeight: '900', marginRight: 10 },
+  langCode: { color: '#6b7280', fontWeight: '800' },
+  langEnglish: { color: '#6b7280', marginTop: 4 },
+  overlayFull: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.06)', alignItems: 'center', justifyContent: 'center' },
+  overlayCardCenter: { backgroundColor: '#fff', borderRadius: 12, padding: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#eef2f7' },
 });

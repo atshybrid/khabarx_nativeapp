@@ -252,12 +252,22 @@ export default function LoginScreen() {
       await persistAuthResponse(res);
       try { console.log('[UI] MPIN login success', { ms: Date.now() - t0, role: res?.user?.role }); } catch {}
       try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
-      // Enforce Citizen Reporter role
-      const userRole = res?.user?.role;
-      if (userRole && userRole !== 'CITIZEN_REPORTER') {
-        Alert.alert('Access Restricted', 'You must be a Citizen Reporter to continue.');
-        router.replace('/news');
-        return;
+      // Role-aware navigation with post flow precedence
+      const roleUC = (res?.user?.role || '').toString().trim().toUpperCase();
+      // If came from post flow, allow Reporter, Member, or HRCI Admin to proceed to post
+      if (params.from === 'post') {
+        const allowed = ['CITIZEN_REPORTER', 'MEMBER', 'HRCI_ADMIN'];
+        if (!allowed.includes(roleUC)) {
+          Alert.alert('Access Restricted', 'Reporter, Member or HRCI Admin role required to continue.');
+          router.replace('/news');
+          return;
+        }
+      } else {
+        // Non-post flow: Admins → Admin Dashboard immediately
+        if (roleUC === 'HRCI_ADMIN' || roleUC === 'SUPERADMIN') {
+          router.replace('/hrci/admin' as any);
+          return;
+        }
       }
   // Persist mobile for next fast login
   try { await AsyncStorage.setItem('profile_mobile', mobile); await AsyncStorage.setItem('last_login_mobile', mobile); } catch {}
@@ -269,9 +279,12 @@ export default function LoginScreen() {
         setShowCongrats(false);
         if (params.from === 'post') {
           router.replace('/explore');
+        } else if (roleUC === 'MEMBER' || roleUC === 'HRCI_MEMBER') {
+          router.replace('/hrci' as any);
         } else if (router.canGoBack()) {
           router.back();
         } else {
+          // Non-admin default landing
           router.replace('/news');
         }
       }, 2000);

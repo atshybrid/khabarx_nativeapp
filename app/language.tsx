@@ -49,6 +49,8 @@ const LanguageSelectionScreen = () => {
     if (submitting || loading) return;
     setSelectedLanguage(language);
     await AsyncStorage.setItem('selectedLanguage', JSON.stringify(language));
+    // Keep member/admin local override in sync so Account screen reflects immediately
+    try { await AsyncStorage.setItem('language_local', JSON.stringify(language)); } catch {}
 
   const deviceDetails = await getDeviceIdentity();
 
