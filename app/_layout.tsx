@@ -11,6 +11,7 @@ import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { LogBox, Platform, StyleSheet, Text, View } from 'react-native';
 // removed duplicate react-native import (merged above)
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { AuthProvider } from '../context/AuthContextNew';
@@ -138,6 +139,7 @@ function ThemedApp() {
       <BottomSheetModalProvider>
         <AuthProvider>
           <ThemeProvider value={effective === 'dark' ? DarkTheme : DefaultTheme}>
+            <ErrorBoundary>
             <Stack
               initialRouteName="splash"
               screenOptions={{
@@ -181,6 +183,7 @@ function ThemedApp() {
               />
               <Stack.Screen name="+not-found" />
             </Stack>
+            </ErrorBoundary>
             <StatusBar style={effective === 'dark' ? 'light' : 'dark'} />
             <Toast />
             <AppLockGate />

@@ -14,9 +14,9 @@ import { Image } from 'expo-image';
 import { useVideoPlayer } from 'expo-video';
 // Removed LinearGradient (no branded card rendering now)
 import { useThemeColor } from '@/hooks/useThemeColor';
-import { useTransliteration } from '@/hooks/useTransliteration';
+// (removed) import { useTransliteration } from '@/hooks/useTransliteration';
 import { makeShadow, makeTextShadow } from '@/utils/shadow';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// (removed) import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -38,23 +38,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Prefer static import; add runtime guard below in case native module isn't linked yet
-import { getCachedCommentsByShortNews, getCommentsByShortNews, prefetchCommentsByShortNews, resolveEffectiveLanguage } from '@/services/api';
+import { getCachedCommentsByShortNews, getCommentsByShortNews, prefetchCommentsByShortNews } from '@/services/api';
 import { on } from '@/services/events';
 // Native-only modules: wrap in try/catch so web build doesn't crash if polyfill missing
 // Lazy holders for native-only modules; populated on first share attempt to satisfy lint (no top-level require)
-let ShareLib: any; // react-native-share
-const ensureNativeShareLibs = async () => {
-  if (!ShareLib) {
-    try {
-      // Only attempt dynamic import if native module is present in the dev client
-      const { NativeModules } = await import('react-native');
-      const hasNative = !!(NativeModules as any)?.RNShare;
-      if (!hasNative) return; // skip import when not linked to avoid Metro unknown module errors
-      ShareLib = (await import('react-native-share')) as any;
-    } catch {}
-  }
-};
-const shareRuntimeGetter = () => (ShareLib && (ShareLib as any).open ? ShareLib : undefined);
+let ShareLib: any; // placeholder for react-native-share when used in release builds
+// In Expo Dev Client, avoid any dynamic import of react-native-share to prevent async-require prefetch crashes
+const ensureNativeShareLibs = async () => { /* no-op in dev */ };
+const shareRuntimeGetter = (): any => undefined;
 // Fallback lightweight placeholder if ViewShot not available (web or load failure)
 const ViewShotFallback: React.FC<any> = ({ children, style }) => <View style={style}>{children}</View>;
 // Optional navigation/logging debug flag
@@ -128,21 +119,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
     })();
     return () => { mounted = false; };
   }, []);
-  // ...existing code...
-  // ...existing code...
   // Prepare video players for each video slide
-  // Global translation map for brand tagline parts (kept inside module but above usage)
-  const GLOBAL_TAG_PARTS = React.useMemo(() => ({
-    latestNews: {
-      te: 'తాజా వార్తలు', hi: 'ताज़ा खबरें', bn: 'সর্বশেষ খবর', ta: 'சமீபத்திய செய்திகள்', kn: 'ತಾಜಾ ಸುದ್ದಿ', ml: 'പുതിയ വാർത്തകൾ', en: 'Latest News'
-    },
-    download: {
-      te: 'డౌన్‌లోడ్', hi: 'डाउनलोड', bn: 'ডাউনলোড', ta: 'பதிவிறக்கு', kn: 'ಡೌನ್‌ಲೋಡ್', ml: 'ഡൗൺലോഡ്', en: 'Download'
-    },
-    app: {
-      te: 'అప్', hi: 'ऐप', bn: 'অ্যাপ', ta: 'அப்', kn: 'ಆಪ್', ml: 'ആപ്പ്', en: 'App'
-    }
-  }) , []);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   // Reaction state (server authoritative). We start with article initial counts; hook will fetch actual.
@@ -155,81 +132,11 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   const fullShareRef = useRef<any>(null); // off-screen full article capture (hero + title + body, no engagement)
   const [shareMode, setShareMode] = useState(false); // toggled briefly during capture (could show watermark if desired)
   const [shareImageReady, setShareImageReady] = useState(false); // off-screen image loaded
-  // Transliteration for place + tagline
-  // Language handling: prefer languageId, derive code only for transliteration/labels.
-  const [resolvedLang, setResolvedLang] = useState<string | undefined>(undefined);
-  const placeTx = useTransliteration({ languageCode: resolvedLang, enabled: true, mode: 'immediate', debounceMs: 120 });
-  const [brandLine, setBrandLine] = useState('');
-  const [userPlace, setUserPlace] = useState('');
+  // Branding: English-only brand line and org logo for share card
+  const BRAND_EN = 'No.1 Local News Daily App';
+  // No dynamic brand line; always English-only
 
-  const lang = resolvedLang || 'en';
-  // Resolve effective language via API helper: prefer languageId, map to code only for transliteration.
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const eff = await resolveEffectiveLanguage();
-        const langId = eff.id;
-        const langCode = eff.code || 'en';
-        if (!mounted) return;
-        setResolvedLang(langCode);
-        if (__DEV__ && NAV_DEBUG) {
-          console.log('[BrandLang] languageId ->', langId, 'code ->', langCode);
-        }
-      } catch {
-        if (!mounted) return;
-        setResolvedLang('en');
-        if (__DEV__ && NAV_DEBUG) {
-          console.log('[BrandLang] languageId -> (unknown) code -> en');
-        }
-      }
-    })();
-    return () => { mounted = false; };
-  }, [article?.id]);
-  const tPart = React.useCallback(<K extends keyof typeof GLOBAL_TAG_PARTS>(k: K) => GLOBAL_TAG_PARTS[k][lang as keyof typeof GLOBAL_TAG_PARTS[K]] || GLOBAL_TAG_PARTS[k].en, [lang, GLOBAL_TAG_PARTS]);
-  // Load user place from storage; fallback to article address if available, then author address/placeName
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const locObjRaw = await AsyncStorage.getItem('profile_location_obj');
-        let candidate = '';
-        if (locObjRaw) {
-          try {
-            const parsed = JSON.parse(locObjRaw);
-            // Prefer address over name/placeName
-            candidate = parsed?.address || parsed?.name || parsed?.placeName || '';
-          } catch {}
-        }
-        if (!candidate) {
-          // Legacy key may contain either a name or full address string
-          candidate = (await AsyncStorage.getItem('profile_location')) || '';
-        }
-        if (!candidate) {
-          // Prefer article-scoped location address, then author address, then author placeName
-          candidate = (article as any)?.location?.address
-            || (article as any)?.author?.address
-            || (article as any)?.author?.placeName
-            || '';
-        }
-        if (mounted) {
-          setUserPlace(candidate);
-          if (candidate) placeTx.onChangeText(candidate);
-        }
-      } catch {}
-    })();
-    return () => { mounted = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [article?.id]);
-
-  // Build phrase: PlaceName Download for the Latest News (translated parts)
-  useEffect(() => {
-  const p = placeTx.value || userPlace || '';
-    const translatedPhrase = `${tPart('download')} ${/* for the */ ''} ${tPart('latestNews')} ${tPart('app')}`.replace(/\s+/g,' ').trim();
-    // If no place, show only phrase`
-    const combined = p ? `${p} ${translatedPhrase}` : translatedPhrase;
-    setBrandLine(combined);
-  }, [placeTx.value, userPlace, lang, tPart]);
+  // no-op
 
   // Removed language confirmation pills per user request.
   const { isTabBarVisible, setTabBarVisible } = useTabBarVisibility();
@@ -408,9 +315,9 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
     try {
       setShareMode(true);
       // allow any pending hero rendering (video poster/image) to stabilize
-      await new Promise(r => setTimeout(r, 120));
+  await new Promise(r => setTimeout(r, 150));
       // Give the off-screen full-share image a moment to load to avoid falling back to hero-only
-      await waitFor(() => shareImageReady, 120, 6); // up to ~720ms
+  await waitFor(() => shareImageReady, 150, 10); // up to ~1.5s
   const { shareTitle, message } = buildSharePayload();
   // Capture full article (hero + title + body) from off-screen composition
       let capturedUri = await fullShareRef.current?.capture?.();
@@ -450,7 +357,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
       // Prefer react-native-share (supports EXTRA_STREAM + EXTRA_TEXT properly on Android) when available
       try {
         await ensureNativeShareLibs();
-        const runtime = shareRuntimeGetter();
+  const runtime: any = shareRuntimeGetter();
         if (runtime?.open) {
           let didWhatsApp = false;
           try {
@@ -600,22 +507,9 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
               ))}
             </ScrollView>
             {/* Overlays: author info and dots */}
-            <View style={[styles.header, shareMode ? styles.headerShare : null]}>
-              {/* Light minimal overlay removed for simpler look */}
-              {shareMode ? (
-                <View style={styles.promoAuthor}>
-                  <View style={[styles.brandCard, { width: '90%', justifyContent:'space-between' }]}>
-                    <Text style={styles.brandSingleLine} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-                      {brandLine || 'Latest News'}
-                    </Text>
-                    <Image
-                      source={require('../assets/images/icon.png')}
-                      style={styles.brandLogo}
-                      contentFit="contain"
-                    />
-                  </View>
-                </View>
-              ) : article.author ? (() => {
+            <View style={[styles.header]}>
+              {/* Author overlay: transparent in normal time, background chip only during share */}
+              {article.author ? (() => {
                 const a: any = article.author;
                 const fullName: string = a.fullName || a.name || 'Reporter';
                 const photo: string | null = a.profilePhotoUrl || a.avatar || null;
@@ -629,7 +523,7 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
                   .map((p: string) => p[0]?.toUpperCase())
                   .join('');
                 const humanRole = roleName ? String(roleName).replace(/_/g,' ').toLowerCase().replace(/\b([a-z])/g,(m)=>m.toUpperCase()) : null;
-                return (
+                const Inner = (
                   <View style={styles.authorCompact}>
                     {photo ? (
                       <Image source={{ uri: photo }} style={styles.avatarSmallImg} cachePolicy="memory-disk" />
@@ -638,20 +532,35 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
                         <Text style={styles.avatarInitialsSmall}>{initials || 'R'}</Text>
                       </View>
                     )}
-                    <Text style={styles.authorNameCompact} numberOfLines={1}>{fullName}</Text>
+                    <Text style={[styles.authorNameCompact, shareMode ? styles.authorNameOnDark : null]} numberOfLines={1}>{fullName}</Text>
                     {humanRole && (
-                      <Text style={styles.roleTiny} numberOfLines={1}>{humanRole}</Text>
+                      <Text style={[styles.roleTiny, shareMode ? styles.roleTinyOnDark : null]} numberOfLines={1}>{humanRole}</Text>
                     )}
                     {address && (
                       <View style={styles.dotSep} />
                     )}
                     {address && (
-                      <Text style={styles.placeTiny} numberOfLines={1}>{address}</Text>
+                      <Text style={[styles.placeTiny, shareMode ? styles.placeTinyOnDark : null]} numberOfLines={1}>{address}</Text>
                     )}
                   </View>
                 );
-              })() : null}
+                return shareMode ? (
+                  <View style={[styles.authorChip, { alignSelf: 'flex-start' }]}>
+                    {Inner}
+                  </View>
+                ) : Inner;
+              })() : <View />}
+              {/* Header right area left empty; brand moves to bottom overlay */}
             </View>
+            {/* Bottom brand banner across hero (visible during share for preview clarity) */}
+            {shareMode ? (
+              <View style={{ position:'absolute', left:10, right:10, bottom:10 }}>
+                <View style={styles.brandBannerFull}>
+                  <Text style={styles.brandSingleLine} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{BRAND_EN}</Text>
+                  <Image source={require('../assets/images/brand_icon.jpg')} style={styles.brandLogo} contentFit="contain" />
+                </View>
+              </View>
+            ) : null}
             {heroSlides.length > 1 && (
               <View style={styles.dotsContainer}>
                 {heroSlides.map((_, i) => (
@@ -806,47 +715,88 @@ const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles
   <View style={{ position: 'absolute', top: 0, left: 0, right: 0, opacity: 0, pointerEvents: 'none' }}>
   <ViewShotComp ref={fullShareRef} options={{ format: 'jpg', quality: 0.9 }} collapsable={false}>
           <View style={{ width, backgroundColor: bg }}>
+            {/* Hero area */}
             <View style={styles.heroContainer}>
               {heroSlides.length > 0 ? (
-                heroSlides[slideIndex].type === 'image' ? (
-                  <Image
-                    source={{ uri: heroSlides[slideIndex].src }}
-                    style={styles.heroMediaImage}
-                    cachePolicy="memory-disk"
-                    onLoadEnd={() => setShareImageReady(true)}
-                    onError={() => setShareImageReady(false)}
-                  />
-                ) : (
-                  <Image
-                    source={{ uri: heroSlides[slideIndex].src }}
-                    style={styles.heroMediaImage}
-                    cachePolicy="memory-disk"
-                    onLoadEnd={() => setShareImageReady(true)}
-                    onError={() => setShareImageReady(false)}
-                  />
-                )
+                <Image
+                  source={{ uri: heroSlides[slideIndex].type === 'image' ? heroSlides[slideIndex].src : (article.image || (Array.isArray(article.images) ? article.images[0] : undefined) || '') }}
+                  style={styles.heroMediaImage}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  onLoadEnd={() => setShareImageReady(true)}
+                  onError={() => setShareImageReady(false)}
+                />
               ) : (
-                <View style={{ flex:1, alignItems:'center', justifyContent:'center' }}>
-                  <Text style={{ color: muted }}>No media</Text>
-                </View>
+                <View style={{ flex:1, backgroundColor: '#000' }} />
               )}
-              {/* Brand card overlay also in capture */}
-              {brandLine ? (
-                <View style={{ position:'absolute', left:10, right:10, bottom:10 }}>
-                  <View style={[styles.brandCard, { width: '100%', justifyContent:'space-between' }]}>
-                    <Text style={styles.brandSingleLine} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{brandLine}</Text>
-                    <Image
-                      source={require('../assets/images/icon.png')}
-                      style={styles.brandLogo}
-                      contentFit="contain"
-                    />
+              {/* Author chip */}
+              {article.author ? (() => {
+                const a: any = article.author;
+                const fullName: string = a.fullName || a.name || 'Reporter';
+                const photo: string | null = a.profilePhotoUrl || a.avatar || null;
+                const roleName: string | null = a.roleName || null;
+                const address: string | null = a.address || (article as any)?.location?.address || a.placeName || null;
+                const initials = fullName
+                  .split(/\s+/)
+                  .filter(Boolean)
+                  .slice(0,2)
+                  .map((p: string) => p[0]?.toUpperCase())
+                  .join('');
+                const humanRole = roleName ? String(roleName).replace(/_/g,' ').toLowerCase().replace(/\b([a-z])/g,(m)=>m.toUpperCase()) : null;
+                return (
+                  <View style={[styles.authorChip, { position:'absolute', top:10, left:10 }] }>
+                    <View style={styles.authorCompact}>
+                      {photo ? (
+                        <Image source={{ uri: photo }} style={styles.avatarSmallImg} cachePolicy="memory-disk" />
+                      ) : (
+                        <View style={[styles.avatarSmall, styles.avatarFallbackSmall]}>
+                          <Text style={styles.avatarInitialsSmall}>{initials || 'R'}</Text>
+                        </View>
+                      )}
+                      <Text style={[styles.authorNameCompact, styles.authorNameOnDark]} numberOfLines={1}>{fullName}</Text>
+                      {humanRole && (
+                        <Text style={[styles.roleTiny, styles.roleTinyOnDark]} numberOfLines={1}>{humanRole}</Text>
+                      )}
+                      {address && (
+                        <View style={styles.dotSep} />
+                      )}
+                      {address && (
+                        <Text style={[styles.placeTiny, styles.placeTinyOnDark]} numberOfLines={1}>{address}</Text>
+                      )}
+                    </View>
                   </View>
+                );
+              })() : null}
+              {/* Bottom brand banner */}
+              <View style={{ position:'absolute', left:10, right:10, bottom:10 }}>
+                <View style={styles.brandBannerFull}>
+                  <Text style={styles.brandSingleLine} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{BRAND_EN}</Text>
+                  <Image source={require('../assets/images/brand_icon.jpg')} style={styles.brandLogo} contentFit="contain" />
                 </View>
-              ) : null}
+              </View>
             </View>
-            <View style={{ padding: 15 }}>
-              <Text style={[styles.title, { color: textColor }, fontsLoaded ? { fontFamily: 'Ramabhadra_400Regular' } : null]}>{article.title}</Text>
-              <Text style={[styles.body, { color: textColor }]}>{article.body}</Text>
+            {/* Article content area */}
+            <View style={[styles.articleArea, { backgroundColor: bg }]}>
+              <View style={styles.articleContent}>
+                <Text style={[styles.title, { color: textColor }, fontsLoaded ? { fontFamily: 'Ramabhadra_400Regular' } : null]} numberOfLines={2}>
+                  {article.title}
+                </Text>
+                <Text style={[styles.body, { color: textColor }]} numberOfLines={maxBodyLines || undefined}>
+                  {displayBody}
+                </Text>
+              </View>
+            </View>
+            {/* Footer (info only; engagement hidden in capture) */}
+            <View style={[styles.footerContainer, { position: 'relative', backgroundColor: card }] }>
+              <View style={[styles.footerInfo, { borderTopColor: border }]}>
+                <View style={styles.footerLeft}>
+                  <Feather name="clock" size={14} color={muted} />
+                  <Text style={[styles.infoText, { color: muted }]}>{formatRelativeTime(article.createdAt)} • {index + 1} of {totalArticles}</Text>
+                </View>
+                <Text numberOfLines={1} style={[styles.categoryPill, { backgroundColor: card, color: textColor, borderColor: border, borderWidth: 1 }]}> 
+                  {article.category || 'General'}
+                </Text>
+              </View>
             </View>
           </View>
   </ViewShotComp>
@@ -877,6 +827,10 @@ type Styles = {
   roleTiny: TextStyle;
   dotSep: ViewStyle;
   placeTiny: TextStyle;
+  authorChip: ViewStyle;
+  authorNameOnDark: TextStyle;
+  roleTinyOnDark: TextStyle;
+  placeTinyOnDark: TextStyle;
   header: ViewStyle;
   headerGradient: ViewStyle;
   authorInfo: ViewStyle;
@@ -903,6 +857,7 @@ type Styles = {
   promoLogo: ImageStyle;
   brandCard: ViewStyle;
   brandCardLeft: ViewStyle;
+  brandBannerFull: ViewStyle;
   brandLogo: ImageStyle;
   brandSingleLine: TextStyle;
   brandPlace: TextStyle;
@@ -1037,6 +992,26 @@ const styles = StyleSheet.create<Styles>({
     color: '#666',
     maxWidth: 90,
     ...makeTextShadow(0,1,1.5,'rgba(0,0,0,0.25)'),
+  },
+  authorChip: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)'
+  },
+  authorNameOnDark: {
+    color: '#fff',
+    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.5)')
+  },
+  roleTinyOnDark: {
+    color: '#eee',
+    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.45)')
+  },
+  placeTinyOnDark: {
+    color: '#ddd',
+    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.45)')
   },
   header: {
     flexDirection: 'row',
@@ -1197,6 +1172,19 @@ const styles = StyleSheet.create<Styles>({
     alignItems: 'center',
     gap: 10,
     flex: 1,
+  },
+  brandBannerFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    flex: 1,
+    marginLeft: 10,
   },
   brandLogo: {
     width: 40,

@@ -428,12 +428,19 @@ export async function updatePreferences(partial: UpdatePreferencesInput, userId?
 
 // After preferences change, refresh auth/session and local caches
 export async function afterPreferencesUpdated(opts: { languageIdChanged?: string | null; languageCode?: string | null } = {}) {
+  // Only attempt token refresh when we are authenticated (refresh token present)
   try {
-    // Refresh tokens/session to ensure server-side language/claims propagate
-    const next = await refreshTokens();
-    // Best-effort: if languageId changed, persist hint in tokens for downstream readers
-    if (opts.languageIdChanged) {
-      await saveTokens({ ...next, languageId: opts.languageIdChanged });
+    const existing = await loadTokens();
+    const hasRefresh = !!existing?.refreshToken;
+    if (hasRefresh) {
+      // Refresh tokens/session to ensure server-side language/claims propagate
+      const next = await refreshTokens();
+      // Best-effort: if languageId changed, persist hint in tokens for downstream readers
+      if (opts.languageIdChanged) {
+        await saveTokens({ ...next, languageId: opts.languageIdChanged });
+      }
+    } else if (DEBUG_API) {
+      console.log('[API] afterPreferencesUpdated: skip token refresh (guest)');
     }
   } catch (e) {
     if (DEBUG_API) console.warn('[API] afterPreferencesUpdated refreshTokens failed', (e as any)?.message || e);
@@ -742,11 +749,11 @@ export const getNews = async (
           }
           // Remember first empty-success to return if all attempts are empty
           if (!lastEmptyOk) lastEmptyOk = { json: j, endpoint: url };
-          if (__DEV__) try { console.warn('[API] getNews attempt returned empty list', url); } catch {}
+          if (DEBUG_API) try { console.warn('[API] getNews attempt returned empty list', url); } catch {}
           continue;
         } catch (e: any) {
           lastErr = e;
-          if (__DEV__) try { console.warn('[API] getNews attempt failed', url, (e as any)?.message || e); } catch {}
+          if (DEBUG_API) try { console.warn('[API] getNews attempt failed', url, (e as any)?.message || e); } catch {}
           // Continue trying other variants
         }
       }
@@ -1009,7 +1016,7 @@ export const getNews = async (
       const cached = await AsyncStorage.getItem(key);
       if (cached) return JSON.parse(cached) as Article[];
     } catch {}
-    console.warn('getNews failed with no cache available', err);
+    if (DEBUG_API) console.warn('getNews failed with no cache available', err);
     throw err;
   }
 };
@@ -1092,11 +1099,11 @@ export const getNewsFeed = async (
             return { json: j, endpoint: url };
           }
           if (!lastEmptyOk) lastEmptyOk = { json: j, endpoint: url };
-          if (__DEV__) try { console.warn('[API] getNewsFeed attempt returned empty list', url); } catch {}
+          if (DEBUG_API) try { console.warn('[API] getNewsFeed attempt returned empty list', url); } catch {}
           continue;
         } catch (e: any) {
           lastErr = e;
-          if (__DEV__) try { console.warn('[API] getNewsFeed attempt failed', url, (e as any)?.message || e); } catch {}
+          if (DEBUG_API) try { console.warn('[API] getNewsFeed attempt failed', url, (e as any)?.message || e); } catch {}
         }
       }
       if (lastEmptyOk) return lastEmptyOk;
@@ -2212,21 +2219,21 @@ export async function getCategories(languageId?: string): Promise<CategoryItem[]
 
   for (const a of attempts) {
     try {
-      try { console.log('[CAT] GET', a.url); } catch {}
+      if (DEBUG_API) try { console.log('[CAT] GET', a.url); } catch {}
       const res = await request<any>(a.url, { noAuth: true });
       const arr = parseList(res);
       if (!arr) {
-        try { console.warn('[CAT] invalid response shape', { attempt: a.label, keys: Object.keys(res || {}) }); } catch {}
+        if (DEBUG_API) try { console.warn('[CAT] invalid response shape', { attempt: a.label, keys: Object.keys(res || {}) }); } catch {}
         continue;
       }
       const list = toCategoryItems(arr);
       if (Array.isArray(list) && list.length > 0) {
         try { await AsyncStorage.setItem(cacheKey, JSON.stringify(list)); } catch {}
-        try { console.log('[CAT] categories loaded', { attempt: a.label, count: list.length }); } catch {}
+        if (DEBUG_API) try { console.log('[CAT] categories loaded', { attempt: a.label, count: list.length }); } catch {}
         return list;
       }
     } catch (e) {
-      try { console.warn('[CAT] attempt failed', { attempt: a.label, message: (e as any)?.message || e }); } catch {}
+      if (DEBUG_API) try { console.warn('[CAT] attempt failed', { attempt: a.label, message: (e as any)?.message || e }); } catch {}
       continue;
     }
   }

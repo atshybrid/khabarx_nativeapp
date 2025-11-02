@@ -19,7 +19,7 @@ const isDev = __DEV__ === true;
 
 // Resolve final base URL with sensible precedence
 // Default to the live API if nothing is configured to avoid local 404s like "resource not found"
-const PROD_DEFAULT_URL = 'https://app.hrcitodaynews.in/api/v1';
+const PROD_DEFAULT_URL = 'https://app.humanrightscouncilforindia.org/api/v1';
 // Allow forcing production API even in dev (and override any EXPLICIT_URL/DEV_URL)
 const FORCE_PROD = (() => {
   const raw = String(process.env.EXPO_PUBLIC_FORCE_PROD ?? process.env.EXPO_PUBLIC_USE_PROD_IN_DEV ?? '').toLowerCase();
@@ -117,6 +117,7 @@ async function clearStoredTokens() {
 export async function request<T = any>(path: string, options: { method?: HttpMethod; body?: any; headers?: Record<string, string>; timeoutMs?: number; noAuth?: boolean } = {}): Promise<T> {
   const method: HttpMethod = options.method || 'GET';
   const jwt = options.noAuth ? null : await AsyncStorage.getItem(JWT_KEY);
+  const hadAuth = !!jwt; // track if this request attempted with auth
   const isFormData = (typeof FormData !== 'undefined') && options.body instanceof FormData;
   const headers: Record<string, string> = {
     'Accept': 'application/json',
@@ -191,7 +192,7 @@ export async function request<T = any>(path: string, options: { method?: HttpMet
       const isHttp = err instanceof HttpError;
       const status = isHttp ? err.status : 0;
       // Handle auth errors by attempting a token refresh once per request
-      if (!attemptedRefresh && isAuthError(err) && !path.startsWith('/auth/refresh')) {
+      if (!attemptedRefresh && isAuthError(err) && hadAuth && !path.startsWith('/auth/refresh')) {
         try {
           const newJwt = await tryRefreshJwt();
           headers.Authorization = `Bearer ${newJwt}`;

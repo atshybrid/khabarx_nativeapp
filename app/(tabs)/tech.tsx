@@ -329,6 +329,7 @@ export default function AccountScreen() {
   // Role check for hiding user header when membership is present
   const roleUC = (role || '').toString().trim().toUpperCase();
   const isMemberOrAdmin = roleUC === 'MEMBER' || roleUC === 'HRCI_MEMBER' || roleUC === 'HRCI_ADMIN';
+  const isCitizenReporter = roleUC === 'CITIZEN_REPORTER';
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: bg }]}>
@@ -378,37 +379,39 @@ export default function AccountScreen() {
           </View>
         ) : null}
 
-        {/* HRCI Member & Admin at top (always visible) */}
-        <View style={[styles.card, styles.hrciCard, { backgroundColor: card, borderColor: '#FE0002' }]}>
-          <View style={[styles.hrciHeader, { justifyContent: 'space-between', width: '100%' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <MaterialIcons name="account-balance" size={24} color="#FE0002" />
-              <Text style={[styles.cardTitle, { color: '#FE0002', marginLeft: 8 }]}>HRCI Member & Admin</Text>
-            </View>
-            {hrciMembership?.kyc?.status === 'APPROVED' && (
-              <View style={styles.kycMiniBadge}>
-                <MaterialIcons name="check" size={14} color="#fff" />
+        {/* HRCI Member & Admin (hidden for Citizen Reporter) */}
+        {!isCitizenReporter && (
+          <View style={[styles.card, styles.hrciCard, { backgroundColor: card, borderColor: '#FE0002' }]}> 
+            <View style={[styles.hrciHeader, { justifyContent: 'space-between', width: '100%' }]}> 
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <MaterialIcons name="account-balance" size={24} color="#FE0002" />
+                <Text style={[styles.cardTitle, { color: '#FE0002', marginLeft: 8 }]}>HRCI Member & Admin</Text>
               </View>
-            )}
-          </View>
-          {hrciMembership ? (
-            <View style={{ marginTop: 8 }}>
-              <Text style={[styles.label, { color: text }]}>{hrciMembership?.designation?.name || 'Member'}</Text>
-              <Text style={[styles.helper, { color: muted, marginTop: 2 }]}>
-                {hrciMembership?.cell?.name || 'Cell'}{hrciMembership?.hrci?.zone ? ` • ${hrciMembership.hrci.zone}` : ''}
-              </Text>
-              <Text style={[styles.helper, { color: muted, marginTop: 2 }]}>KYC: {hrciMembership?.kyc?.status || 'PENDING'}</Text>
+              {hrciMembership?.kyc?.status === 'APPROVED' && (
+                <View style={styles.kycMiniBadge}>
+                  <MaterialIcons name="check" size={14} color="#fff" />
+                </View>
+              )}
             </View>
-          ) : (
-            <Text style={[styles.helper, { color: muted, marginTop: 4 }]}>
-              Human Rights Council for India - {hrciLoading ? 'Loading...' : 'Login or start onboarding'}
-            </Text>
-          )}
-          <Pressable onPress={handleHrciNavigation} style={({ pressed }) => [styles.button, styles.hrciButton, { marginTop: 12 }, pressed && { opacity: 0.95 }]}>
-            <MaterialIcons name="login" size={18} color="#fff" style={{ marginRight: 6 }} />
-            <Text style={[styles.buttonText, { color: '#fff' }]}>{hrciMembership ? 'Open Dashboard' : 'Open HRCI'}</Text>
-          </Pressable>
-        </View>
+            {hrciMembership ? (
+              <View style={{ marginTop: 8 }}>
+                <Text style={[styles.label, { color: text }]}>{hrciMembership?.designation?.name || 'Member'}</Text>
+                <Text style={[styles.helper, { color: muted, marginTop: 2 }]}>
+                  {hrciMembership?.cell?.name || 'Cell'}{hrciMembership?.hrci?.zone ? ` • ${hrciMembership.hrci.zone}` : ''}
+                </Text>
+                <Text style={[styles.helper, { color: muted, marginTop: 2 }]}>KYC: {hrciMembership?.kyc?.status || 'PENDING'}</Text>
+              </View>
+            ) : (
+              <Text style={[styles.helper, { color: muted, marginTop: 4 }]}> 
+                Human Rights Council for India - {hrciLoading ? 'Loading...' : 'Login or start onboarding'}
+              </Text>
+            )}
+            <Pressable onPress={handleHrciNavigation} style={({ pressed }) => [styles.button, styles.hrciButton, { marginTop: 12 }, pressed && { opacity: 0.95 }]}> 
+              <MaterialIcons name="login" size={18} color="#fff" style={{ marginRight: 6 }} />
+              <Text style={[styles.buttonText, { color: '#fff' }]}>{hrciMembership ? 'Open Dashboard' : 'Open HRCI'}</Text>
+            </Pressable>
+          </View>
+        )}
         {/* Welcome card removed as requested */}
 
         {/* Location Card */}

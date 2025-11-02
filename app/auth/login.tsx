@@ -274,6 +274,13 @@ export default function LoginScreen() {
       setAttemptsLeft(MAX_ATTEMPTS);
       setMpinError(null);
       setLoginSuccessMsg('Login success');
+      // For Citizen Reporters, navigate immediately to Home to avoid any transient blank state
+      if (roleUC === 'CITIZEN_REPORTER') {
+        setShowCongrats(false);
+        router.replace('/news');
+        return;
+      }
+      // Show a quick congrats for others, then navigate
       setShowCongrats(true);
       setTimeout(() => {
         setShowCongrats(false);
@@ -287,7 +294,7 @@ export default function LoginScreen() {
           // Non-admin default landing
           router.replace('/news');
         }
-      }, 2000);
+      }, 1400);
     } catch (e:any) {
       try { console.warn('[UI] MPIN login fail', { ms: Date.now() - t0, err: e?.message, status: e?.status }); } catch {}
       if (e?.status === 401) {

@@ -11,11 +11,13 @@ import { BottomSheetFlatList, BottomSheetModal, BottomSheetModalProvider, Bottom
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Image, LayoutAnimation, Platform, Pressable, ScrollView, StyleSheet, Text, UIManager, useWindowDimensions, View } from 'react-native';
+import { Alert, Image, LayoutAnimation, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, UIManager, useWindowDimensions, View } from 'react-native';
 import { HrciIdCardFrontExact } from '../../components/HrciIdCardFrontExact';
 
 import LottieLoader from '@/components/ui/LottieLoader';
+import { request } from '@/services/http';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { downloadPdfWithFallbacks } from '../../services/fileDownload';
 
 // Enable LayoutAnimation only on Old Architecture (Bridged) Android.
 // On New Architecture (Fabric), this API is a no-op and logs a warning.
@@ -315,18 +317,33 @@ export default function AccountScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         {/* Conditional: Show HRCI ID card preview for Member/Admin; otherwise show user profile card */}
         {(() => {
-          // Use user.role, fallback to membership.level, then tokens role; normalize by trimming and uppercasing
-          const roleRaw = (mp?.user?.role || mp?.membership?.level || tokenRole || '').toString();
-          const roleUC = roleRaw.trim().toUpperCase();
+          // Determine role strictly from user.role (fallback to tokenRole). Do NOT use membership.level for gating UI.
+          const userRoleRaw = (mp?.user?.role || tokenRole || '').toString();
+          const roleUC = userRoleRaw.trim().toUpperCase();
           const isAdmin = roleUC === 'HRCI_ADMIN' || roleUC === 'SUPERADMIN';
-          // Only hide top user card for exact roles: MEMBER/HRCI_MEMBER or HRCI_ADMIN
+          // Show HRCI card only for true member/admin roles on user.role
           const isMemberOrAdmin = roleUC === 'MEMBER' || roleUC === 'HRCI_MEMBER' || roleUC === 'HRCI_ADMIN';
+          // Synchronous reporter check (fallback) to avoid async race from isCitizenReporter()
+          const isReporterSync = roleUC === 'CITIZEN_REPORTER'
+            || (tokenRole || '').toString().trim().toUpperCase() === 'CITIZEN_REPORTER'
+            || ((mp?.user?.role || '').toString().trim().toUpperCase() === 'CITIZEN_REPORTER');
           if (__DEV__) {
-            try { console.log('[Account] Role resolution', { userRole: mp?.user?.role, membershipLevel: mp?.membership?.level, tokenRole, roleUC, isMemberOrAdmin }); } catch {}
+            try {
+              console.log('[Account] Role resolution', {
+                userRole: mp?.user?.role,
+                membershipLevel: mp?.membership?.level,
+                tokenRole,
+                roleUC,
+                isMemberOrAdmin,
+                roleReporter,
+                isReporterSync,
+              });
+            } catch {}
           }
           const cardWidth = Math.max(Math.min(screenWidth - 48, 720), 320);
 
-          if (isMemberOrAdmin) {
+          // If the logged-in user is a Citizen Reporter, hide the HRCI Member & Admin card (sync + async guards)
+          if (isMemberOrAdmin && !roleReporter && !isReporterSync) {
             // Derive card props for HRCI card
             let logoUri: string | undefined;
             try {
@@ -379,6 +396,51 @@ export default function AccountScreen() {
                       <Text style={styles.primaryBtnText}>View ID Card</Text>
                     </Pressable>
                   )}
+                  {/* Appointment Letter download/open */}
+                  <Pressable
+                    onPress={async () => {
+                      try {
+                        // Prefer API that generates/returns the most recent letter
+                        const resp = await request<any>('/memberships/me/appointment-letter?generate=true', { method: 'GET' });
+                        const payload = resp?.data ?? resp;
+                        const generated = Boolean(payload?.generated);
+                        if (!generated) {
+                          Alert.alert('Appointment Letter', 'Please complete KYC and generate your ID Card first, then get the appointment letter.');
+                          return;
+                        }
+                        const url = String(payload?.appointmentLetterPdfUrl || '').trim();
+                        if (!url) {
+                          // Defensive: try previous sources if API omitted URL
+                          const fresh = await getMembershipProfile();
+                          const fallback = (fresh as any)?.appointmentLetterPdfUrl
+                            || (fresh as any)?.membership?.appointmentLetterPdfUrl
+                            || (await loadTokens())?.user?.appointmentLetterPdfUrl
+                            || '';
+                          const clean2 = String(fallback || '').trim();
+                          if (!clean2) {
+                            Alert.alert('Appointment Letter', 'Not available yet. Please refresh.');
+                            return;
+                          }
+                          await downloadPdfWithFallbacks(clean2, { preferFolderSaveOnAndroid: true });
+                          return;
+                        }
+                        await downloadPdfWithFallbacks(url, { preferFolderSaveOnAndroid: true });
+                      } catch (e: any) {
+                        try {
+                          const resp = await request<any>('/memberships/me/appointment-letter?generate=true', { method: 'GET' });
+                          const payload = resp?.data ?? resp;
+                          const clean2 = String(payload?.appointmentLetterPdfUrl || '').trim();
+                          if (clean2) await Linking.openURL(clean2);
+                          else throw e;
+                        } catch {
+                          Alert.alert('Appointment Letter', e?.message || 'Failed to download or open.');
+                        }
+                      }
+                    }}
+                    style={({ pressed }) => [styles.secondaryBtn, pressed && { opacity: 0.8 }]}
+                  >
+                    <Text style={styles.secondaryBtnText}>Appointment Letter</Text>
+                  </Pressable>
                   <Pressable
                     onPress={async () => {
                       const res = await checkPostArticleAccess();
@@ -428,12 +490,15 @@ export default function AccountScreen() {
                 </View>
               </View>
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-                <Pressable
-                  onPress={() => router.push('/hrci/id-card' as any)}
-                  style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.8 }]}
-                >
-                  <Text style={styles.primaryBtnText}>View ID Card</Text>
-                </Pressable>
+                {/* Hide HRCI access for Citizen Reporters entirely */}
+                {!(roleReporter || isReporterSync) && (
+                  <Pressable
+                    onPress={() => router.push('/hrci/id-card' as any)}
+                    style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.8 }]}
+                  >
+                    <Text style={styles.primaryBtnText}>View ID Card</Text>
+                  </Pressable>
+                )}
                 <Pressable
                   onPress={async () => {
                     const res = await checkPostArticleAccess();

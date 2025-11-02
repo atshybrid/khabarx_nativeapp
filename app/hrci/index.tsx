@@ -6,22 +6,26 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  Image,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    Alert,
+    Animated,
+    Image,
+    Linking,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
+import { loadTokens } from '../../services/auth';
 import { on } from '../../services/events';
+import { downloadPdfWithFallbacks } from '../../services/fileDownload';
 import { canCreateHrciCase, getHrciCasesSummary, HrciCasesSummary } from '../../services/hrciCases';
 import { request } from '../../services/http';
 import { getKYCStatus } from '../../services/kyc';
+import { getMembershipProfile } from '../../services/membership';
 
 type Profile = {
   fullName?: string;
@@ -689,6 +693,56 @@ export default function HrciDashboard() {
                     subtitle="Manage & create"
                     icon="cash-multiple"
                     onPress={guard(() => router.push('/hrci/donations' as any))}
+                  />
+                  {/* Appointment Letter (opens PDF) - available for members; ungated */}
+                  <ActionCard
+                    title="Appointment Letter"
+                    subtitle="Download / Share PDF"
+                    icon="file-pdf-box"
+                    onPress={async () => {
+                      try {
+                        // First, ask backend to generate (if needed) and return the latest URL
+                        const resp = await request<any>('/memberships/me/appointment-letter?generate=true', { method: 'GET' });
+                        const payload = resp?.data ?? resp; // support { success, data } and direct
+                        const generated = Boolean(payload?.generated);
+                        const urlFromApi = String(payload?.appointmentLetterPdfUrl || '').trim();
+                        if (!generated) {
+                          Alert.alert('Appointment Letter', 'Please complete KYC and generate your ID Card first, then get the appointment letter.');
+                          return;
+                        }
+                        const clean = urlFromApi;
+                        if (!clean) {
+                          // Fallbacks if API omitted the URL for some reason
+                          const tokens = await loadTokens();
+                          const mpFresh = await getMembershipProfile();
+                          const url2 = (membership as any)?.appointmentLetterPdfUrl
+                            || (tokens?.user as any)?.appointmentLetterPdfUrl
+                            || (mpFresh as any)?.appointmentLetterPdfUrl
+                            || (mpFresh as any)?.membership?.appointmentLetterPdfUrl
+                            || '';
+                          const clean2 = String(url2 || '').trim();
+                          if (!clean2) {
+                            Alert.alert('Appointment Letter', 'Not available yet. Please refresh.');
+                            return;
+                          }
+                          await downloadPdfWithFallbacks(clean2, { preferFolderSaveOnAndroid: true });
+                          return;
+                        }
+                        // Download/share the generated PDF
+                        await downloadPdfWithFallbacks(clean, { preferFolderSaveOnAndroid: true });
+                      } catch (e: any) {
+                        try {
+                          // Final fallback: open in browser if sharing/saving failed
+                          const resp = await request<any>('/memberships/me/appointment-letter?generate=true', { method: 'GET' });
+                          const payload = resp?.data ?? resp;
+                          const clean = String(payload?.appointmentLetterPdfUrl || '').trim();
+                          if (clean) await Linking.openURL(clean);
+                          else throw e;
+                        } catch {
+                          Alert.alert('Appointment Letter', e?.message || 'Unable to download or open.');
+                        }
+                      }
+                    }}
                   />
                   <ActionCard
                     title="Reports"

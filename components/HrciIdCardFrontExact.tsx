@@ -14,7 +14,7 @@ export interface HrciIdCardFrontProps {
   validUpto: string; // e.g., 'MARCH 2027'
   issueDate?: string; // Optional issue date text
   zone?: string; // Optional zone text
-  logoUri?: string; // Circular logo PNG
+  logoUri?: string; // Logo PNG (square)
   photoUri?: string; // Member photo square
   stampUri?: string; // Round stamp PNG (overlaps bottom-right of photo)
   authorSignUri?: string; // Authorizing signature PNG
@@ -58,7 +58,9 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   const [footerHeight, setFooterHeight] = React.useState(0);
   // Use a fixed design coordinate space then scale for width to avoid font/layout drift
   const baseWidth = 720;
-  const baseHeight = baseWidth * 1.42; // slightly tighter
+  // CR80 portrait aspect (85.6mm × 54.0mm) -> ~1.588
+  const CR80_ASPECT = 3.375 / 2.125;
+  const baseHeight = Math.round(baseWidth * CR80_ASPECT);
   const scale = width / baseWidth;
   const height = baseHeight * scale;
 
@@ -147,7 +149,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
         {/* Details Area */}
         <View style={styles.detailsArea}>
           {/* New highlighted container for key identity fields */}
-          <View style={styles.detailsContainer}>
+          <View style={[styles.detailsContainer, { width: baseWidth - 56 }]}>
             {/* Details table (fixed order) */}
             <View style={styles.detailsTable}>
               <DetailRow label="Name" value={memberName} />
@@ -190,10 +192,8 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
 };
 
 const DetailRow = ({ label, value }: { label: string; value: string }) => {
-  const l = label.trim().toLowerCase();
-  const isNameRow = l === 'name';
-  const isDesignationRow = l === 'designation';
-  const autoFit = isNameRow || isDesignationRow;
+  // Make all value fields auto-fit so larger fonts still fit within the row width
+  const autoFit = true;
 
   return (
     <View style={styles.detailRow}>
@@ -204,7 +204,7 @@ const DetailRow = ({ label, value }: { label: string; value: string }) => {
           style={styles.detailValue}
           numberOfLines={1}
           adjustsFontSizeToFit
-          minimumFontScale={0.75}
+          minimumFontScale={0.65}
           allowFontScaling={false}
         >
           {value}
@@ -229,8 +229,9 @@ const styles = StyleSheet.create({
   regLine: { color: '#ffffff', fontSize: 20, fontWeight: '700', textAlign: 'center', lineHeight: 26, letterSpacing: 0.5 },
   bodySection: { flex: 1, alignItems: 'center', paddingTop: 12, paddingHorizontal: 28, position: 'relative', zIndex: 5, elevation: 2, overflow: 'visible' },
   logoWrapper: { marginBottom: 12 },
-  logo: { width: 0.22 * 720, height: 0.22 * 720, borderRadius: 0.11 * 720, resizeMode: 'cover', borderWidth: 4, borderColor: '#ffffff' },
-  logoPlaceholder: { width: 0.23 * 720, height: 0.23 * 720, borderRadius: 0.115 * 720, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
+  // Increase logo size for stronger presence on the front card
+  logo: { width: 0.26 * 720, height: 0.26 * 720, borderRadius: 0, resizeMode: 'cover', borderWidth: 4, borderColor: '#ffffff' },
+  logoPlaceholder: { width: 0.26 * 720, height: 0.26 * 720, borderRadius: 0, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
   placeholderText: { textAlign: 'center', color: '#111827', fontWeight: '700' },
   placeholderTextSmall: { textAlign: 'center', color: '#111827', fontSize: 12, fontWeight: '600' },
   jurisdiction: { fontSize: 26, fontWeight: '900', color: BLUE_TEXT, marginTop: 0, textAlign: 'center', letterSpacing: 0.5, lineHeight: 30 },
@@ -239,22 +240,25 @@ const styles = StyleSheet.create({
   photoStampRow: { marginTop: 6, marginBottom: 8 },
   photoShell: { backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#e5e7eb' },
   cellName: { color: BLUE_TEXT, fontSize: 30, fontWeight: '900', marginTop: 18, textAlign: 'center', letterSpacing: 0.5, lineHeight: 32 },
-  detailsArea: { position: 'relative', width: '100%', overflow: 'visible' },
+  // Center the details container horizontally within the card area
+  detailsArea: { position: 'relative', width: '100%', overflow: 'visible', alignItems: 'center' },
   detailsContainer: {
-    alignSelf: 'stretch',
+    // Center the identity fields container for a more balanced, print-ready look
+    alignSelf: 'center',
     backgroundColor: '#F3F4F6',
     borderWidth: 1,
     borderColor: '#e5e7eb',
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
     marginTop: 12,
   },
   detailsTable: { alignSelf: 'center', position: 'relative', zIndex: 1 },
-  detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 3, flexWrap: 'nowrap' },
-  detailLabel: { width: 180, fontSize: 24, fontWeight: '800', color: '#111827', letterSpacing: 0.25, textAlign: 'left', lineHeight: 34 },
-  colon: { width: 16, fontSize: 24, fontWeight: '800', color: '#111827', textAlign: 'center', lineHeight: 34 },
-  detailValue: { width: 420, fontSize: 24, fontWeight: '800', color: '#111827', lineHeight: 34, textAlign: 'left' },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 5, flexWrap: 'nowrap' },
+  // Further increase font sizes for Name, Designation, ID No, Contact No, and Valid Upto rows
+  detailLabel: { width: 190, fontSize: 32, fontWeight: '900', color: '#111827', letterSpacing: 0.25, textAlign: 'left', lineHeight: 44 },
+  colon: { width: 18, fontSize: 32, fontWeight: '900', color: '#111827', textAlign: 'center', lineHeight: 44 },
+  detailValue: { width: 430, fontSize: 32, fontWeight: '900', color: '#111827', lineHeight: 44, textAlign: 'left' },
   signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: 'auto', marginTop: 0, position: 'absolute', right: 0, bottom: 12, zIndex: 20, elevation: 8 },
   signatureOverlay: { position: 'absolute', alignItems: 'flex-end', zIndex: 999, elevation: 12 },
   signatureContainer: { flexDirection: 'column', alignItems: 'flex-end' },

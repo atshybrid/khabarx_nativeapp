@@ -6,16 +6,15 @@ import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  Image,
-  NativeModules,
-  Platform,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    Alert,
+    Animated,
+    Image,
+    Platform,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useWindowDimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ViewShot from 'react-native-view-shot';
@@ -23,44 +22,62 @@ import { HrciIdCardExport, HrciIdCardExportHandle } from '../../components/HrciI
 import { HrciIdCardFrontExact } from '../../components/HrciIdCardFrontExact';
 import { request } from '../../services/http';
 
-async function hasMediaLibraryNative(): Promise<boolean> {
-  try {
-    const EMC: any = await import('expo-modules-core');
-    const NativeModulesProxy = EMC?.NativeModulesProxy ?? EMC?.default?.NativeModulesProxy;
-    return !!(NativeModulesProxy?.ExpoMediaLibrary || NativeModulesProxy?.ExponentMediaLibrary);
-  } catch {
-    return false;
-  }
-}
+// Removed: old MediaLibrary native preflight helper (we now attempt save and fallback gracefully)
 
-async function onBackSaveToFiles(ref: React.RefObject<ViewShot | null>) {
+// Generic save-to-Photos flow using MediaLibrary with Android SAF/share fallbacks
+async function saveToPhotosGeneric(ref: React.RefObject<ViewShot | null>, side: 'Front' | 'Back') {
   const uri = await onBackCapture(ref);
   if (!uri) return;
   try {
-    const FS: any = await import('expo-file-system');
-    const SAF = FS?.StorageAccessFramework;
-    if (!SAF) {
-      // Graceful fallback if SAF isn't available: share the image instead
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Back ID Card (JPEG)', UTI: 'public.jpeg' });
-      else Alert.alert('Not supported', 'Save to Files is not available on this device. Use Share instead.');
+    // Preflight check for native module presence
+    const EMC: any = await import('expo-modules-core');
+    const NativeModulesProxy = EMC?.NativeModulesProxy ?? EMC?.default?.NativeModulesProxy;
+    const hasNative = !!(NativeModulesProxy?.ExpoMediaLibrary || NativeModulesProxy?.ExponentMediaLibrary);
+    if (!hasNative) throw new Error('MediaLibrary native module not available');
+
+    const ML: any = await import('expo-media-library');
+    const requestPermissionsAsync = ML?.requestPermissionsAsync ?? ML?.default?.requestPermissionsAsync;
+    const saveToLibraryAsync = ML?.saveToLibraryAsync ?? ML?.default?.saveToLibraryAsync;
+    if (!requestPermissionsAsync || !saveToLibraryAsync) throw new Error('MediaLibrary JS API not available');
+    const { status } = await requestPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Allow Photos/Media permission to save the image.');
       return;
     }
-    const perm = await SAF.requestDirectoryPermissionsAsync();
-    if (!perm?.granted || !perm.directoryUri) {
-      Alert.alert('Cancelled', 'No folder selected.');
-      return;
+    await saveToLibraryAsync(uri);
+    Alert.alert('Saved', `${side} ID card saved to Photos.`);
+  } catch {
+    // Friendly notice and graceful fallback when MediaLibrary isn't bundled in the current build
+    try {
+      Alert.alert(
+        'Photos not available',
+        'This build does not include the Photos module. We will let you pick a folder to save, or you can share the image.',
+      );
+    } catch {}
+    // Android fallback: Storage Access Framework to let user pick folder (e.g., Downloads)
+    if (Platform.OS === 'android') {
+      try {
+        const FS: any = await import('expo-file-system');
+        const SAF = FS?.StorageAccessFramework;
+        if (SAF) {
+          const perm = await SAF.requestDirectoryPermissionsAsync();
+          if (perm?.granted && perm.directoryUri) {
+            const filename = `HRCI_ID_${side}_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}.jpg`;
+            const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
+            const destUri = await SAF.createFileAsync(perm.directoryUri, filename, 'image/jpeg');
+            await FS.writeAsStringAsync(destUri, base64, { encoding: FS.EncodingType.Base64 });
+            Alert.alert('Saved', `${side} ID card saved to the selected folder.`);
+            return;
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
-    const filename = `HRCI_ID_Back_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}.jpg`;
-    const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
-    const destUri = await SAF.createFileAsync(perm.directoryUri, filename, 'image/jpeg');
-    await FS.writeAsStringAsync(destUri, base64, { encoding: FS.EncodingType.Base64 });
-    Alert.alert('Saved', 'Back ID card saved to the selected folder.');
-  } catch (e: any) {
-    console.warn('Back save to Files failed', e);
+    // Last resort: share sheet
     try {
       const canShare = await Sharing.isAvailableAsync();
-      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Back ID Card (JPEG)', UTI: 'public.jpeg' });
+      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: `Share ${side} ID Card (JPEG)`, UTI: 'public.jpeg' });
     } catch {}
   }
 }
@@ -90,11 +107,13 @@ export default function HrciIdCardScreen() {
   const [idCardData, setIdCardData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'front' | 'back'>('front');
-  const [canSAF, setCanSAF] = useState<boolean>(false);
-  const [hasML, setHasML] = useState<boolean>(false);
+  // Removed ML/SAF state checks; Save Photo now tries MediaLibrary directly with fallbacks
   // Responsive width: scale down to fit mobile screens, never exceed design base (720) nor stretch too small
   const { width: screenWidth } = useWindowDimensions();
   const exactCardWidth = Math.max(Math.min(screenWidth - 32, 720), 320); // clamp for readability
+  // CR80 portrait aspect (height/width) for 54mm × 85.6mm
+  const CR80_ASPECT = 3.375 / 2.125; // ~1.588
+  const backPreviewHeight = Math.round(exactCardWidth * CR80_ASPECT);
   const exportRef = useRef<HrciIdCardExportHandle>(null);
   const frontShotRef = useRef<ViewShot>(null);
   const backShotRef = useRef<ViewShot>(null);
@@ -127,25 +146,6 @@ export default function HrciIdCardScreen() {
 
   // Fetch composite ID card data AFTER membership/profile load
   useEffect(() => {
-    // Detect Storage Access Framework availability on Android
-    (async () => {
-      if (Platform.OS === 'android') {
-        try {
-          const FS: any = await import('expo-file-system');
-          setCanSAF(!!FS?.StorageAccessFramework);
-        } catch {
-          setCanSAF(false);
-        }
-      }
-      // Detect MediaLibrary native module availability
-      try {
-        const ok = await hasMediaLibraryNative();
-        setHasML(ok);
-      } catch {
-        setHasML(false);
-      }
-    })();
-
     const loadIdCard = async () => {
       try {
         const start = Date.now();
@@ -178,14 +178,22 @@ export default function HrciIdCardScreen() {
   const authorSignUri = setting.authorSignUrl || undefined;
   const photoUri = profile?.profilePhotoUrl;
   const secondLogoUrl = setting?.secondLogoUrl || setting?.frontLogoUrl || logoUri;
-  const headOfficeAddress = setting?.headOfficeAddress || 'Vijayawada';
-  const htmlPath: string | undefined = idCardData?.card?.html;
-  // Use provided base URL from user context
-  const APP_BASE_URL = 'https://app.hrcitodaynews.in/';
-  const baseUrl = APP_BASE_URL.replace(/\/+$/,'');
-  const idSlug = (idCardData?.card?.cardNumber || idNumber || '').toString().trim().toLowerCase();
-  const joinUrl = (base: string, path: string) => `${base}${path.startsWith('/') ? path : `/${path}`}`;
-  const qrValue = htmlPath ? joinUrl(baseUrl, htmlPath) : (idSlug ? joinUrl(baseUrl, `/hrci/idcard/${idSlug}/html`) : baseUrl);
+  const headOfficeAddress = setting?.headOfficeAddress || '';
+  const regionalOfficeAddress = setting?.regionalOfficeAddress || '';
+  const administrationOfficeAddress = setting?.administrationOfficeAddress || '';
+  const contactNumber1 = setting?.contactNumber1 || '';
+  const contactNumber2 = setting?.contactNumber2 || '';
+  // Canonical public website base for QR scan target
+  const WEBSITE_BASE_URL = 'https://humanrightscouncilforindia.org';
+  // Use only the server-provided card number; normalize to lowercase to match website expectation
+  const cardNumRaw = (idCardData?.card?.cardNumber ?? '').toString().trim();
+  const idSlug = cardNumRaw ? cardNumRaw.toLowerCase() : '';
+  // Build the QR value so scanning opens the public ID card page, e.g. https://humanrightscouncilforindia.org/idcard/hrci-2511-00004
+  const qrValue = idSlug
+    ? `${WEBSITE_BASE_URL}/idcard/${encodeURIComponent(idSlug)}`
+    : `${WEBSITE_BASE_URL}/idcard`;
+  // Debug hint to verify at runtime what QR encodes
+  try { console.log('[ID Card] QR target =>', qrValue); } catch {}
 
   useEffect(() => {
   const loadProfile = async () => {
@@ -332,9 +340,10 @@ export default function HrciIdCardScreen() {
               <HrciIdCardExport
                 ref={exportRef}
                 previewWidth={exactCardWidth}
-                // CR80 wallet card: 3.375in × 2.125in @ 600 DPI
+                previewPadToCR80
+                // CR80 wallet card: 3.375in × 2.125in @ 1200 DPI (print-ready)
                 widthInInches={2.125}
-                dpi={600}
+                dpi={1200}
                 padToCR80
                 fitMode="pad"
                 showExportInfo
@@ -395,6 +404,10 @@ export default function HrciIdCardScreen() {
               // Back props
               secondLogoUrl={secondLogoUrl}
               headOfficeAddress={headOfficeAddress}
+              regionalOfficeAddress={regionalOfficeAddress}
+              administrationOfficeAddress={administrationOfficeAddress}
+              contactNumber1={contactNumber1}
+              contactNumber2={contactNumber2}
               qrValue={qrValue}
             />
 
@@ -404,23 +417,18 @@ export default function HrciIdCardScreen() {
               <TouchableOpacity
                 style={styles.actionBtn}
                 onPress={async () => {
-                  if (hasML && exportRef.current?.saveToPhotos) {
-                    await exportRef.current.saveToPhotos();
-                  } else if (Platform.OS === 'android' && canSAF) {
-                    await onFrontSaveToFiles(frontShotRef);
-                  } else {
-                    await shareSingle(frontShotRef, 'Share Front ID Card (JPEG)');
-                  }
+                  // Prefer direct save-to-Photos using hidden high-DPI capture, with SAF/share fallbacks
+                  await saveToPhotosGeneric(frontShotRef, 'Front');
                 }}
               >
                 <MaterialCommunityIcons name={'download' as any} size={20} color="#ffffff" />
                 <Text style={styles.actionText}>Save Photo</Text>
               </TouchableOpacity>
 
-              {/* Share (two images when possible; falls back internally) */}
+              {/* Share (separate front/back at CR80 1200 DPI) */}
               <TouchableOpacity 
                 style={styles.actionBtn}
-                onPress={() => onShareTwoImages(frontShotRef, backShotRef, bothShotRef)}
+                onPress={() => onShareSeparate(frontShotRef, backShotRef)}
               >
                 <MaterialCommunityIcons name="share" size={20} color="#ffffff" />
                 <Text style={styles.actionText}>Share</Text>
@@ -431,12 +439,23 @@ export default function HrciIdCardScreen() {
           // Back mirrors front: non-scroll with fixed bottom actions
           <View style={styles.frontContent}>
             <View style={styles.cardContainer}>
-              <IdCardBack
-                width={exactCardWidth}
-                secondLogoUrl={secondLogoUrl}
-                headOfficeAddress={headOfficeAddress}
-                qrValue={qrValue}
-              />
+              {/* Pad to CR80 portrait container so preview reflects 54mm × 85.6mm proportions */}
+              <View style={{ width: exactCardWidth, height: backPreviewHeight, alignItems: 'center', justifyContent: 'flex-end', backgroundColor: 'transparent' }}>
+                <IdCardBack
+                  width={exactCardWidth}
+                  secondLogoUrl={secondLogoUrl}
+                  headOfficeAddress={headOfficeAddress}
+                  regionalOfficeAddress={regionalOfficeAddress}
+                  administrationOfficeAddress={administrationOfficeAddress}
+                  contactNumber1={contactNumber1}
+                  contactNumber2={contactNumber2}
+                  qrValue={qrValue}
+                />
+              </View>
+              {/* Small info line mirroring front */}
+              <Text style={{ marginTop: 8, fontSize: 12, color: '#e5e7eb', fontWeight: '600' }}>
+                54.0mm × 85.6mm (CR80)
+              </Text>
             </View>
 
             {/* Hidden high-DPI render for Back capture */}
@@ -444,6 +463,10 @@ export default function HrciIdCardScreen() {
               shotRef={backShotRef}
               secondLogoUrl={secondLogoUrl}
               headOfficeAddress={headOfficeAddress}
+              regionalOfficeAddress={regionalOfficeAddress}
+              administrationOfficeAddress={administrationOfficeAddress}
+              contactNumber1={contactNumber1}
+              contactNumber2={contactNumber2}
               qrValue={qrValue}
             />
 
@@ -479,6 +502,10 @@ export default function HrciIdCardScreen() {
               // Back props
               secondLogoUrl={secondLogoUrl}
               headOfficeAddress={headOfficeAddress}
+              regionalOfficeAddress={regionalOfficeAddress}
+              administrationOfficeAddress={administrationOfficeAddress}
+              contactNumber1={contactNumber1}
+              contactNumber2={contactNumber2}
               qrValue={qrValue}
             />
 
@@ -488,23 +515,18 @@ export default function HrciIdCardScreen() {
               <TouchableOpacity
                 style={styles.actionBtn}
                 onPress={async () => {
-                  if (hasML) {
-                    await onBackSaveToPhotos(backShotRef);
-                  } else if (Platform.OS === 'android' && canSAF) {
-                    await onBackSaveToFiles(backShotRef);
-                  } else {
-                    await shareSingle(backShotRef, 'Share Back ID Card (JPEG)');
-                  }
+                  // Prefer direct save-to-Photos using hidden high-DPI capture, with SAF/share fallbacks
+                  await saveToPhotosGeneric(backShotRef, 'Back');
                 }}
               >
                 <MaterialCommunityIcons name={'download' as any} size={20} color="#ffffff" />
                 <Text style={styles.actionText}>Save Photo</Text>
               </TouchableOpacity>
 
-              {/* Share (two images when possible; falls back internally) */}
+              {/* Share (separate front/back at CR80 1200 DPI) */}
               <TouchableOpacity 
                 style={styles.actionBtn}
-                onPress={() => onShareTwoImages(frontShotRef, backShotRef, bothShotRef)}
+                onPress={() => onShareSeparate(frontShotRef, backShotRef)}
               >
                 <MaterialCommunityIcons name="share" size={20} color="#ffffff" />
                 <Text style={styles.actionText}>Share</Text>
@@ -624,7 +646,7 @@ function SkeletonBox({ style }: { style?: any }) {
 // Card-shaped skeleton mimicking ID card layout
 function IdCardSkeleton({ width }: { width: number }) {
   const baseWidth = 720;
-  const BASE_ASPECT = 1.42;
+  const BASE_ASPECT = 3.375 / 2.125; // CR80 portrait
   const baseHeight = Math.round(baseWidth * BASE_ASPECT);
   const scale = width / baseWidth;
   const outHeight = Math.round(width * BASE_ASPECT);
@@ -678,7 +700,7 @@ function IdCardSkeleton({ width }: { width: number }) {
 
           {/* Bottom strip */}
           <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
-            <SkeletonBox style={{ height: 40 }} />
+            <SkeletonBox style={{ height: 56 }} />
           </View>
         </View>
       </View>
@@ -689,21 +711,25 @@ function IdCardSkeleton({ width }: { width: number }) {
 function QRCodeMaybe({ value, size }: { value: string; size: number }) {
   const enc = encodeURIComponent(value);
   const uri = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${enc}`;
-  return <Image source={{ uri }} style={{ width: size, height: size }} />;
+  // Key on value so the Image remounts (avoids stale cache when QR payload changes)
+  return <Image key={value} source={{ uri }} style={{ width: size, height: size }} />;
 }
 
-function IdCardBack({ width, secondLogoUrl, headOfficeAddress, qrValue }: { width: number; secondLogoUrl: string | undefined; headOfficeAddress: string; qrValue: string; }) {
+function IdCardBack({ width, secondLogoUrl, headOfficeAddress, regionalOfficeAddress, administrationOfficeAddress, contactNumber1, contactNumber2, qrValue }: { width: number; secondLogoUrl: string | undefined; headOfficeAddress: string; regionalOfficeAddress?: string; administrationOfficeAddress?: string; contactNumber1?: string; contactNumber2?: string; qrValue: string; }) {
   const baseWidth = 720;
-  const BASE_ASPECT = 1.42; // match front
+  const BASE_ASPECT = 3.375 / 2.125; // CR80 portrait
   const baseHeight = Math.round(baseWidth * BASE_ASPECT);
   const scale = width / baseWidth;
   const outHeight = Math.round(width * BASE_ASPECT);
 
-  const bandH = 58;
-  const blueH = 50;
+  // Slightly taller header bands to reduce top white balance
+  const bandH = 56;
+  const blueH = 48;
+  const BOTTOM_STRIP_H = 56; // increased bottom red strip height
   const title = 'Human Rights Council for India (HRCI)';
-  const logoSize = 200; // slightly smaller
-  const qrSize = 200;   // slightly smaller
+  // Scale up logo and QR to better fill vertical space
+  const logoSize = 180;
+  const qrSize = 240;
 
   return (
     <View style={{ width, height: outHeight, alignItems: 'center', justifyContent: 'center' }}>
@@ -714,19 +740,19 @@ function IdCardBack({ width, secondLogoUrl, headOfficeAddress, qrValue }: { widt
           <View style={{ position: 'absolute', top: bandH, left: 0, right: 0, height: blueH, backgroundColor: '#17007A' }} />
           <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' }}>
             <Text
-              style={{ color: '#ffffff', fontSize: 36, fontWeight: '900', textAlign: 'center' }}
+              style={{ color: '#ffffff', fontSize: 34, fontWeight: '900', textAlign: 'center' }}
               numberOfLines={1}
               adjustsFontSizeToFit
-              minimumFontScale={0.5}
+              minimumFontScale={0.6}
             >
               {title}
             </Text>
           </View>
         </View>
 
-        <View style={styles.backContentPad}>
-        {/* Center logo */}
-        <View style={{ alignItems: 'center', marginTop: 24, marginBottom: 12 }}>
+  <View style={[styles.backContentPad, { paddingBottom: BOTTOM_STRIP_H + 10 }]}>
+          {/* Center logo */}
+          <View style={{ alignItems: 'center', marginTop: 8, marginBottom: 8 }}>
         {secondLogoUrl ? (
           <Image source={{ uri: secondLogoUrl }} style={{ width: logoSize, height: logoSize, resizeMode: 'cover', backgroundColor: '#e5e7eb' }} />
         ) : (
@@ -737,8 +763,8 @@ function IdCardBack({ width, secondLogoUrl, headOfficeAddress, qrValue }: { widt
       </View>
 
       {/* Registration block */}
-      <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
-        <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', lineHeight: 20 }}>
+      <View style={{ paddingHorizontal: 12, marginTop: 4 }}>
+        <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', lineHeight: 20, textAlign: 'center' }}>
           {"REGISTERED BY \" MINISTRY OF CORPORATE AFFAIRS, INDIA\"\n" +
            "REGD NO: CSR0036936 OF \"HRCI\", CSR 00038592 OF \"HRCI\"\n" +
            "REGD NO: BK-IV-46/2022 \"HRCI\" ISO CERTIFICATE NO: INO/AP12129/0922\n" +
@@ -749,23 +775,50 @@ function IdCardBack({ width, secondLogoUrl, headOfficeAddress, qrValue }: { widt
       </View>
 
       {/* QR Code */}
-      <View style={{ alignItems: 'center', marginVertical: 24 }}>
+      <View style={{ alignItems: 'center', marginVertical: 10 }}>
         <QRCodeMaybe value={qrValue} size={qrSize} />
       </View>
 
-      {/* Head Office and contacts */}
-      <View style={{ alignItems: 'center', marginTop: 4 }}>
-        <Text style={{ fontSize: 18, fontWeight: '900', color: '#111827' }}>Head Office Address</Text>
-        <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', textAlign: 'center', marginTop: 4 }}>{headOfficeAddress}</Text>
-        <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', marginTop: 2 }}>Contact Numbers: 8906189999, 8885888778</Text>
-        <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', marginTop: 2 }}>Email: hrci.9@gmail.com</Text>
-        <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', marginTop: 2 }}>Website: www.hrcihe.com</Text>
+      {/* Addresses and contacts */}
+      <View style={{ alignItems: 'center', marginTop: 4, paddingHorizontal: 12 }}>
+        {/* Head Office */}
+        {headOfficeAddress ? (
+          <View style={{ marginBottom: 10, width: '100%' }}>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: '#111827', textAlign: 'center' }}>Head Office Address</Text>
+            <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', textAlign: 'center', marginTop: 4, lineHeight: 18 }}>{headOfficeAddress}</Text>
+          </View>
+        ) : null}
+
+        {/* Regional Office */}
+        {regionalOfficeAddress ? (
+          <View style={{ marginBottom: 10, width: '100%' }}>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: '#111827', textAlign: 'center' }}>Regional Office Address</Text>
+            <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', textAlign: 'center', marginTop: 4, lineHeight: 18 }}>{regionalOfficeAddress}</Text>
+          </View>
+        ) : null}
+
+        {/* Administration Office */}
+        {administrationOfficeAddress ? (
+          <View style={{ marginBottom: 10, width: '100%' }}>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: '#111827', textAlign: 'center' }}>Administration Office Address</Text>
+            <Text style={{ fontSize: 14, fontWeight: '800', color: '#111827', textAlign: 'center', marginTop: 4, lineHeight: 18 }}>{administrationOfficeAddress}</Text>
+          </View>
+        ) : null}
+
+        {/* Contact Numbers */}
+        {(contactNumber1 || contactNumber2) ? (
+          <Text style={{ fontSize: 14, fontWeight: '900', color: '#111827', marginTop: 2 }}>
+            {`Contact Numbers: ${[contactNumber1, contactNumber2].filter(Boolean).join(', ')}`}
+          </Text>
+        ) : null}
       </View>
 
       {/* Terms & Conditions */}
-      <View style={styles.backSection}>
-        <Text style={styles.backSectionTitle}>Terms & Conditions</Text>
-        <Text style={styles.backText}>
+      <View style={[styles.backSection, { marginTop: 10 }]}>
+        <Text style={[styles.backSectionTitle, { fontSize: 18 }]}>
+          Terms & Conditions
+        </Text>
+        <Text style={[styles.backText, { fontSize: 13, lineHeight: 20 }]}>
           1. This card is the property of HRCI and must be returned upon request to HRCI management.{"\n"}
           2. This card can be withdrawn anytime without notice.{"\n"}
           3. Use this card as per the terms and conditions of the cardholder agreement.{"\n"}
@@ -774,40 +827,52 @@ function IdCardBack({ width, secondLogoUrl, headOfficeAddress, qrValue }: { widt
       </View>
 
   {/* Bottom red strip (full-bleed, fixed) */}
-  <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#FE0002', height: 40 }} />
+  <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#FE0002', height: BOTTOM_STRIP_H }} />
       </View>{/* backContentPad */}
     </View>
     </View>
   );
 }
 
-// Back capture helpers (same print sizing and fit as front: 85mm x 55mm @ 600DPI, cover)
-const BACK_WIDTH_IN_INCHES = 55 / 25.4;
-// Increase hidden capture DPI to improve shared image quality
-const BACK_DPI = 600;
-const BASE_ASPECT = 1.42;
-const TARGET_ASPECT = 85 / 55;
+// Back capture helpers (match CR80 portrait: 3.375in x 2.125in) at high DPI
+const BACK_WIDTH_IN_INCHES = 2.125; // 54.0 mm
+// Increase hidden capture DPI to improve saved/share image quality
+const BACK_DPI = 1200;
+// Front design aspect (legacy layout)
+const BASE_ASPECT_FRONT = 1.42;
+// Back design is now true CR80
+const BASE_ASPECT_BACK = 3.375 / 2.125; // ~1.588 (CR80 portrait)
+const TARGET_ASPECT = BASE_ASPECT_BACK; // Export target = CR80 portrait
 
-function BackHiddenCapture({ shotRef, secondLogoUrl, headOfficeAddress, qrValue }: { shotRef: React.RefObject<ViewShot | null>; secondLogoUrl?: string; headOfficeAddress: string; qrValue: string; }) {
+function BackHiddenCapture({ shotRef, secondLogoUrl, headOfficeAddress, regionalOfficeAddress, administrationOfficeAddress, contactNumber1, contactNumber2, qrValue }: { shotRef: React.RefObject<ViewShot | null>; secondLogoUrl?: string; headOfficeAddress: string; regionalOfficeAddress?: string; administrationOfficeAddress?: string; contactNumber1?: string; contactNumber2?: string; qrValue: string; }) {
   const widthInInches = BACK_WIDTH_IN_INCHES;
   const dpi = BACK_DPI;
   const effectiveExportWidth = Math.max(Math.round(widthInInches * dpi), 300);
-  const doPad = Math.abs(TARGET_ASPECT - BASE_ASPECT) > 0.001;
-  const exportHeightPx = Math.round(effectiveExportWidth * (doPad ? TARGET_ASPECT : BASE_ASPECT));
+  const doPad = Math.abs(TARGET_ASPECT - BASE_ASPECT_BACK) > 0.001;
+  const exportHeightPx = Math.round(effectiveExportWidth * (doPad ? TARGET_ASPECT : BASE_ASPECT_BACK));
 
-  // pad (contain) fit: show full card without cropping; center within target aspect
+  // contain fit: keep full card without cropping; anchor to bottom to avoid gap above red strip
   const innerW = effectiveExportWidth;
-  const innerH = Math.round(effectiveExportWidth * BASE_ASPECT);
+  const innerH = Math.round(effectiveExportWidth * BASE_ASPECT_BACK);
 
   return (
     <View style={{ position: 'absolute', left: -9999, top: -9999, width: 1, height: 1, opacity: 0 }}>
       <ViewShot
         ref={shotRef}
         options={{ format: 'jpg', quality: 1, result: 'tmpfile' }}
-        style={{ width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' }}
+        style={{ width: effectiveExportWidth, height: exportHeightPx, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'flex-end' }}
       >
-        <View style={{ width: innerW, height: innerH, alignItems: 'center', justifyContent: 'center' }}>
-          <IdCardBack width={innerW} secondLogoUrl={secondLogoUrl} headOfficeAddress={headOfficeAddress} qrValue={qrValue} />
+        <View style={{ width: innerW, height: innerH, alignItems: 'center', justifyContent: 'flex-end' }}>
+          <IdCardBack
+            width={innerW}
+            secondLogoUrl={secondLogoUrl}
+            headOfficeAddress={headOfficeAddress}
+            regionalOfficeAddress={regionalOfficeAddress}
+            administrationOfficeAddress={administrationOfficeAddress}
+            contactNumber1={contactNumber1}
+            contactNumber2={contactNumber2}
+            qrValue={qrValue}
+          />
         </View>
       </ViewShot>
     </View>
@@ -831,12 +896,12 @@ function FrontHiddenCapture(props: {
   const widthInInches = BACK_WIDTH_IN_INCHES;
   const dpi = BACK_DPI;
   const effectiveExportWidth = Math.max(Math.round(widthInInches * dpi), 300);
-  const doPad = Math.abs(TARGET_ASPECT - BASE_ASPECT) > 0.001;
-  const exportHeightPx = Math.round(effectiveExportWidth * (doPad ? TARGET_ASPECT : BASE_ASPECT));
+  const doPad = Math.abs(TARGET_ASPECT - BASE_ASPECT_FRONT) > 0.001;
+  const exportHeightPx = Math.round(effectiveExportWidth * (doPad ? TARGET_ASPECT : BASE_ASPECT_FRONT));
 
-  // pad (contain) fit: show full card without cropping; center within target aspect
+  // contain fit: keep full card without cropping
   const innerW = effectiveExportWidth;
-  const innerH = Math.round(effectiveExportWidth * BASE_ASPECT);
+  const innerH = Math.round(effectiveExportWidth * BASE_ASPECT_FRONT);
 
   return (
     <View style={{ position: 'absolute', left: -9999, top: -9999, width: 1, height: 1, opacity: 0 }}>
@@ -876,89 +941,10 @@ async function onBackCapture(ref: React.RefObject<ViewShot | null>): Promise<str
   }
 }
 
-async function onFrontSaveToFiles(ref: React.RefObject<ViewShot | null>) {
-  const uri = await onBackCapture(ref);
-  if (!uri) return;
-  try {
-    const FS: any = await import('expo-file-system');
-    const SAF = FS?.StorageAccessFramework;
-    if (!SAF) {
-      // Graceful fallback if SAF isn't available: share the image instead
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Front ID Card (JPEG)', UTI: 'public.jpeg' });
-      else Alert.alert('Not supported', 'Save to Files is not available on this device. Use Share instead.');
-      return;
-    }
-    const perm = await SAF.requestDirectoryPermissionsAsync();
-    if (!perm?.granted || !perm.directoryUri) {
-      Alert.alert('Cancelled', 'No folder selected.');
-      return;
-    }
-    const filename = `HRCI_ID_Front_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}.jpg`;
-    const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
-    const destUri = await SAF.createFileAsync(perm.directoryUri, filename, 'image/jpeg');
-    await FS.writeAsStringAsync(destUri, base64, { encoding: FS.EncodingType.Base64 });
-    Alert.alert('Saved', 'Front ID card saved to the selected folder.');
-  } catch (e: any) {
-    console.warn('Front save to Files failed', e);
-    try {
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Front ID Card (JPEG)', UTI: 'public.jpeg' });
-    } catch {}
-  }
-}
+// Removed: old front Save-to-Files helper (generic save handles SAF fallback)
 
 
-async function onBackSaveToPhotos(ref: React.RefObject<ViewShot | null>) {
-  const uri = await onBackCapture(ref);
-  if (!uri) return;
-  try {
-    // Preflight check for native module presence
-    const EMC: any = await import('expo-modules-core');
-    const NativeModulesProxy = EMC?.NativeModulesProxy ?? EMC?.default?.NativeModulesProxy;
-    const hasNative = !!(NativeModulesProxy?.ExpoMediaLibrary || NativeModulesProxy?.ExponentMediaLibrary);
-    if (!hasNative) throw new Error('MediaLibrary native module not available');
-
-    const ML: any = await import('expo-media-library');
-    const requestPermissionsAsync = ML?.requestPermissionsAsync ?? ML?.default?.requestPermissionsAsync;
-    const saveToLibraryAsync = ML?.saveToLibraryAsync ?? ML?.default?.saveToLibraryAsync;
-    if (!requestPermissionsAsync || !saveToLibraryAsync) throw new Error('MediaLibrary JS API not available');
-    const { status } = await requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Allow Photos/Media permission to save the image.');
-      return;
-    }
-    await saveToLibraryAsync(uri);
-    Alert.alert('Saved', 'Back ID card saved to Photos.');
-  } catch (e: any) {
-    console.warn('Back save to Photos failed', e);
-    // Android fallback: Storage Access Framework to let user pick folder (e.g., Downloads)
-    if (Platform.OS === 'android') {
-      try {
-        const FS: any = await import('expo-file-system');
-        const SAF = FS?.StorageAccessFramework;
-        if (SAF) {
-          const perm = await SAF.requestDirectoryPermissionsAsync();
-          if (perm?.granted && perm.directoryUri) {
-            const filename = `HRCI_ID_Back_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}.jpg`;
-            const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 });
-            const destUri = await SAF.createFileAsync(perm.directoryUri, filename, 'image/jpeg');
-            await FS.writeAsStringAsync(destUri, base64, { encoding: FS.EncodingType.Base64 });
-            Alert.alert('Saved', 'Back ID card saved to the selected folder.');
-            return;
-          }
-        }
-      } catch (safErr) {
-        console.warn('Back SAF fallback failed', safErr);
-      }
-    }
-    // Last resort: share sheet
-    try {
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Back ID Card (JPEG)', UTI: 'public.jpeg' });
-    } catch {}
-  }
-}
+// Removed: old back Save-to-Photos helper (generic save used by both sides)
 
 // Combined Front+Back capture (stacked vertically) for sharing both at once
 function BothHiddenCapture(props: {
@@ -977,17 +963,22 @@ function BothHiddenCapture(props: {
   // Back props
   secondLogoUrl?: string;
   headOfficeAddress: string;
+  regionalOfficeAddress?: string;
+  administrationOfficeAddress?: string;
+  contactNumber1?: string;
+  contactNumber2?: string;
   qrValue: string;
 }) {
   const widthInInches = BACK_WIDTH_IN_INCHES;
   const dpi = BACK_DPI;
   const effectiveExportWidth = Math.max(Math.round(widthInInches * dpi), 300);
-  const doPad = Math.abs(TARGET_ASPECT - BASE_ASPECT) > 0.001;
-  const exportHeightPx = Math.round(effectiveExportWidth * (doPad ? TARGET_ASPECT : BASE_ASPECT));
+  const exportHeightPx = Math.round(effectiveExportWidth * TARGET_ASPECT);
 
-  // pad (contain) for both halves: keep full front/back without crop
-  const innerW = effectiveExportWidth;
-  const innerH = Math.round(effectiveExportWidth * BASE_ASPECT);
+  // contain for each: front centered, back bottom-aligned
+  const innerWFront = effectiveExportWidth;
+  const innerHFront = Math.round(effectiveExportWidth * BASE_ASPECT_FRONT);
+  const innerWBack = effectiveExportWidth;
+  const innerHBack = Math.round(effectiveExportWidth * BASE_ASPECT_BACK);
 
   return (
     <View style={{ position: 'absolute', left: -9999, top: -9999, width: 1, height: 1, opacity: 0 }}>
@@ -998,9 +989,9 @@ function BothHiddenCapture(props: {
       >
         {/* Front (pad/contain) */}
         <View style={{ width: effectiveExportWidth, height: exportHeightPx, alignItems: 'center', justifyContent: 'center' }}>
-          <View style={{ width: innerW, height: innerH, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: innerWFront, height: innerHFront, alignItems: 'center', justifyContent: 'center' }}>
             <HrciIdCardFrontExact
-              width={innerW}
+              width={innerWFront}
               memberName={props.memberName}
               designation={props.designation}
               cellName={props.cellName}
@@ -1015,10 +1006,19 @@ function BothHiddenCapture(props: {
           </View>
         </View>
 
-        {/* Back (pad/contain) */}
-        <View style={{ width: effectiveExportWidth, height: exportHeightPx, alignItems: 'center', justifyContent: 'center' }}>
-          <View style={{ width: innerW, height: innerH, alignItems: 'center', justifyContent: 'center' }}>
-            <IdCardBack width={innerW} secondLogoUrl={props.secondLogoUrl} headOfficeAddress={props.headOfficeAddress} qrValue={props.qrValue} />
+        {/* Back (pad/contain with bottom anchor) */}
+        <View style={{ width: effectiveExportWidth, height: exportHeightPx, alignItems: 'center', justifyContent: 'flex-end' }}>
+          <View style={{ width: innerWBack, height: innerHBack, alignItems: 'center', justifyContent: 'flex-end' }}>
+            <IdCardBack
+              width={innerWBack}
+              secondLogoUrl={props.secondLogoUrl}
+              headOfficeAddress={props.headOfficeAddress}
+              regionalOfficeAddress={props.regionalOfficeAddress}
+              administrationOfficeAddress={props.administrationOfficeAddress}
+              contactNumber1={props.contactNumber1}
+              contactNumber2={props.contactNumber2}
+              qrValue={props.qrValue}
+            />
           </View>
         </View>
       </ViewShot>
@@ -1027,76 +1027,29 @@ function BothHiddenCapture(props: {
 }
 
 // Share two separate images (front and back) together if supported; falls back to combined tall image
-async function onShareTwoImages(
+// Offer a choice to share front or back separately (each captured at CR80 portrait ~85.6mm × 54.0mm @ 1200 DPI)
+function onShareSeparate(
   frontRef: React.RefObject<ViewShot | null>,
-  backRef: React.RefObject<ViewShot | null>,
-  bothRef: React.RefObject<ViewShot | null>
+  backRef: React.RefObject<ViewShot | null>
 ) {
   try {
-    const [frontUriRaw, backUriRaw] = await Promise.all([
-      frontRef.current?.capture?.(),
-      backRef.current?.capture?.(),
-    ]);
-
-    const ensureFileUri = (u?: string | null) => {
-      if (!u) return null;
-      return u.startsWith('file://') ? u : `file://${u}`;
-    };
-
-    const frontUri = ensureFileUri(frontUriRaw);
-    const backUri = ensureFileUri(backUriRaw);
-
-    if (frontUri && backUri) {
-      // Try react-native-share for multi-image share if available
-      let RNShare: any = null;
-      try {
-        // Strict native preflight: only attempt dynamic import if the native module exists
-        const hasNative = !!(NativeModules && (NativeModules as any).RNShare);
-        if (hasNative) {
-          const mod = await import('react-native-share');
-          RNShare = (mod as any)?.default ?? mod;
-        }
-      } catch {}
-
-      if (RNShare?.open) {
-        try {
-          await RNShare.open({
-            urls: [frontUri, backUri],
-            type: 'image/*',
-            showAppsToView: true,
-            failOnCancel: false,
-            title: 'Share ID Card (Front & Back)'
-          });
-          return;
-        } catch (e) {
-          console.warn('react-native-share open failed, falling back to combined', e);
-        }
-      }
-    }
-
-    // Fallback: share combined tall image via expo-sharing
-    await onShareBoth(bothRef);
-  } catch (e: any) {
-    console.warn('Multi-image share failed, falling back to combined image', e);
-    await onShareBoth(bothRef);
+    Alert.alert(
+      'Share ID Card',
+      'Choose which side to share (CR80 • 1200 DPI).',
+      [
+        { text: 'Front', onPress: () => shareSingle(frontRef, 'Share Front ID Card (JPEG)') },
+        { text: 'Back', onPress: () => shareSingle(backRef, 'Share Back ID Card (JPEG)') },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+      { cancelable: true }
+    );
+  } catch (e) {
+    console.warn('Share choice dialog failed, falling back to front', e);
+    shareSingle(frontRef, 'Share Front ID Card (JPEG)');
   }
 }
 
-async function onShareBoth(ref: React.RefObject<ViewShot | null>) {
-  try {
-    const uri = await ref.current?.capture?.();
-    if (!uri) return;
-    const canShare = await Sharing.isAvailableAsync();
-    if (canShare) {
-      await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Share Front + Back (JPEG)', UTI: 'public.jpeg' });
-    } else {
-      Alert.alert('Sharing not available', 'Your device does not support the native share sheet.');
-    }
-  } catch (e: any) {
-    console.warn('Share both failed', e);
-    Alert.alert('Share failed', e?.message ?? String(e));
-  }
-}
+// Removed combined-share flow; per request we share front/back separately
 
 // Share a single captured image (used as a fallback for Save Photo when no Photos/Files)
 async function shareSingle(ref: React.RefObject<ViewShot | null>, title: string) {

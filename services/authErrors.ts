@@ -203,7 +203,12 @@ export class AuthenticationError extends Error implements AuthError {
 // Error handler utility
 export class AuthErrorHandler {
   private static logError(error: AuthError, context: string) {
-    console.error(`[AUTH_ERROR] ${context}:`, {
+    // Downgrade noise for expected refresh failures to warnings to avoid red LogBox overlays in dev
+    const isRefreshNoise =
+      context === 'token_refresh' &&
+      (error.code === AuthErrorCode.TOKEN_INVALID || error.code === AuthErrorCode.REFRESH_FAILED);
+    const logger = isRefreshNoise ? console.warn : console.error;
+    logger(`[AUTH_ERROR] ${context}:`, {
       code: error.code,
       message: error.message,
       userMessage: error.userMessage,

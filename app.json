@@ -4,22 +4,23 @@
     "slug": "khabarx",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/app-icon.png",
     "scheme": "khabarx",
     "userInterfaceStyle": "automatic",
-  "newArchEnabled": false,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/images/app-icon.png",
+        "backgroundColor": "#ffffff",
+        "monochromeImage": "./assets/images/app-icon-mono.png"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.amoghnya.khabarx",
       "googleServicesFile": "./google-services.json",
-  "softwareKeyboardLayoutMode": "resize",
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "CAMERA",
         "READ_MEDIA_IMAGES",
@@ -68,7 +69,7 @@
       "firebase": {
         "webApiKey": "AIzaSyAIwciUGr4JgSo7keO0TiSPzS3E70SeUyw",
         "projectId": "khabarx-f0365",
-  "appId": "1:572758255210:android:4ee81e7bc477d728f44c13",
+        "appId": "1:572758255210:android:4ee81e7bc477d728f44c13",
         "messagingSenderId": "572758255210",
         "storageBucket": "khabarx-f0365.firebasestorage.app"
       },

@@ -201,7 +201,7 @@ export default function DonationHub() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
               renderItem={({ item }) => (
-                <Pressable onPress={() => router.push({ pathname: '/donations/[id]', params: { id: item.id } })} style={styles.campaignCard}>
+                <Pressable onPress={() => router.push({ pathname: '/donations/checkout', params: { eventId: item.id } })} style={styles.campaignCard}>
                   {item.coverImageUrl ? (
                     <Image source={{ uri: item.coverImageUrl }} style={styles.campaignCover} contentFit="cover" />
                   ) : (
@@ -227,31 +227,24 @@ export default function DonationHub() {
           )}
         </View>
 
-        {/* Success Stories & Donor Wall (placeholders) */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Success Stories</Text>
-          {loadingStories ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-              {[1,2,3].map(i => (
-                <View key={i} style={styles.storyCard}>
-                  <Skeleton width={'100%'} height={100} borderRadius={12} />
-                  <View style={{ padding: 10 }}>
-                    <Skeleton width={140} height={12} />
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
-              {(stories.length === 0) ? (
-                [1,2,3].map(i => (
+        {/* Success Stories: hide section if no data */}
+        {(loadingStories || stories.length > 0) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Success Stories</Text>
+            {loadingStories ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+                {[1,2,3].map(i => (
                   <View key={i} style={styles.storyCard}>
-                    <View style={styles.storyMedia} />
-                    <Text numberOfLines={2} style={styles.storyTitle}>Story</Text>
+                    <Skeleton width={'100%'} height={100} borderRadius={12} />
+                    <View style={{ padding: 10 }}>
+                      <Skeleton width={140} height={12} />
+                    </View>
                   </View>
-                ))
-              ) : (
-                stories.map(s => (
+                ))}
+              </ScrollView>
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+                {stories.map(s => (
                   <Pressable key={s.id} onPress={() => router.push({ pathname: '/donations/story/[id]', params: { id: s.id } })} style={styles.storyCard}>
                     {s.heroImageUrl ? (
                       <Image source={{ uri: s.heroImageUrl }} style={styles.storyMedia} contentFit="cover" />
@@ -262,26 +255,25 @@ export default function DonationHub() {
                     )}
                     <Text numberOfLines={2} style={styles.storyTitle}>{s.title || 'Story'}</Text>
                   </Pressable>
-                ))
-              )}
-            </ScrollView>
-          )}
-        </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        )}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Donor Wall</Text>
-          {loadingTop ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-              {[...Array(8)].map((_, i) => (
-                <Skeleton key={i} width={48} height={48} isCircle />
-              ))}
-            </ScrollView>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
-              {topDonors.length === 0 ? (
-                [...Array(8)].map((_, i) => <View key={i} style={styles.avatar} />)
-              ) : (
-                topDonors.map((d) => (
+        {/* Donor Wall: hide section if no data */}
+        {(loadingTop || topDonors.length > 0) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Donor Wall</Text>
+            {loadingTop ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
+                {[...Array(8)].map((_, i) => (
+                  <Skeleton key={i} width={48} height={48} isCircle />
+                ))}
+              </ScrollView>
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
+                {topDonors.map((d) => (
                   <Pressable key={d.key} onPress={() => { setSheetFor(d); setUploadedUrl(null); setApiError(null); }} style={({ pressed }) => [styles.donorCard, pressed && { opacity: 0.85 }]}>
                     <View>
                       <Image
@@ -297,11 +289,11 @@ export default function DonationHub() {
                     </View>
                     <Text numberOfLines={1} style={styles.donorName}>{d.displayName || 'Donor'}</Text>
                   </Pressable>
-                ))
-              )}
-            </ScrollView>
-          )}
-        </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        )}
       </ScrollView>
 
       {/* Bottom sheet to choose new donor photo */}
@@ -353,7 +345,7 @@ export default function DonationHub() {
         <View style={{ flex: 1 }} />
         <Pressable
           disabled={!validAmount}
-          onPress={() => router.push({ pathname: '/hrci/donations/create', params: { amount: String(validAmount) } })}
+          onPress={() => router.push({ pathname: '/donations/checkout', params: { amount: String(validAmount) } })}
           style={[styles.primaryBtn, !validAmount && { opacity: 0.6 }]}
         >
           <Text style={styles.primaryBtnTxt}>Donate</Text>

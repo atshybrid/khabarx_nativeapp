@@ -7,6 +7,9 @@ import { HrciIdCardFrontExact, HrciIdCardFrontProps } from './HrciIdCardFrontExa
 export interface HrciIdCardExportProps extends HrciIdCardFrontProps {
   // Visible width of the on-screen preview (design units will auto-scale inside)
   previewWidth?: number;
+  // Pad the visible preview to a target aspect (e.g., CR80 portrait) rather than using the base card aspect
+  previewPadToCR80?: boolean;
+  previewTargetAspect?: number;
   // Pixel width to render for export (higher => higher DPI). Recommended 1440 or 2160 for print.
   exportWidth?: number;
   // Best-practice print options: compute export size from physical width & DPI
@@ -45,6 +48,8 @@ export interface HrciIdCardExportHandle {
 export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdCardExportProps>(({ previewWidth = 360, exportWidth = 2160, showActions = true, ...cardProps }, ref) => {
   const shotRef = useRef<ViewShot>(null);
   const {
+    previewPadToCR80,
+    previewTargetAspect,
     widthInInches,
     dpi,
     padToCR80,
@@ -68,6 +73,11 @@ export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdC
   const doPad = !!padToCR80 || (!!targetAspect && Math.abs(targetAspect - BASE_ASPECT) > 0.001);
   const exportHeightPx = Math.round(effectiveExportWidth * (doPad ? padAspect : BASE_ASPECT));
   const heightInches = widthInInches ? +( (widthInInches * (doPad ? padAspect : BASE_ASPECT)).toFixed(3) ) : undefined;
+
+  // Visible preview padding logic (so preview can match CR80 proportions like the back card)
+  const previewPadAspect = previewPadToCR80 ? CR80_ASPECT : (previewTargetAspect || BASE_ASPECT);
+  const previewDoPad = !!previewPadToCR80 || (!!previewTargetAspect && Math.abs(previewTargetAspect - BASE_ASPECT) > 0.001);
+  const previewHeightPx = Math.round(previewWidth * (previewDoPad ? previewPadAspect : BASE_ASPECT));
 
   const onCapture = useCallback(async (): Promise<string | null> => {
     try {
@@ -203,7 +213,13 @@ export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdC
     <View style={styles.root}>
       {/* Visible on-screen preview (tap to download) */}
       {disableTapToDownload ? (
-        <HrciIdCardFrontExact {...cardProps} width={previewWidth} />
+        previewDoPad ? (
+          <View style={{ width: previewWidth, height: previewHeightPx, alignItems: 'center', justifyContent: 'center' }}>
+            <HrciIdCardFrontExact {...cardProps} width={previewWidth} />
+          </View>
+        ) : (
+          <HrciIdCardFrontExact {...cardProps} width={previewWidth} />
+        )
       ) : (
         <TouchableOpacity
           onPress={onDownload}
@@ -211,7 +227,13 @@ export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdC
           accessibilityRole="button"
           accessibilityLabel="Download ID card as JPEG"
         >
-          <HrciIdCardFrontExact {...cardProps} width={previewWidth} />
+          {previewDoPad ? (
+            <View style={{ width: previewWidth, height: previewHeightPx, alignItems: 'center', justifyContent: 'center' }}>
+              <HrciIdCardFrontExact {...cardProps} width={previewWidth} />
+            </View>
+          ) : (
+            <HrciIdCardFrontExact {...cardProps} width={previewWidth} />
+          )}
         </TouchableOpacity>
       )}
 

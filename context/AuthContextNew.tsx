@@ -170,6 +170,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const doRefreshToken = useCallback(async (): Promise<boolean> => {
     try {
       console.log('[AUTH] Refreshing token...');
+      // Avoid noisy errors if there are no tokens/refresh token available
+      const existing = await loadTokens();
+      if (!existing?.refreshToken) {
+        console.log('[AUTH] Skip token refresh (no refresh token present)');
+        return false;
+      }
       
   const newTokens = await refreshTokens();
       
@@ -191,7 +197,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return true;
       
     } catch (error) {
-      console.error('[AUTH] Token refresh failed:', error);
+      console.warn('[AUTH] Token refresh failed:', error);
       
       const authError = AuthErrorHandler.handle(error, 'token_refresh');
       dispatch({ type: 'TOKEN_REFRESH_ERROR', payload: authError.userMessage });
@@ -205,7 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: 'LOGOUT' });
         
         try {
-          router.replace('/');
+          router.replace('/language');
         } catch (navError) {
           console.warn('[AUTH] Navigation after logout failed:', navError);
         }

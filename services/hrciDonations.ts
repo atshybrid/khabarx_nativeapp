@@ -104,7 +104,10 @@ export type DonationEvent = {
 export async function getDonationEvents(limit = 20): Promise<DonationEvent[]> {
   const usp = new URLSearchParams({ limit: String(limit) });
   try {
-    const res = await request<{ success?: boolean; count?: number; data?: DonationEvent[] }>(`/donations/events?${usp.toString()}` as any, { method: 'GET' });
+    const res = await request<{ success?: boolean; count?: number; data?: DonationEvent[] }>(
+      `/donations/events?${usp.toString()}` as any,
+      { method: 'GET', noAuth: true }
+    );
     return Array.isArray(res?.data) ? res.data! : [];
   } catch (e: any) {
     const msg = String(e?.message || '').toLowerCase();
@@ -319,4 +322,66 @@ export async function getDonationStoryById(id: string): Promise<DonationStoryDet
     }
     throw e;
   }
+}
+
+// Public quick-pay (direct Razorpay checkout)
+// Public/Direct Razorpay order (server requires auth per sample; we'll send auth if available)
+export type CreateOrderRequest = {
+  eventId?: string;
+  amount: number; // INR
+  donorName?: string;
+  donorAddress?: string;
+  donorMobile?: string;
+  donorEmail?: string;
+  donorPan?: string;
+  isAnonymous?: boolean;
+  shareCode?: string;
+};
+export type CreateOrderResponse = {
+  orderId: string;
+  amount: number;
+  currency: string;
+  provider: string;
+  providerOrderId: string;
+  providerKeyId?: string;
+};
+
+export async function createDonationOrder(payload: CreateOrderRequest): Promise<CreateOrderResponse> {
+  const res = await request<{ success?: boolean; data?: { order?: CreateOrderResponse } }>(
+    `/donations/orders` as any,
+    { method: 'POST', body: payload, noAuth: true }
+  );
+  const order = (res as any)?.data?.order ?? (res as any)?.order ?? res;
+  return order as CreateOrderResponse;
+}
+
+export type ConfirmDonationPayload = {
+  orderId: string;
+  status: 'SUCCESS' | 'FAILED' | string;
+  provider?: string; // 'razorpay'
+  providerRef?: string; // 'razorpay'
+  razorpay_order_id?: string;
+  razorpay_payment_id?: string;
+  razorpay_signature?: string;
+};
+export type ConfirmDonationResponse = {
+  success?: boolean;
+  data?: {
+    status?: string;
+    donationId?: string;
+    receipt?: {
+      id?: string;
+      receiptNo?: string;
+      amount?: number;
+      verify?: { htmlUrl?: string; pdfUrl?: string | null };
+    };
+  };
+};
+
+export async function confirmDonation(payload: ConfirmDonationPayload): Promise<ConfirmDonationResponse> {
+  const res = await request<ConfirmDonationResponse>(
+    `/donations/confirm` as any,
+    { method: 'POST', body: payload, noAuth: true }
+  );
+  return res;
 }

@@ -564,7 +564,7 @@ export default function HrciAdminDashboard() {
           <View style={styles.grid}>
             <GridAction color={{ bg: '#ecfeff', border: '#a5f3fc' }} icon={<Feather name="list" size={18} color={Colors.light.primary} />} label="Donations" onPress={() => router.push('/hrci/donations' as any)} />
             <GridAction color={{ bg: '#fff7ed', border: '#fdba74' }} icon={<Feather name="activity" size={18} color={Colors.light.primary} />} label="Audit Logs" onPress={() => Alert.alert('Coming soon', 'Audit logs')} />
-            <GridAction color={{ bg: '#f0fdfa', border: '#99f6e4' }} icon={<Feather name="credit-card" size={18} color={Colors.light.primary} />} label="ID Card Settings" onPress={() => router.push('/hrci/admin/settings' as any)} />
+            <GridAction color={{ bg: '#f0fdfa', border: '#99f6e4' }} icon={<Feather name="credit-card" size={18} color={Colors.light.primary} />} label="ID Card Settings" onPress={() => router.push('/hrci/admin/idcard-settings' as any)} />
             <GridAction color={{ bg: '#f5f3ff', border: '#ddd6fe' }} icon={<Feather name="shield" size={18} color={Colors.light.primary} />} label="Permissions" onPress={() => Alert.alert('Coming soon', 'Permissions')} />
             <GridAction color={{ bg: '#eef2ff', border: '#e0e7ff' }} icon={<Feather name="search" size={18} color={Colors.light.primary} />} label="Member Donations" onPress={() => setMdOpen(v => !v)} />
           </View>

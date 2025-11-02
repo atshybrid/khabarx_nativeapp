@@ -314,6 +314,55 @@ export async function updateOrgSettings(payload: OrgSettingsPut): Promise<OrgSet
 }
 
 // -------------------------
+// HRCI ID Card Settings (Admin)
+// -------------------------
+
+export type HrciIdCardSettings = {
+  id: string;
+  name?: string | null;
+  isActive?: boolean;
+  primaryColor?: string | null;
+  secondaryColor?: string | null;
+  frontH1?: string | null;
+  frontH2?: string | null;
+  frontH3?: string | null;
+  frontH4?: string | null;
+  frontLogoUrl?: string | null;
+  secondLogoUrl?: string | null;
+  hrciStampUrl?: string | null;
+  authorSignUrl?: string | null;
+  registerDetails?: string | null;
+  frontFooterText?: string | null;
+  headOfficeAddress?: string | null;
+  regionalOfficeAddress?: string | null;
+  administrationOfficeAddress?: string | null;
+  contactNumber1?: string | null;
+  contactNumber2?: string | null;
+  terms?: string[] | null;
+  qrLandingBaseUrl?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type HrciIdCardSettingsPut = Partial<Omit<HrciIdCardSettings, 'id' | 'createdAt' | 'updatedAt'>> & {
+  name?: string;
+};
+
+export async function listIdCardSettings(): Promise<HrciIdCardSettings[]> {
+  const res = await request<any>(`/hrci/idcard/settings`, { method: 'GET' });
+  const data = (res as any)?.data ?? res;
+  if (Array.isArray(data)) return data as HrciIdCardSettings[];
+  if (data && typeof data === 'object' && Array.isArray((data as any).data)) return (data as any).data as HrciIdCardSettings[];
+  return [];
+}
+
+export async function updateIdCardSettings(id: string, payload: HrciIdCardSettingsPut): Promise<HrciIdCardSettings> {
+  const res = await request<any>(`/hrci/idcard/settings/${encodeURIComponent(id)}`, { method: 'PUT', body: payload });
+  const data = (res as any)?.data ?? res;
+  return data as HrciIdCardSettings;
+}
+
+// -------------------------
 // Memberships (Admin)
 // -------------------------
 
