@@ -130,6 +130,26 @@ export type AdminAd = {
 export type AdminAdCreate = {
   title: string;
   mediaType: 'IMAGE' | 'VIDEO';
+  userId?: string | null; // direct userId from record
+  cellId?: string | null;
+  designationId?: string | null;
+  seatSequence?: number | null;
+  idCard?: {
+    id?: string;
+    membershipId?: string;
+    cardNumber?: string | null;
+    issuedAt?: string | null;
+    expiresAt?: string | null;
+    status?: string | null;
+    fullName?: string | null;
+    designationName?: string | null;
+    cellName?: string | null;
+    mobileNumber?: string | null;
+    appointmentLetterPdfUrl?: string | null;
+    appointmentLetterGeneratedAt?: string | null;
+    createdAt?: string | null;
+    updatedAt?: string | null;
+  } | null;
   mediaUrl: string;
   posterUrl?: string; // required when VIDEO
   clickUrl?: string;
@@ -368,18 +388,43 @@ export async function updateIdCardSettings(id: string, payload: HrciIdCardSettin
 
 export type AdminMembership = {
   id: string;
+  userId?: string | null;
+  cellId?: string | null;
+  designationId?: string | null;
   level?: string | null;
-  status?: string | null; // e.g., ACTIVE | PENDING | EXPIRED | SUSPENDED
-  paymentStatus?: string | null;
-  idCardStatus?: string | null;
+  zone?: string | null;
+  status?: string | null; // ACTIVE | PENDING | EXPIRED | SUSPENDED
+  paymentStatus?: string | null; // SUCCESS | NOT_REQUIRED | etc
+  idCardStatus?: string | null; // NOT_CREATED | GENERATED
+  seatSequence?: number | null;
+  lockedAt?: string | null;
   activatedAt?: string | null;
   expiresAt?: string | null;
+  revokedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
   cell?: { id?: string; code?: string; name?: string } | null;
-  designation?: { id?: string; code?: string; name?: string } | null;
+  designation?: { id?: string; code?: string; name?: string; defaultCapacity?: number; validityDays?: number } | null;
   user?: {
     id?: string;
     mobileNumber?: string | null;
     profile?: { fullName?: string | null; profilePhotoUrl?: string | null } | null;
+  } | null;
+  idCard?: {
+    id?: string;
+    membershipId?: string;
+    cardNumber?: string | null;
+    issuedAt?: string | null;
+    expiresAt?: string | null;
+    status?: string | null;
+    fullName?: string | null;
+    designationName?: string | null;
+    cellName?: string | null;
+    mobileNumber?: string | null;
+    appointmentLetterPdfUrl?: string | null;
+    appointmentLetterGeneratedAt?: string | null;
+    createdAt?: string | null;
+    updatedAt?: string | null;
   } | null;
   hrci?: {
     zone?: string | null;
@@ -393,6 +438,7 @@ export type AdminMembership = {
 export type ListAdminMembershipsParams = {
   status?: string; // ACTIVE | PENDING | etc
   level?: string;
+  userId?: string;
   cellId?: string;
   designationId?: string;
   mobileNumber?: string; // optional server-side filter if supported
@@ -400,6 +446,8 @@ export type ListAdminMembershipsParams = {
   hrcStateId?: string;
   hrcDistrictId?: string;
   hrcMandalId?: string;
+  paymentStatus?: string; // SUCCESS | NOT_REQUIRED | FAILED
+  idCardStatus?: string; // GENERATED | NOT_CREATED
   limit?: number; // default 20
   cursor?: string;
 };
@@ -408,6 +456,7 @@ export async function listAdminMemberships(params: ListAdminMembershipsParams = 
   const q = new URLSearchParams();
   if (params.status) q.set('status', params.status);
   if (params.level) q.set('level', params.level);
+  if (params.userId) q.set('userId', params.userId);
   if (params.cellId) q.set('cellId', params.cellId);
   if (params.designationId) q.set('designationId', params.designationId);
   if (params.mobileNumber) q.set('mobileNumber', params.mobileNumber);
@@ -415,6 +464,8 @@ export async function listAdminMemberships(params: ListAdminMembershipsParams = 
   if (params.hrcStateId) q.set('hrcStateId', params.hrcStateId);
   if (params.hrcDistrictId) q.set('hrcDistrictId', params.hrcDistrictId);
   if (params.hrcMandalId) q.set('hrcMandalId', params.hrcMandalId);
+  if (params.paymentStatus) q.set('paymentStatus', params.paymentStatus);
+  if (params.idCardStatus) q.set('idCardStatus', params.idCardStatus);
   q.set('limit', String(Math.min(Math.max(params.limit ?? 20, 1), 50)));
   if (params.cursor) q.set('cursor', params.cursor);
   const res = await request<any>(`/memberships/admin${q.toString() ? `?${q.toString()}` : ''}`);
@@ -424,4 +475,54 @@ export async function listAdminMemberships(params: ListAdminMembershipsParams = 
     nextCursor: (res as any)?.nextCursor ?? null,
     data: (((res as any)?.data ?? []) as any[]).map((m) => (m as AdminMembership)),
   } as { success: boolean; count: number; nextCursor: string | null; data: AdminMembership[] };
+}
+
+// Fetch single membership detail
+export async function getAdminMembership(id: string): Promise<AdminMembership | null> {
+  try {
+    const res = await request<any>(`/memberships/admin/${encodeURIComponent(id)}`);
+    const data = (res as any)?.data ?? res;
+    if (!data || typeof data !== 'object') return null;
+    return data as AdminMembership;
+  } catch (e) {
+    console.warn('[AdminMembership] detail failed', (e as any)?.message || e);
+    return null;
+  }
+}
+
+// Create a new membership (admin flow)
+// Endpoint: POST /memberships/admin/create-member
+// Payload keys vary by level; optional activate boolean triggers immediate activation when supported.
+export type CreateAdminMemberPayload = {
+  fullName: string;
+  mobileNumber: string;
+  cell?: string; // cell code or id depending on backend contract
+  designationCode?: string; // designation code
+  level: string; // NATIONAL | ZONE | STATE | DISTRICT | MANDAL
+  zone?: string;
+  hrcCountryId?: string;
+  hrcStateId?: string;
+  hrcDistrictId?: string;
+  hrcMandalId?: string;
+  activate?: boolean;
+};
+
+export async function createAdminMember(payload: CreateAdminMemberPayload): Promise<AdminMembership> {
+  const body: any = {
+    fullName: payload.fullName,
+    mobileNumber: payload.mobileNumber,
+    level: payload.level,
+    activate: payload.activate ?? false,
+  };
+  if (payload.cell) body.cell = payload.cell;
+  if (payload.designationCode) body.designationCode = payload.designationCode;
+  // Level-specific geo fields
+  if (payload.zone) body.zone = payload.zone;
+  if (payload.hrcCountryId) body.hrcCountryId = payload.hrcCountryId;
+  if (payload.hrcStateId) body.hrcStateId = payload.hrcStateId;
+  if (payload.hrcDistrictId) body.hrcDistrictId = payload.hrcDistrictId;
+  if (payload.hrcMandalId) body.hrcMandalId = payload.hrcMandalId;
+  const res = await request<any>(`/memberships/admin/create-member`, { method: 'POST', body });
+  const data = (res as any)?.data ?? res;
+  return data as AdminMembership;
 }

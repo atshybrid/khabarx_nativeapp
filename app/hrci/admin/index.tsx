@@ -342,6 +342,9 @@ export default function HrciAdminDashboard() {
       {/* Simple top bar with org */}
       <View style={styles.topBar}>
         <View style={styles.headerLeft}>
+          <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.85 }]}>
+            <Feather name="arrow-left" size={18} color={Colors.light.primary} />
+          </Pressable>
           {org?.hrciLogoUrl ? (
             <Image source={{ uri: org.hrciLogoUrl }} style={styles.orgLogo} />
           ) : (
@@ -486,7 +489,8 @@ export default function HrciAdminDashboard() {
             {/* Priority row */}
             <GridAction color={{ bg: '#fff7ed', border: '#fdba74' }} icon={<Feather name="calendar" size={20} color={Colors.light.primary} />} label="Meetings" onPress={() => router.push('/hrci/admin/meetings-list' as any)} />
             <GridAction color={{ bg: '#f0f9ff', border: '#bae6fd' }} icon={<Feather name="users" size={20} color={Colors.light.primary} />} label="KYC Review" onPress={() => router.push('/hrci/admin/kyc' as any)} />
-            <GridAction color={{ bg: '#f0fdfa', border: '#99f6e4' }} icon={<Feather name="user-check" size={20} color={Colors.light.primary} />} label="Members" onPress={() => router.push('/hrci/admin/members' as any)} />
+            {/* Route directly to redesigned global memberships screen */}
+            <GridAction color={{ bg: '#f0fdfa', border: '#99f6e4' }} icon={<Feather name="user-check" size={20} color={Colors.light.primary} />} label="Members" onPress={() => router.push('/memberships' as any)} />
             {/* Secondary row */}
             <GridAction color={{ bg: '#ecfdf5', border: '#a7f3d0' }} icon={<Feather name="plus-circle" size={18} color={Colors.light.primary} />} label="Create Event" onPress={() => router.push('/hrci/admin/events' as any)} />
             <GridAction color={{ bg: '#f5f3ff', border: '#ddd6fe' }} icon={<Feather name="link" size={18} color={Colors.light.primary} />} label="Payment Links" onPress={() => router.push('/hrci/admin/payments' as any)} />
@@ -648,6 +652,7 @@ const styles = StyleSheet.create({
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   orgLogo: { width: 36, height: 36, borderRadius: 6 },
   orgLogoPlaceholder: { width: 36, height: 36, borderRadius: 6, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e5e7eb' },
+  backBtn: { width: 36, height: 36, borderRadius: 8, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' },
   roundBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.15)' },
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: '900' },
   headerSub: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '700' },

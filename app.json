@@ -4,16 +4,16 @@
     "slug": "khabarx",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/app-icon.png",
+    "icon": "./assets/images/khabarx_icon_1024.png",
     "scheme": "khabarx",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+  "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/app-icon.png",
+        "foregroundImage": "./assets/images/khabarx_adaptive_foreground.png",
         "backgroundColor": "#ffffff",
         "monochromeImage": "./assets/images/app-icon-mono.png"
       },
@@ -41,7 +41,7 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "imageWidth": 300,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
@@ -57,7 +57,9 @@
           "microphonePermission": "Allow khabarx to record audio with videos."
         }
       ],
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      "expo-video",
+      "expo-web-browser"
     ],
     "extra": {
       "google": {

@@ -408,13 +408,19 @@ export default function HrciGeoScreen() {
                 end={{ x: 0, y: 1 }}
                 style={[styles.fadeTop, { pointerEvents: 'none' }]}
               />
-              <Button
-                title={returnToAfterGeo ? 'Create meeting' : 'Check Availability'}
-                onPress={continueNext}
-                disabled={!canContinue}
-                backgroundColor={Colors.light.secondary}
-                style={{ width: '100%' }}
-              />
+              {(() => {
+                const membershipFlow = !!returnToAfterGeo && returnToAfterGeo.includes('/hrci/admin/members/');
+                const title = membershipFlow ? 'Check Availability' : (returnToAfterGeo ? 'Create meeting' : 'Check Availability');
+                return (
+                  <Button
+                    title={title}
+                    onPress={continueNext}
+                    disabled={!canContinue}
+                    backgroundColor={Colors.light.secondary}
+                    style={{ width: '100%' }}
+                  />
+                );
+              })()}
             </View>
           </View>
         </TouchableWithoutFeedback>

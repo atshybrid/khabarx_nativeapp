@@ -28,14 +28,22 @@ export default function HrciLevelScreen() {
     useCallback(() => {
       const back = () => {
         try {
-          if (returnToAfterGeo) {
+          // If we can go back in stack always prefer that
+          if (router.canGoBack()) {
             router.back();
-          } else {
-            // also check fallback key if context lost
-            AsyncStorage.getItem('HRCI_RETURN_TO_AFTER_GEO').then((val: string | null) => {
-              if (val) router.back(); else router.replace('/hrci/login');
-            });
+            return true;
           }
+          // If admin member create marker exists, go to memberships list
+          AsyncStorage.getItem('HRCI_ADMIN_MEMBER_CREATE_ACTIVE').then((marker) => {
+            if (marker === '1') {
+              router.replace('/memberships');
+            } else if (returnToAfterGeo) {
+              router.back();
+            } else {
+              // fallback original behavior
+              router.replace('/hrci/login');
+            }
+          });
         } catch {}
         return true;
       };
@@ -71,9 +79,18 @@ export default function HrciLevelScreen() {
         <View style={styles.searchBox}>
           <TouchableOpacity
             onPress={() => {
-              if (returnToAfterGeo) {
-                router.back();
-              } else {
+              try {
+                if (router.canGoBack()) { router.back(); return; }
+                AsyncStorage.getItem('HRCI_ADMIN_MEMBER_CREATE_ACTIVE').then((marker) => {
+                  if (marker === '1') {
+                    router.replace('/memberships');
+                  } else if (returnToAfterGeo) {
+                    router.back();
+                  } else {
+                    router.replace('/hrci/login');
+                  }
+                });
+              } catch {
                 router.replace('/hrci/login');
               }
             }}

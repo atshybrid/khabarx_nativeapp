@@ -1,3 +1,4 @@
+import Toast from '@/components/Toast';
 import { Colors } from '@/constants/Colors';
 import { AdminMembership, listAdminMemberships } from '@/services/hrciAdmin';
 import { Feather } from '@expo/vector-icons';
@@ -20,19 +21,36 @@ export default function HrciAdminMembers() {
   const [stateQuery, setStateQuery] = useState<string>('');
   const [districtQuery, setDistrictQuery] = useState<string>('');
   const [mandalQuery, setMandalQuery] = useState<string>('');
+  // Server-side filter inputs
+  const [userIdFilter, setUserIdFilter] = useState<string>('');
+  const [cellIdFilter, setCellIdFilter] = useState<string>('');
+  const [designationIdFilter, setDesignationIdFilter] = useState<string>('');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>('');
+  const [idCardStatusFilter, setIdCardStatusFilter] = useState<string>('');
 
   const load = useCallback(async (opts?: { cursor?: string | null; append?: boolean }) => {
     const isInitial = !opts?.append && !opts?.cursor;
     if (isInitial) setLoading(true);
     const start = Date.now();
     try {
-  const res = await listAdminMemberships({ status: status || undefined, level: level || undefined, limit: 20, cursor: opts?.cursor || undefined });
+  const res = await listAdminMemberships({
+      status: status || undefined,
+      level: level || undefined,
+      userId: userIdFilter.trim() || undefined,
+      cellId: cellIdFilter.trim() || undefined,
+      designationId: designationIdFilter.trim() || undefined,
+      paymentStatus: paymentStatusFilter.trim() || undefined,
+      idCardStatus: idCardStatusFilter.trim() || undefined,
+      limit: 20,
+      cursor: opts?.cursor || undefined,
+    });
       const data = Array.isArray(res.data) ? res.data : [];
       setNextCursor(res.nextCursor || null);
       setItems(prev => (opts?.append ? [...prev, ...data] : data));
     } catch (e) {
-      // TODO: show toast
       console.warn('[AdminMembers] load failed', (e as any)?.message || e);
+      // Fire toast event
+      try { const evt = require('@/services/events'); evt.emit?.('toast:show', { message: 'Failed to load members' }); } catch {}
     } finally {
       if (isInitial) {
         const elapsed = Date.now() - start;
@@ -42,7 +60,7 @@ export default function HrciAdminMembers() {
         setLoading(false);
       }
     }
-  }, [status, level]);
+  }, [status, level, userIdFilter, cellIdFilter, designationIdFilter, paymentStatusFilter, idCardStatusFilter]);
 
   useEffect(() => {
     load();
@@ -113,6 +131,11 @@ export default function HrciAdminMembers() {
     setStateQuery('');
     setDistrictQuery('');
     setMandalQuery('');
+    setUserIdFilter('');
+    setCellIdFilter('');
+    setDesignationIdFilter('');
+    setPaymentStatusFilter('');
+    setIdCardStatusFilter('');
   }, []);
 
   const renderItem = useCallback(({ item }: { item: AdminMembership }) => {
@@ -122,7 +145,8 @@ export default function HrciAdminMembers() {
     const st = item?.status || '—';
     const cell = item?.cell?.name || item?.cell?.code || '';
     const desig = item?.designation?.name || item?.designation?.code || '';
-    const subtitle = [mobile, cell].filter(Boolean).join(' · ');
+    const cardNumber = item?.idCard?.cardNumber || '';
+    const subtitle = [mobile, cell, cardNumber].filter(Boolean).join(' · ');
     const locParts: string[] = [];
     const stateName = (item as any)?.hrci?.state?.name || (item as any)?.hrci?.state || '';
     const districtName = (item as any)?.hrci?.district?.name || (item as any)?.hrci?.district || '';
@@ -134,7 +158,7 @@ export default function HrciAdminMembers() {
     const photo = item?.user?.profile?.profilePhotoUrl || '';
     const statusColor = st === 'ACTIVE' ? '#16a34a' : st === 'PENDING' ? '#e67e22' : st === 'EXPIRED' ? '#64748b' : '#ef4444';
     return (
-      <Pressable onPress={() => { /* later: navigate to detail */ }} style={({ pressed }) => [styles.card, pressed && { opacity: 0.95 }]}>
+      <Pressable onPress={() => router.push(`/hrci/admin/members/${item.id}` as any)} style={({ pressed }) => [styles.card, pressed && { opacity: 0.95 }]}>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={styles.avatarWrap}>
             {photo ? (
@@ -242,6 +266,26 @@ export default function HrciAdminMembers() {
         {showMoreFilters && (
           <View style={{ gap: 8, marginTop: 8 }}>
             <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>User ID</Text>
+              <TextInput value={userIdFilter} onChangeText={setUserIdFilter} placeholder="Exact userId" placeholderTextColor="#94a3b8" style={styles.fieldInput} autoCapitalize="none" />
+            </View>
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>Cell ID</Text>
+              <TextInput value={cellIdFilter} onChangeText={setCellIdFilter} placeholder="Exact cellId" placeholderTextColor="#94a3b8" style={styles.fieldInput} autoCapitalize="none" />
+            </View>
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>Designation ID</Text>
+              <TextInput value={designationIdFilter} onChangeText={setDesignationIdFilter} placeholder="Exact designationId" placeholderTextColor="#94a3b8" style={styles.fieldInput} autoCapitalize="none" />
+            </View>
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>Payment</Text>
+              <TextInput value={paymentStatusFilter} onChangeText={setPaymentStatusFilter} placeholder="SUCCESS / FAILED" placeholderTextColor="#94a3b8" style={styles.fieldInput} autoCapitalize="characters" />
+            </View>
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>ID Card</Text>
+              <TextInput value={idCardStatusFilter} onChangeText={setIdCardStatusFilter} placeholder="GENERATED / NOT_CREATED" placeholderTextColor="#94a3b8" style={styles.fieldInput} autoCapitalize="characters" />
+            </View>
+            <View style={styles.fieldRow}>
               <Text style={styles.fieldLabel}>Cell</Text>
               <TextInput value={cellQuery} onChangeText={setCellQuery} placeholder="Name or code" placeholderTextColor="#94a3b8" style={styles.fieldInput} />
             </View>
@@ -295,6 +339,11 @@ export default function HrciAdminMembers() {
           ) : null}
         />
       )}
+      {/* FAB to create member */}
+      <Pressable onPress={() => router.push('/hrci/admin/members/create' as any)} style={({ pressed }) => [styles.fab, pressed && { opacity: 0.9 }]}>
+        <Feather name="plus" size={22} color="#fff" />
+      </Pressable>
+      <Toast />
     </SafeAreaView>
   );
 }
@@ -356,4 +405,5 @@ const styles = StyleSheet.create({
   fieldRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fieldLabel: { width: 72, color: '#64748b', fontWeight: '800' },
   fieldInput: { flex: 1, height: 40, borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', paddingHorizontal: 10, backgroundColor: '#f8fafc', color: '#0f172a' },
+  fab: { position: 'absolute', right: 18, bottom: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.light.primary, alignItems: 'center', justifyContent: 'center', elevation: 6 },
 });

@@ -84,10 +84,14 @@ where java
 ```
 Should show only paths inside `jdk-17`.
 
-### 4. Gradle Wrapper Enforcement
-We also set `org.gradle.java.home` in `android/gradle.properties` as a fallback. If Gradle still launches with the wrong JVM, run via the helper script:
+### 4. Quick JDK Enforcement (without editing gradle.properties)
+Prefer NOT hardcoding `org.gradle.java.home` for cross-platform EAS builds. Instead, use either:
 
 ```powershell
+# One-off session override
+$env:JAVA_HOME="C:\Program Files\Java\jdk-17"; $env:Path="C:\Program Files\Java\jdk-17\bin;" + $env:Path
+
+# Or the helper script (recommended)
 powershell -File scripts/use-jdk17.ps1 -- ./android/gradlew.bat -v
 ```
 
@@ -100,13 +104,31 @@ Optionally clear `%USERPROFILE%/.gradle/caches` (will force dependency re-downlo
 
 ### 6. Rebuild
 ```powershell
-npx expo run:android
+npm run android:dev
 ```
 
 If it still fails, re-run with diagnostics:
 ```powershell
 ./android/gradlew.bat assembleDebug --stacktrace --info
 ```
+
+### 9. Prebuild vs Checked-in Native Projects
+Expo Doctor may warn that config fields won't sync because `android/` is committed. You have two valid strategies:
+
+| Strategy | Pros | Cons |
+|----------|------|------|
+| Keep `android/` committed (current) | Full manual native control; faster iteration | Must manually reflect app.json changes (icon, orientation, plugins) in native when needed |
+| Use Prebuild (gitignore `android/`) | App config stays source of truth; automatic sync | Slower first build; must regenerate after native customizations |
+
+To switch to Prebuild later:
+```powershell
+git rm -r --cached android
+echo '/android' >> .gitignore
+npx expo prebuild --clean
+```
+Then commit and rely on `app.json` for native settings.
+
+For now this project intentionally keeps `android/` committed. Treat doctor’s notice as informational.
 
 ### 7. Common Pitfalls
 - VS Code reuses an old integrated shell that still has previous PATH.

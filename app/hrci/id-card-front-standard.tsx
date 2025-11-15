@@ -12,12 +12,18 @@ export default function HrciIdCardFrontStandardScreen() {
         <Text style={styles.heading}>Standard ID-1 Card Front Preview</Text>
         <HrciIdCardFrontStandard
           width={cardWidth}
+          topBandHeightInches={0.24}
+          blueBandHeightInches={0.24}
+          bottomBandHeightInches={0.1806}
+          bodyHeightInches={(2.1264 - (0.24 + 0.24 + 0.1806))}
+          topTitle="HUMAN RIGHTS COUNCIL FOR INDIA (HRCI)"
           memberName="MRS. KONA VARALAKSHMI"
           designation="SOUTH INDIA WOMEN PORT PRESIDENT"
           cellName="Member Cell Name"
           idNumber="HRCI-IND-SI-WP-001"
           contactNumber="9603005183"
           validUpto="MARCH 2027"
+          showSectionDebug
         />
         <View style={{ height: 48 }} />
       </ScrollView>

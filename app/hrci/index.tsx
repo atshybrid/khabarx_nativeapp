@@ -1,11 +1,15 @@
 import { safeBack } from '@/utils/navigation';
 import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     Animated,
     Image,
@@ -23,7 +27,7 @@ import { loadTokens } from '../../services/auth';
 import { on } from '../../services/events';
 import { downloadPdfWithFallbacks } from '../../services/fileDownload';
 import { canCreateHrciCase, getHrciCasesSummary, HrciCasesSummary } from '../../services/hrciCases';
-import { request } from '../../services/http';
+import { getBaseUrl, request } from '../../services/http';
 import { getKYCStatus } from '../../services/kyc';
 import { getMembershipProfile } from '../../services/membership';
 
@@ -128,6 +132,8 @@ export default function HrciDashboard() {
   const [cardInfo, setCardInfo] = useState<CardInfo | null>(null);
   const [kycOverride, setKycOverride] = useState<'PENDING' | 'VERIFIED' | 'REJECTED' | 'NOT_STARTED' | undefined>(undefined);
   const photoPromptShownRef = useRef(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [downloadingLetter, setDownloadingLetter] = useState(false);
 
 
   const loadProfile = async () => {
@@ -361,6 +367,114 @@ export default function HrciDashboard() {
     console.log('[Dashboard] ✅ Refresh completed');
   };
 
+  // Helper: base64 encode from ArrayBuffer
+  const toBase64 = (buffer: ArrayBuffer): string => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.length;
+    let base64 = '';
+    let i = 0;
+    while (i < len) {
+      const b1 = bytes[i++] ?? 0;
+      const b2 = bytes[i++] ?? 0;
+      const b3 = bytes[i++] ?? 0;
+      const enc1 = b1 >> 2;
+      const enc2 = ((b1 & 3) << 4) | (b2 >> 4);
+      const enc3 = ((b2 & 15) << 2) | (b3 >> 6);
+      const enc4 = b3 & 63;
+      if (isNaN(b2 as any)) {
+        base64 += chars.charAt(enc1) + chars.charAt(enc2) + '==';
+      } else if (isNaN(b3 as any)) {
+        base64 += chars.charAt(enc1) + chars.charAt(enc2) + chars.charAt(enc3) + '=';
+      } else {
+        base64 += chars.charAt(enc1) + chars.charAt(enc2) + chars.charAt(enc3) + chars.charAt(enc4);
+      }
+    }
+    return base64;
+  };
+
+  // Download ID Card PDF directly from dashboard using card number
+  const downloadIdCardPdf = async () => {
+    try {
+      setDownloadingPdf(true);
+      let cn = String(cardInfo?.cardNumber || '').trim().toLowerCase();
+      if (!cn) {
+        try {
+          const tokens = await loadTokens();
+          const u: any = tokens?.user;
+          cn = String(
+            u?.membership?.card?.cardNumber ||
+            u?.membership?.cardNumber ||
+            u?.card?.cardNumber || ''
+          ).trim().toLowerCase();
+        } catch {}
+      }
+      if (!cn) {
+        Alert.alert('ID Card', 'Card number not available. Please refresh.');
+        return;
+      }
+      const jwt = await AsyncStorage.getItem('jwt');
+      const url = `${getBaseUrl()}/hrci/idcard/pdf`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/pdf',
+          'Content-Type': 'application/json',
+          ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+        },
+        body: JSON.stringify({ cardNumber: cn, side: 'both', design: 'poppins' }),
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => '');
+        throw new Error(msg || `HTTP ${res.status}`);
+      }
+      const dispo = res.headers.get('content-disposition') || '';
+      const m = dispo.match(/filename="?([^";]+)"?/i);
+      const filename = (m?.[1] || `${cn}-both.pdf`).replace(/[^A-Za-z0-9._-]/g, '_');
+      const arr = await res.arrayBuffer();
+      const b64 = toBase64(arr);
+
+      // Try Android Storage Access Framework first
+      const SAF: any = (FileSystem as any).StorageAccessFramework;
+      let savedUri: string | null = null;
+      try {
+        if (SAF?.requestDirectoryPermissionsAsync) {
+          const perm = await SAF.requestDirectoryPermissionsAsync();
+          if (perm?.granted && perm.directoryUri) {
+            const dest = await SAF.createFileAsync(perm.directoryUri, filename, 'application/pdf');
+            await FileSystem.writeAsStringAsync(dest, b64, { encoding: 'base64' as any });
+            savedUri = dest;
+            try { Alert.alert('Saved', `ID Card saved as ${filename}`); } catch {}
+          }
+        }
+      } catch (e) {
+        console.warn('[Dashboard] SAF save failed', e);
+      }
+
+      if (!savedUri) {
+        // Fallback: save to cache/doc and share
+        const baseDir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory || '';
+        const temp = `${baseDir}${filename}`;
+        await FileSystem.writeAsStringAsync(temp, b64, { encoding: 'base64' as any });
+        try {
+          const canShare = await Sharing.isAvailableAsync();
+          if (canShare) {
+            await Sharing.shareAsync(temp, { mimeType: 'application/pdf', dialogTitle: 'ID Card (PDF)', UTI: 'com.adobe.pdf' } as any);
+          } else {
+            Alert.alert('PDF Ready', 'File saved in app storage.');
+          }
+        } catch (e) {
+          Alert.alert('Saved', `File saved: ${temp}`);
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Dashboard] ID Card PDF download failed', e);
+      Alert.alert('ID Card', e?.message || String(e));
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
     // Listen for profile updates (photo etc.) to refresh relevant data
@@ -571,9 +685,13 @@ export default function HrciDashboard() {
                 })()}
                 </View>
               </View>
-              <TouchableOpacity onPress={() => router.push('/hrci/id-card' as any)} style={styles.idCardFullBtn}>
-                <MaterialCommunityIcons name="card-account-details" size={22} color="#ffffff" />
-                <Text style={styles.idCardFullText}>View ID Card</Text>
+              <TouchableOpacity onPress={downloadIdCardPdf} style={[styles.idCardFullBtn, downloadingPdf ? { opacity: 0.85 } : null]} disabled={downloadingPdf}>
+                {downloadingPdf ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <MaterialCommunityIcons name="card-account-details" size={22} color="#ffffff" />
+                )}
+                <Text style={styles.idCardFullText}>{downloadingPdf ? 'Downloading…' : 'Download ID Card'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -699,7 +817,11 @@ export default function HrciDashboard() {
                     title="Appointment Letter"
                     subtitle="Download / Share PDF"
                     icon="file-pdf-box"
+                    loading={downloadingLetter}
+                    disabled={downloadingLetter}
                     onPress={async () => {
+                      if (downloadingLetter) return;
+                      setDownloadingLetter(true);
                       try {
                         // First, ask backend to generate (if needed) and return the latest URL
                         const resp = await request<any>('/memberships/me/appointment-letter?generate=true', { method: 'GET' });
@@ -741,6 +863,8 @@ export default function HrciDashboard() {
                         } catch {
                           Alert.alert('Appointment Letter', e?.message || 'Unable to download or open.');
                         }
+                      } finally {
+                        setDownloadingLetter(false);
                       }
                     }}
                   />
@@ -786,16 +910,25 @@ function SkeletonBox({ style }: { style?: any }) {
   );
 }
 
-function ActionCard({ title, subtitle, icon, onPress }: {
+function ActionCard({ title, subtitle, icon, onPress, loading, disabled }: {
   title: string;
   subtitle: string;
   icon: string;
   onPress: () => void;
+  loading?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <TouchableOpacity style={styles.actionCard} onPress={onPress}>
-      <MaterialCommunityIcons name={icon as any} size={28} color="#FE0002" />
-      <Text style={styles.actionTitle}>{title}</Text>
+    <TouchableOpacity style={[styles.actionCard, disabled ? { opacity: 0.6 } : null]} onPress={onPress} disabled={disabled}>
+      {loading ? (
+        <Animated.View style={{ padding: 2 }}>
+          {/* Use the existing theme color for visibility */}
+          <MaterialCommunityIcons name="loading" size={28} color="#FE0002" />
+        </Animated.View>
+      ) : (
+        <MaterialCommunityIcons name={icon as any} size={28} color="#FE0002" />
+      )}
+      <Text style={styles.actionTitle}>{loading ? 'Please wait…' : title}</Text>
       <Text style={styles.actionSubtitle}>{subtitle}</Text>
     </TouchableOpacity>
   );

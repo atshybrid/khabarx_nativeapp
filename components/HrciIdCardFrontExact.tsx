@@ -8,7 +8,11 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 export interface HrciIdCardFrontProps {
   memberName: string;
   designation: string;
+  /** Optional level/title to pair with designation (used by standard variant). */
+  designationLevel?: string;
   cellName: string;
+  /** Derived work place name (district / mandal / state / zone / country) */
+  workPlace?: string;
   idNumber: string;
   contactNumber: string;
   validUpto: string; // e.g., 'MARCH 2027'
@@ -40,6 +44,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
   memberName,
   designation,
   cellName,
+  workPlace,
   idNumber,
   contactNumber,
   validUpto,
@@ -154,9 +159,11 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
             <View style={styles.detailsTable}>
               <DetailRow label="Name" value={memberName} />
               <DetailRow label="Designation" value={designation} />
-              <DetailRow label="ID No" value={idNumber} />
-              <DetailRow label="Contact No" value={contactNumber} />
-              <DetailRow label="Valid Upto" value={validUpto} />
+              <DetailRow label="Cell" value={cellName} />
+              <DetailRow label="Work Place" value={workPlace || ''} />
+              <DetailRow label="ID" value={idNumber} />
+              <DetailRow label="Mob" value={contactNumber} />
+              <DetailRow label="Valid" value={validUpto} />
             </View>
           </View>
         </View>
@@ -254,11 +261,11 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   detailsTable: { alignSelf: 'center', position: 'relative', zIndex: 1 },
-  detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 5, flexWrap: 'nowrap' },
-  // Further increase font sizes for Name, Designation, ID No, Contact No, and Valid Upto rows
-  detailLabel: { width: 190, fontSize: 32, fontWeight: '900', color: '#111827', letterSpacing: 0.25, textAlign: 'left', lineHeight: 44 },
-  colon: { width: 18, fontSize: 32, fontWeight: '900', color: '#111827', textAlign: 'center', lineHeight: 44 },
-  detailValue: { width: 430, fontSize: 32, fontWeight: '900', color: '#111827', lineHeight: 44, textAlign: 'left' },
+  // Compact detail rows (exact card) – reduced vertical padding & smaller font to decrease overall height
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 2, flexWrap: 'nowrap' },
+  detailLabel: { width: 190, fontSize: 26, fontWeight: '900', color: '#111827', letterSpacing: 0.25, textAlign: 'left', lineHeight: 32 },
+  colon: { width: 18, fontSize: 26, fontWeight: '900', color: '#111827', textAlign: 'center', lineHeight: 32 },
+  detailValue: { width: 430, fontSize: 26, fontWeight: '900', color: '#111827', lineHeight: 32, textAlign: 'left' },
   signatureRow: { flexDirection: 'column', alignItems: 'flex-end', width: 'auto', marginTop: 0, position: 'absolute', right: 0, bottom: 12, zIndex: 20, elevation: 8 },
   signatureOverlay: { position: 'absolute', alignItems: 'flex-end', zIndex: 999, elevation: 12 },
   signatureContainer: { flexDirection: 'column', alignItems: 'flex-end' },
