@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function MembershipsScreen() {
   // Removed unused showFilters state.
-  const { data: members, filters, setFilters, resetFilters, loading, error, refreshing, hasMore, loadMore, refresh, reload } = useAdminMemberships({ initialFilters: { status: 'ACTIVE' }, pageSize: 20 });
+  const { data: members, cursor, filters, setFilters, resetFilters, loading, error, refreshing, hasMore, loadMore, refresh, reload } = useAdminMemberships({ initialFilters: { status: 'ACTIVE' }, pageSize: 20 });
   const meta = useMembershipMeta();
   const [picker, setPicker] = useState<null | 'level' | 'cell' | 'designation' | 'country' | 'state' | 'district' | 'mandal'>(null);
   const selectedCell = useMemo(() => meta.cells.find(c => c.id === filters.cellId), [meta.cells, filters.cellId]);
@@ -154,16 +154,29 @@ export default function MembershipsScreen() {
           renderItem={renderItem}
           refreshing={refreshing}
           onRefresh={onRefresh}
-          onEndReachedThreshold={0.5}
-          onEndReached={loadMore}
+          onEndReachedThreshold={0.6}
+          onEndReached={() => { if (!loading && hasMore) loadMore(); }}
           contentContainerStyle={styles.listContainer}
           initialNumToRender={12}
           windowSize={5}
           getItemLayout={(_, index) => ({ length: ITEM_HEIGHT, offset: ITEM_HEIGHT * index, index })}
           removeClippedSubviews
-          ListFooterComponent={loading && !refreshing ? (
-            <ActivityIndicator style={{ marginVertical: 20 }} color={Colors.light.primary} />
-          ) : null}
+          ListFooterComponent={() => (
+            <View style={styles.footerContainer}>
+              {loading && !refreshing ? (
+                <ActivityIndicator style={{ marginVertical: 12 }} color={Colors.light.primary} />
+              ) : null}
+              {hasMore && !loading ? (
+                <Pressable onPress={loadMore} style={({ pressed }) => [styles.loadMoreBtn, pressed && { opacity: 0.85 }]} accessibilityRole="button" accessibilityLabel="Load more members">
+                  <Text style={styles.loadMoreText}>Load more</Text>
+                </Pressable>
+              ) : null}
+              {/* Cursor debug - show truncated cursor if available (helpful for manual inspection) */}
+              {cursor ? (
+                <Text style={styles.cursorText} numberOfLines={1}>cursor: {String(cursor).slice(0, 80)}{String(cursor).length > 80 ? '…' : ''}</Text>
+              ) : null}
+            </View>
+          )}
           ListEmptyComponent={!loading && !error ? (
             <View style={styles.emptyState}>
               <MaterialCommunityIcons name="account-search" size={64} color="#d1d5db" />
@@ -338,6 +351,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   listContainer: { flexGrow: 1, paddingBottom: 100 },
+  footerContainer: { alignItems: 'center', paddingVertical: 16 },
+  loadMoreBtn: { backgroundColor: Colors.light.primary, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
+  loadMoreText: { color: '#ffffff', fontWeight: '700' },
+  cursorText: { marginTop: 8, fontSize: 11, color: '#6b7280', paddingHorizontal: 12 },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',

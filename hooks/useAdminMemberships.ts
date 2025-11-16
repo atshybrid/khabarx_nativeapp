@@ -24,6 +24,7 @@ interface UseAdminMembershipsOptions {
 
 interface UseAdminMembershipsResult {
   data: MembershipRecord[];
+  cursor: string | null;
   loading: boolean;
   error: string | null;
   refreshing: boolean;
@@ -138,6 +139,7 @@ export function useAdminMemberships(options: UseAdminMembershipsOptions = {}): U
 
   return {
     data,
+    cursor,
     loading,
     error,
     refreshing,

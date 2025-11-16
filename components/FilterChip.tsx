@@ -9,15 +9,18 @@ interface FilterChipProps {
   onPress?: () => void;
   style?: ViewStyle;
   accessibilityLabel?: string;
+  accessibilityHint?: string;
 }
 
-export const FilterChip: React.FC<FilterChipProps> = ({ label, active, color, onPress, style, accessibilityLabel }) => {
+export const FilterChip: React.FC<FilterChipProps> = ({ label, active, color, onPress, style, accessibilityLabel, accessibilityHint }) => {
   const activeBg = color || Theme.color.primary;
+  const generatedHint = active ? 'Double tap to deselect filter' : 'Double tap to apply filter';
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected: !!active }}
       accessibilityLabel={accessibilityLabel || label}
+      accessibilityHint={accessibilityHint || generatedHint}
       onPress={onPress}
       style={({ pressed }) => [
         styles.chip,

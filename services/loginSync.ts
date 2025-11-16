@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { afterPreferencesUpdated, getLanguages, getUserPreferences, resolveEffectiveLanguage, updatePreferences } from './api';
-import { loadTokens } from './auth';
+import { loadTokens, logoutAndClearProfile } from './auth';
 import { emit } from './events';
 import { ensureNotificationsSetup, getCurrentPushToken } from './notifications';
 import { requestAppPermissions } from './permissions';
@@ -151,7 +151,20 @@ export async function autoSyncPreferences(reason: AutoSyncReason = 'manual') {
 			try { await getUserPreferences(userId); } catch {}
 		try { await AsyncStorage.setItem(LAST_SYNC_AT, String(Date.now())); } catch {}
 	} catch (e) {
-		try { console.warn('[LOGIN_SYNC] autoSyncPreferences failed', (e as any)?.message || e); } catch {}
+		try {
+			const msg = (e as any)?.message || `${e}`;
+			// If server reports that the user no longer exists, perform a local logout to avoid
+			// repeated sync attempts and surface a friendly toast to the user.
+			const isUserNotFound = (e as any)?.status === 404 || String(msg).toLowerCase().includes('user not found');
+			if (isUserNotFound) {
+				try {
+					await logoutAndClearProfile({ mobileNumberHint: undefined });
+				} catch {}
+				try { emit('toast:show', { message: 'Session invalid – please sign in again' } as any); } catch {}
+				return;
+			}
+			console.warn('[LOGIN_SYNC] autoSyncPreferences failed', msg);
+		} catch {}
 	}
 }
 
