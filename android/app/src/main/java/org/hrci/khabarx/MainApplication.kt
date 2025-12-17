@@ -1,4 +1,4 @@
-package com.amoghnya.khabarx
+package org.hrci.khabarx
 
 import android.app.Application
 import android.content.res.Configuration

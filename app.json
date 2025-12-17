@@ -2,7 +2,7 @@
   "expo": {
     "name": "khabarx",
     "slug": "khabarx",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/khabarx_icon_1024.png",
     "scheme": "khabarx",
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/images/app-icon-mono.png"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.amoghnya.khabarx",
+      "package": "org.hrci.khabarx",
       "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [

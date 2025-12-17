@@ -51,6 +51,13 @@ Outputs:
 - APK: `android/app/build/outputs/apk/release/app-release.apk`
 - AAB: `android/app/build/outputs/bundle/release/app-release.aab`
 
+## 3a) Play Console: Deobfuscation (mapping.txt)
+
+If release minification is enabled (R8/ProGuard), Gradle generates a mapping file that you can upload to Google Play so crash reports are readable.
+
+- File path: `android/app/build/outputs/mapping/release/mapping.txt`
+- Play Console: **App bundle explorer** → select the version → **Deobfuscation files** → upload `mapping.txt`
+
 ## 4) Get SHA‑256 (release)
 
 Option A — From the keystore directly:
@@ -72,7 +79,7 @@ Look for the `Variant: release` block → `SHA-256`.
 In your server environment, set:
 
 ```
-ANDROID_APP_PACKAGE=com.amoghnya.khabarx
+ANDROID_APP_PACKAGE=org.hrci.khabarx
 ANDROID_SHA256_DEBUG=<your_debug_fingerprint>
 ANDROID_SHA256_RELEASE=<your_release_fingerprint>
 ```
@@ -82,8 +89,8 @@ Your server will serve `/.well-known/assetlinks.json` accordingly.
 ## 6) Verify App Links on device
 
 ```powershell
-adb shell pm set-app-links --package com.amoghnya.khabarx verify
-adb shell pm get-app-links com.amoghnya.khabarx
+adb shell pm set-app-links --package org.hrci.khabarx verify
+adb shell pm get-app-links org.hrci.khabarx
 ```
 
 If a browser opens due to previous defaults, clear defaults for that browser in Android settings.

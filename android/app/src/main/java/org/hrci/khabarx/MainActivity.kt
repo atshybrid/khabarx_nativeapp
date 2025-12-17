@@ -1,4 +1,5 @@
-package com.amoghnya.khabarx
+package org.hrci.khabarx
+
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

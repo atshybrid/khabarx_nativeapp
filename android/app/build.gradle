@@ -2,6 +2,17 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+def loadKeystoreProps() {
+    def props = new Properties()
+    def propsFile = rootProject.file('keystore.properties')
+    if (propsFile.exists()) {
+        propsFile.withInputStream { stream ->
+            props.load(stream)
+        }
+    }
+    return props
+}
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
@@ -87,13 +98,15 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.amoghnya.khabarx'
+    namespace 'org.hrci.khabarx'
     defaultConfig {
-        applicationId 'com.amoghnya.khabarx'
+        // IMPORTANT: This must be unique on Google Play.
+        // We keep `namespace` unchanged to avoid refactoring Kotlin package paths.
+        applicationId 'org.hrci.khabarx'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 2
+        versionName "1.0.1"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -107,28 +120,37 @@ android {
         release {
             // Best practice: do NOT commit your keystore or passwords.
             // Configure these in android/gradle.properties or via environment.
+            // You may also use android/keystore.properties (gitignored) for local builds.
             // Example gradle.properties:
             //   MYAPP_UPLOAD_STORE_FILE=android/app/khabarx-release.keystore
             //   MYAPP_UPLOAD_KEY_ALIAS=khabarx
             //   MYAPP_UPLOAD_STORE_PASSWORD=***
             //   MYAPP_UPLOAD_KEY_PASSWORD=***
+            def keystoreProps = loadKeystoreProps()
             def storeFileProp = findProperty('MYAPP_UPLOAD_STORE_FILE') ?: System.getenv('MYAPP_UPLOAD_STORE_FILE')
             def storePasswordProp = findProperty('MYAPP_UPLOAD_STORE_PASSWORD') ?: System.getenv('MYAPP_UPLOAD_STORE_PASSWORD')
             def keyAliasProp = findProperty('MYAPP_UPLOAD_KEY_ALIAS') ?: System.getenv('MYAPP_UPLOAD_KEY_ALIAS')
             def keyPasswordProp = findProperty('MYAPP_UPLOAD_KEY_PASSWORD') ?: System.getenv('MYAPP_UPLOAD_KEY_PASSWORD')
 
+            if (!storeFileProp) storeFileProp = keystoreProps.getProperty('MYAPP_UPLOAD_STORE_FILE')
+            if (!storePasswordProp) storePasswordProp = keystoreProps.getProperty('MYAPP_UPLOAD_STORE_PASSWORD')
+            if (!keyAliasProp) keyAliasProp = keystoreProps.getProperty('MYAPP_UPLOAD_KEY_ALIAS')
+            if (!keyPasswordProp) keyPasswordProp = keystoreProps.getProperty('MYAPP_UPLOAD_KEY_PASSWORD')
+
             if (storeFileProp && keyAliasProp && storePasswordProp && keyPasswordProp) {
-                storeFile file(storeFileProp)
+                // Interpret keystore paths relative to the android/ folder (rootProject).
+                // Also tolerate accidental "android/..." prefix (common when copy/pasting instructions).
+                def normalizedStorePath = String.valueOf(storeFileProp).replace('\\', '/')
+                if (normalizedStorePath.startsWith('android/')) {
+                    normalizedStorePath = normalizedStorePath.substring('android/'.length())
+                }
+                def storeFileCandidate = new File(normalizedStorePath)
+                storeFile(storeFileCandidate.isAbsolute() ? storeFileCandidate : rootProject.file(normalizedStorePath))
                 storePassword storePasswordProp
                 keyAlias keyAliasProp
                 keyPassword keyPasswordProp
             } else {
-                // Fall back to debug signing only if release props are missing (dev convenience)
-                // NOTE: Real production builds should set the release keystore properties above.
-                storeFile file('debug.keystore')
-                storePassword 'android'
-                keyAlias 'androiddebugkey'
-                keyPassword 'android'
+                throw new RuntimeException("Release signing is NOT configured. Set MYAPP_UPLOAD_STORE_FILE, MYAPP_UPLOAD_STORE_PASSWORD, MYAPP_UPLOAD_KEY_ALIAS, MYAPP_UPLOAD_KEY_PASSWORD (via android/gradle.properties or environment variables). Refusing to build a debug-signed release.")
             }
         }
     }
@@ -137,7 +159,7 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Use proper release signing when configured; otherwise falls back as defined above
+            // Requires proper release signing (see signingConfigs.release)
             signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()

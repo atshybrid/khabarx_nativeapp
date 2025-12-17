@@ -31,7 +31,7 @@ Template (replace the fingerprint below with your actual SHA‑256):
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.amoghnya.khabarx",
+      "package_name": "org.hrci.khabarx",
       "sha256_cert_fingerprints": [
         "AA:BB:CC:DD:EE:FF:...:ZZ" 
       ]
@@ -62,8 +62,8 @@ After hosting `assetlinks.json`, reinstall or trigger verification:
 
 ```powershell
 adb shell pm clear com.android.chrome
-adb shell pm set-app-links --package com.amoghnya.khabarx verify
-adb shell pm get-app-links com.amoghnya.khabarx
+adb shell pm set-app-links --package org.hrci.khabarx verify
+adb shell pm get-app-links org.hrci.khabarx
 ```
 
 You can also check in Settings → Apps → Khabarx → Open by default → Verified links. The domain should appear as Verified.

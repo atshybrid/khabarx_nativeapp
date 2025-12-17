@@ -71,12 +71,12 @@ app.get('/news', (req, res) => {
 
 // Android App Links: serve Digital Asset Links from env configuration
 // Env vars:
-//   ANDROID_APP_PACKAGE        e.g., com.amoghnya.khabarx
+//   ANDROID_APP_PACKAGE        e.g., org.hrci.khabarx
 //   ANDROID_SHA256_DEBUG       e.g., FA:C6:...:9C
 //   ANDROID_SHA256_RELEASE     e.g., <your release fingerprint>
 app.get('/.well-known/assetlinks.json', (req, res) => {
   try {
-    const pkg = process.env.ANDROID_APP_PACKAGE || 'com.amoghnya.khabarx';
+    const pkg = process.env.ANDROID_APP_PACKAGE || 'org.hrci.khabarx';
     // Collect fingerprints from env (support comma-separated or multiple vars)
     const fps = [];
     const d = process.env.ANDROID_SHA256_DEBUG;

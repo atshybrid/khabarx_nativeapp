@@ -50,7 +50,7 @@ export default function SupportScreen() {
   };
 
   const rateUs = () => {
-    const pkg = (Constants as any)?.expoConfig?.android?.package || 'com.amoghnya.khabarx';
+    const pkg = (Constants as any)?.expoConfig?.android?.package || 'org.hrci.khabarx';
     const url = `market://details?id=${pkg}`;
     const webUrl = `https://play.google.com/store/apps/details?id=${pkg}`;
     Linking.openURL(url).catch(() => Linking.openURL(webUrl).catch(() => Alert.alert('Error', 'Unable to open Play Store')));
@@ -58,7 +58,7 @@ export default function SupportScreen() {
 
   const shareApp = async () => {
     try {
-      const pkg = (Constants as any)?.expoConfig?.android?.package || 'com.amoghnya.khabarx';
+      const pkg = (Constants as any)?.expoConfig?.android?.package || 'org.hrci.khabarx';
       const link = `https://play.google.com/store/apps/details?id=${pkg}`;
       await Share.share({ message: `Try KhabarX — fast, beautiful news. ${link}` });
     } catch {}
