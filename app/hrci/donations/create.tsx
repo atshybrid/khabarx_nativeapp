@@ -163,7 +163,7 @@ export default function CreateDonationScreen() {
 
       {/* Processing overlay */}
       {overlayStep !== 'idle' && (
-        <View style={styles.overlay} pointerEvents="none">
+        <View style={[styles.overlay, { pointerEvents: 'none' }]}>
           <View style={styles.overlayCard}>
             <LottieView source={require('@/assets/lotti/donate.json')} autoPlay loop style={{ width: 120, height: 120 }} />
             <Text style={styles.overlayTxt}>

@@ -134,7 +134,7 @@ export default function DonationHub() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
-      <SafeAreaView pointerEvents="box-none">
+      <SafeAreaView style={{ pointerEvents: 'box-none' }}>
         <StatusBar style="dark" />
         <View style={styles.appBar}>
           <Pressable onPress={() => router.replace('/news')} hitSlop={8} style={styles.iconBtn}>
@@ -298,7 +298,7 @@ export default function DonationHub() {
 
       {/* Bottom sheet to choose new donor photo */}
       {sheetFor && (
-        <View style={styles.modalOverlay} pointerEvents="box-none">
+        <View style={[styles.modalOverlay, { pointerEvents: 'box-none' }] }>
           <Pressable style={{ flex: 1 }} onPress={() => setSheetFor(null)} />
           <View style={styles.sheet}>
             <View style={styles.handle} />
@@ -333,7 +333,7 @@ export default function DonationHub() {
 
       {/* API call loader overlay */}
       {apiLoading && (
-        <View style={styles.loaderOverlay} pointerEvents="none">
+        <View style={[styles.loaderOverlay, { pointerEvents: 'none' }]}>
           <LottieLoader size={96} />
         </View>
       )}

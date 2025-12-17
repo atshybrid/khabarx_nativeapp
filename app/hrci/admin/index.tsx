@@ -495,6 +495,7 @@ export default function HrciAdminDashboard() {
             <GridAction color={{ bg: '#ecfdf5', border: '#a7f3d0' }} icon={<Feather name="plus-circle" size={18} color={Colors.light.primary} />} label="Create Event" onPress={() => router.push('/hrci/admin/events' as any)} />
             <GridAction color={{ bg: '#f5f3ff', border: '#ddd6fe' }} icon={<Feather name="link" size={18} color={Colors.light.primary} />} label="Payment Links" onPress={() => router.push('/hrci/admin/payments' as any)} />
             <GridAction color={{ bg: '#fffbeb', border: '#fde68a' }} icon={<Feather name="file-text" size={18} color={Colors.light.primary} />} label="Stories" onPress={() => router.push('/hrci/admin/stories' as any)} />
+            <GridAction color={{ bg: '#fffaf0', border: '#fcd34d' }} icon={<Feather name="message-square" size={18} color={Colors.light.primary} />} label="Short News" onPress={() => router.push('/hrci/admin/shortnews' as any)} />
             {/* Tertiary row */}
             <GridAction color={{ bg: '#eef2ff', border: '#e0e7ff' }} icon={<Feather name="settings" size={18} color={Colors.light.primary} />} label="Org Settings" onPress={() => router.push('/hrci/admin/settings' as any)} />
             <GridAction color={{ bg: '#fff1f2', border: '#fecdd3' }} icon={<Feather name="percent" size={18} color={Colors.light.primary} />} label="Member Discount" onPress={() => router.push('/hrci/admin/discounts' as any)} />

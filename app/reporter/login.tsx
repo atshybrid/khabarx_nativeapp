@@ -1,10 +1,33 @@
+import MobileLoginModal from '@/components/MobileLoginModal';
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 export default function ReporterLogin() {
+	const router = useRouter();
+	const [visible, setVisible] = useState<boolean>(true);
+
+	useEffect(() => {
+		// Ensure sheet is visible on mount
+		setVisible(true);
+	}, []);
+
 	return (
 		<View style={styles.container}>
-			<Text style={styles.title}>Reporter Login</Text>
-			<Text style={styles.sub}>Screen under construction</Text>
+			<Text style={styles.title}>Citizen Reporter</Text>
+			<Text style={styles.sub}>Sign in or create your account</Text>
+
+			<MobileLoginModal
+				visible={visible}
+				onClose={() => {
+					setVisible(false);
+					router.back();
+				}}
+				onSuccess={() => {
+					setVisible(false);
+					router.replace('/reporter/dashboard');
+				}}
+			/>
 		</View>
 	);
 }

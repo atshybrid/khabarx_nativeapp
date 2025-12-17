@@ -1,16 +1,25 @@
 
 import { AntDesign } from '@expo/vector-icons';
-import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import {
     Dimensions,
     Image,
+    Platform,
     Share,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
-import ViewShot from 'react-native-view-shot';
+
+function getViewShotComponent(): any | null {
+  if (Platform.OS === 'web') return null;
+  try {
+    return require('react-native-view-shot')?.default;
+  } catch {
+    return null;
+  }
+}
 
 const { width } = Dimensions.get('window');
 
@@ -67,7 +76,9 @@ const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>(function Artic
   const [isLiked, setIsLiked] = useState(false);
   const [isDisliked, setIsDisliked] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
-  const viewShotRef = useRef<ViewShot>(null);
+  const viewShotRef = useRef<any>(null);
+  const ViewShot = getViewShotComponent();
+  const Wrapper: any = ViewShot || View;
 
   const handleAction = (action: Function, state: boolean, setState: Function) => {
     action();
@@ -93,7 +104,7 @@ const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>(function Artic
 
   return (
     <View style={styles.container}>
-      <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
+      <Wrapper ref={ViewShot ? viewShotRef : undefined} {...(ViewShot ? { options: { format: 'jpg', quality: 0.9 } } : {})}>
         <View style={{ backgroundColor: COLORS.white }}>
           <View style={styles.imageContainer}>
             <Image source={{ uri: imageUrl || '' }} style={styles.image} />
@@ -113,7 +124,7 @@ const ArticleDetailCard = forwardRef<any, ArticleDetailCardProps>(function Artic
             <Text style={styles.body}>{body}</Text>
           </View>
         </View>
-      </ViewShot>
+      </Wrapper>
 
       <View style={styles.footer}>
         <TouchableOpacity onPress={() => handleAction(() => { if (isDisliked) setIsDisliked(false); }, isLiked, setIsLiked)} style={styles.actionButton}>

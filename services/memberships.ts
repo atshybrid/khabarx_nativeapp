@@ -10,9 +10,18 @@ function buildQuery(filters: MembershipFilters): string {
   if (filters.designationId) params.set('designationId', filters.designationId);
   if (filters.hrcCountryId) params.set('hrcCountryId', filters.hrcCountryId);
   if (filters.hrcStateId) params.set('hrcStateId', filters.hrcStateId);
-  if (filters.hrcDistrictId) params.set('hrcDistrictId', filters.hrcDistrictId);
+  if (filters.hrcDistrictId) {
+    if (Array.isArray(filters.hrcDistrictId)) params.set('hrcDistrictId', filters.hrcDistrictId.join(','));
+    else params.set('hrcDistrictId', String(filters.hrcDistrictId));
+  }
   if (filters.hrcMandalId) params.set('hrcMandalId', filters.hrcMandalId);
-  if (filters.search) params.set('search', filters.search);
+  const search = (filters.search || '').trim();
+  if (search) {
+    // Some backends support generic `search`, others only `mobileNumber`.
+    // Send both when the input is numeric to keep search working for mobile.
+    params.set('search', search);
+    if (/^\d+$/.test(search)) params.set('mobileNumber', search);
+  }
   params.set('limit', String(filters.limit ?? 20));
   if (filters.cursor) params.set('cursor', filters.cursor);
   return params.toString();

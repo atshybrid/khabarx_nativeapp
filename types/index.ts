@@ -27,6 +27,7 @@ export interface Article {
   tags?: string[];
   // SEO / canonical metadata
   canonicalUrl?: string;
+  shortUrl?: string;
   metaTitle?: string;
   metaDescription?: string;
 }

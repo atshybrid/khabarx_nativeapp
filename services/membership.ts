@@ -48,7 +48,17 @@ export interface MembershipProfileData {
 export async function getMembershipProfile(): Promise<MembershipProfileData | null> {
   try {
     const res = await request<any>('/memberships/me/profile', { method: 'GET' });
-    return (res?.data || res) as MembershipProfileData;
+    const raw = (res?.data || res) as any;
+    // Normalize common response shapes:
+    // - { success: true, data: {...} }
+    // - { data: {...} }
+    // - {...}
+    const candidate =
+      raw?.success !== undefined && raw?.data ? raw.data :
+      raw?.data && (raw.data.user || raw.data.membership || raw.data.card || raw.data.device || raw.data.location) ? raw.data :
+      raw;
+
+    return (candidate || null) as MembershipProfileData | null;
   } catch (e) {
     console.warn('[Membership] getMembershipProfile failed', (e as any)?.message || e);
     return null;
@@ -84,4 +94,22 @@ export async function ensureIdCardGenerated(): Promise<MembershipProfileData | n
   const after = await getMembershipProfile();
   console.log('[Membership] Post-issue status', after?.membership?.idCardStatus || after?.card?.status);
   return after || initial;
+}
+
+// Update current user's membership profile.
+// Endpoint inferred from the GET: PUT /memberships/me/profile
+export type UpdateMembershipMeProfilePayload = {
+  profile?: {
+    fullName?: string | null;
+    gender?: string | null;
+    dob?: string | null;
+    profilePhotoUrl?: string | null;
+  };
+  languageId?: string | null;
+};
+
+export async function updateMembershipMeProfile(payload: UpdateMembershipMeProfilePayload): Promise<MembershipProfileData | any> {
+  const res = await request<any>('/memberships/me/profile', { method: 'PUT', body: payload });
+  const raw = (res?.data || res) as any;
+  return (raw?.success !== undefined && raw?.data ? raw.data : raw) as any;
 }

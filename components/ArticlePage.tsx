@@ -1,1352 +1,464 @@
-import { VideoWrapper } from '@/components/VideoWrapper';
+// CLEAN REBUILD OF ARTICLEPAGE WITH EXACT SCREEN SHARE (SIMPLIFIED)
 import { WEB_BASE_URL } from '@/config/appConfig';
+import { Colors } from '@/constants/Colors';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { useAutoHideBottomBar } from '@/hooks/useAutoHideBottomBar';
 import { useReaction } from '@/hooks/useReaction';
 import { Article } from '@/types';
-import { Ramabhadra_400Regular, useFonts } from '@expo-google-fonts/ramabhadra';
-// Vector icons from @expo/vector-icons no longer used for engagement rail
+import { Ramabhadra_400Regular, useFonts as useFontsRam } from '@expo-google-fonts/ramabhadra';
 import { Feather } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
-import { useVideoPlayer } from 'expo-video';
-// Removed LinearGradient (no branded card rendering now)
-import { useThemeColor } from '@/hooks/useThemeColor';
-// (removed) import { useTransliteration } from '@/hooks/useTransliteration';
-import { makeShadow, makeTextShadow } from '@/utils/shadow';
-// (removed) import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-    Animated,
-    Dimensions,
-    Easing,
-    Platform,
-    Share as RnShare,
-    ScrollView,
-    StyleSheet,
-    Text,
-    ToastAndroid,
-    TouchableOpacity,
-    View,
-    type ImageStyle,
-    type TextStyle,
-    type ViewStyle,
-} from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Dimensions, InteractionManager, Platform, Share as RnCoreShare, ScrollView, StyleSheet, Text, ToastAndroid, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-// Prefer static import; add runtime guard below in case native module isn't linked yet
-import { getCachedCommentsByShortNews, getCommentsByShortNews, prefetchCommentsByShortNews } from '@/services/api';
-import { on } from '@/services/events';
-// Native-only modules: wrap in try/catch so web build doesn't crash if polyfill missing
-// Lazy holders for native-only modules; populated on first share attempt to satisfy lint (no top-level require)
-let ShareLib: any; // placeholder for react-native-share when used in release builds
-// In Expo Dev Client, avoid any dynamic import of react-native-share to prevent async-require prefetch crashes
-const ensureNativeShareLibs = async () => { /* no-op in dev */ };
-const shareRuntimeGetter = (): any => undefined;
-// Fallback lightweight placeholder if ViewShot not available (web or load failure)
-const ViewShotFallback: React.FC<any> = ({ children, style }) => <View style={style}>{children}</View>;
-// Optional navigation/logging debug flag
-const NAV_DEBUG = (() => {
-  const raw = String(process.env.EXPO_PUBLIC_NAV_DEBUG ?? '').toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
-})();
+import BRAND_LOGO from '../assets/images/brand_icon_hrci.png';
+// NOTE: react-native-share and react-native-view-shot are native modules.
+// Importing them at module scope can crash Expo web/SSR bundles.
+// We load them lazily only on native platforms.
+// Removed WebView composer; user wants exact native screen style capture.
 
-interface ArticlePageProps {
-  article: Article;
-  index: number;
-  totalArticles: number;
-}
+interface ArticlePageProps { article: Article; index: number; totalArticles: number; }
+type EngagementButtonProps = { icon: React.ReactNode; text?: number | string; onPress: () => void; disabled?: boolean; };
+const EngagementButton = ({ icon, text, onPress, disabled }: EngagementButtonProps) => (
+  <TouchableOpacity onPress={onPress} disabled={disabled} style={[styles.engagementButton, disabled && { opacity: 0.5 }]} hitSlop={{ top:8,bottom:8,left:8,right:8 }}>
+    {icon}
+    {text !== undefined && text !== '' && (<Text style={styles.engagementButtonText}>{text}</Text>)}
+  </TouchableOpacity>
+);
 
-type EngagementButtonProps = {
-  icon: React.ReactNode;
-  text?: number | string;
-  onPress: () => void;
-  onLongPress?: () => void;
-  accessibilityLabel?: string;
-  disabled?: boolean;
-  textStyle?: any;
-  layout?: 'row' | 'column';
-};
+const BRAND_TEXT = 'DESH KI DHADKAN KHABAR X';
+// Brand banner configuration (easy to tweak)
+const BRAND_STRIP_BG = '#000000'; // full black, no transparency
+const BRAND_TEXT_SIZE = 18; // brand text size
+const BRAND_LOGO_LARGE = 64; // large logo size in banner
+const BRAND_STRIP_HEIGHT = 40; // banner strip height under text
+// Export tuning
+const SHARE_EXPORT_SCALE = 1.6; // multiply output pixels (1.0 = screen size)
+// Hero height tuning (EDIT THIS ONE LINE):
+// Bigger value = taller image.
+// 16:9 => 9/16 (~0.5625)
+// Big hero (Waynews-like feel) => ~0.75
+const HERO_HEIGHT_RATIO = 0.90;
+// Extra fixed pixels added to hero height.
+// Set to 30 for +30px, or 0 to disable.
+const HERO_HEIGHT_EXTRA_PX = 0;
+// Back-compat: older builds referenced these names.
+// Keep + actively use them to avoid runtime crashes during Fast Refresh / stale bundles.
+const OVERLAY_HERO_RATIO = HERO_HEIGHT_RATIO;
+const RUNTIME_HERO_RATIO = HERO_HEIGHT_RATIO;
+const MIN_HERO_RATIO = HERO_HEIGHT_RATIO;
+const OVERLAY_BODY_WORDS = 60; // number of words to show fully in share image
+// Author chip configuration
+const AUTHOR_CHIP_VARIANT: string = 'text'; // 'avatar' or 'text'
+const AUTHOR_CHIP_POSITION: string = 'top-left'; // 'top-left' or 'bottom-left'
+const { width } = Dimensions.get('window');
+const { height: windowHeight } = Dimensions.get('window');
 
-const EngagementButton: React.FC<EngagementButtonProps> = ({ icon, text, onPress, onLongPress, accessibilityLabel, disabled, textStyle, layout = 'column' }) => {
-  const scale = React.useRef(new Animated.Value(1)).current;
-  const bounce = React.useCallback(() => {
-    Animated.sequence([
-      Animated.timing(scale, { toValue: 1.12, duration: 90, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-      Animated.spring(scale, { toValue: 1, friction: 5, tension: 160, useNativeDriver: true }),
-    ]).start();
-  }, [scale]);
-  const handlePress = React.useCallback(() => {
-    if (disabled) return;
-    bounce();
-    try { onPress(); } catch {}
-  }, [disabled, bounce, onPress]);
-  return (
-    <TouchableOpacity
-      onPress={handlePress}
-      onLongPress={onLongPress}
-      style={[styles.engagementButton, layout === 'row' && { flexDirection: 'row', alignItems: 'center' }, disabled && { opacity: 0.5 }]}
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="button"
-      disabled={disabled}
-      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-    >
-      <Animated.View style={{ transform: [{ scale }] }}>
-        {icon}
-      </Animated.View>
-      {text !== undefined && text !== '' && (
-        <Text style={[styles.engagementButtonText, layout === 'row' && { marginLeft: 8 }, textStyle]}>{text}</Text>
-      )}
-    </TouchableOpacity>
-  );
-};
+// Title colors: stable “random” per article.
+// Uses the provided color codes (excluding very light colors that won't be readable on white).
+const TITLE_COLOR_PALETTE = [
+  '#C62828',
+  '#0D1B2A',
+  '#1C1C1C',
+  '#E65100',
+  '#1B5E20',
+  '#616161',
+] as const;
 
 const ArticlePage: React.FC<ArticlePageProps> = ({ article, index, totalArticles }) => {
-  // Dynamically load react-native-view-shot after mount so captures work on native.
-  const [ViewShotComp, setViewShotComp] = useState<any>(() => ViewShotFallback);
+  const insets = useSafeAreaInsets();
+  const reaction = useReaction({ articleId: article.id });
+  const heroRef = useRef<ScrollView>(null);
+  const viewShotRef = useRef<any>(null);
+  const scrollCaptureRef = useRef<View>(null); // capture content area (title + body) to avoid white screen
+  const overlayRef = useRef<View>(null); // overlay capture ref
+  const rootRef = useRef<View>(null);
+  const [shareMode, setShareMode] = useState(false);
+  const [slideIndex, setSlideIndex] = useState(0);
+  // Removed titleHeight tracking
+  // Note: runtime shows full article; no maxBodyLines needed
+  const [loadedImages, setLoadedImages] = useState(0);
+  const [overlayHeroLoaded, setOverlayHeroLoaded] = useState(false);
+  const [ViewShotComponent, setViewShotComponent] = useState<any>(null);
+  const captureRefFnRef = useRef<any>(null);
+  // Removed viewShot layout tracking (unused after overlay capture reinstated)
+  const { isTabBarVisible, setTabBarVisible } = useTabBarVisibility();
+  const { show, hide } = useAutoHideBottomBar(() => setTabBarVisible(true), () => setTabBarVisible(false), { timeout: 5000, minVisible: 500 });
+  const lastScrollAtRef = useRef(0); const lastScrollYRef = useRef(0); const scrollThrottle = 200;
+  const lastTouchYRef = useRef(0); const lastTouchStartAtRef = useRef(0); const lastTouchMovedRef = useRef(false);
+  const [fontsLoaded] = useFontsRam({ Ramabhadra_400Regular });
+  // Removed HTML composer state
+
+  // Lazy-load native-only modules without require() (eslint no-require-imports).
   useEffect(() => {
     if (Platform.OS === 'web') return;
     let mounted = true;
-    (async () => {
-      try {
-        const vs: any = await import('react-native-view-shot');
-        const C = (vs as any)?.default || vs;
-        if (mounted) setViewShotComp(() => C);
-      } catch {}
-    })();
-    return () => { mounted = false; };
+    import('react-native-view-shot')
+      .then((mod: any) => {
+        if (!mounted) return;
+        setViewShotComponent(() => mod?.default);
+        captureRefFnRef.current = mod?.captureRef;
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
-  // Prepare video players for each video slide
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  // Reaction state (server authoritative). We start with article initial counts; hook will fetch actual.
-  const reaction = useReaction({
-    articleId: article.id,
-  });
-  const heroRef = useRef<ScrollView>(null);
-  const viewShotRef = useRef<any>(null);
-  const heroCaptureRef = useRef<any>(null); // wraps hero media for image capture
-  const fullShareRef = useRef<any>(null); // off-screen full article capture (hero + title + body, no engagement)
-  const [shareMode, setShareMode] = useState(false); // toggled briefly during capture (could show watermark if desired)
-  const [shareImageReady, setShareImageReady] = useState(false); // off-screen image loaded
-  // Branding: English-only brand line and org logo for share card
-  const BRAND_EN = 'No.1 Local News Daily App';
-  // No dynamic brand line; always English-only
 
-  // no-op
-
-  // Removed language confirmation pills per user request.
-  const { isTabBarVisible, setTabBarVisible } = useTabBarVisibility();
-  const { show, hide } = useAutoHideBottomBar(
-    () => setTabBarVisible(true),
-    () => setTabBarVisible(false),
-    { timeout: 5000, minVisible: 500, debug: true }
-  );
-  const lastScrollAtRef = useRef(0);
-  const lastScrollYRef = useRef(0);
-  const scrollThrottle = 200;
-  const lastTouchYRef = useRef(0);
-  const lastTouchStartAtRef = useRef(0);
-  const lastTouchMovedRef = useRef(false);
-
-  const [fontsLoaded] = useFonts({
-    Ramabhadra_400Regular,
-  });
-
-  // Footer fixed at device bottom within safe area (does not move with tab bar)
-  const footerBottomOffset = Math.max(insets.bottom, 0);
-
-  // Relative time helper for createdAt: Xm, Xh (<=24h), then X day(s)
-  const formatRelativeTime = (iso?: string): string => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return '';
-    const diffMs = Date.now() - d.getTime();
-    const minutes = Math.floor(diffMs / 60000);
-    if (minutes < 60) return `${Math.max(1, minutes)}m`;
-    const hours = Math.floor(minutes / 60);
-    if (hours <= 24) return `${hours}h`;
-    const days = Math.floor(hours / 24);
-    return `${days} ${days === 1 ? 'day' : 'days'}`;
-  };
-
-  // Build hero slides (video first if present, then images)
   const heroSlides = useMemo(() => {
-    const slides: { type: 'image' | 'video'; src: string }[] = [];
-    if (article.videoUrl) slides.push({ type: 'video', src: article.videoUrl });
+    const slides: { type:'image'; src:string }[] = [];
     const imgs = Array.isArray(article.images) && article.images.length ? article.images : (article.image ? [article.image] : []);
-    imgs.forEach((u) => slides.push({ type: 'image', src: u }));
+    imgs.forEach(u => slides.push({ type:'image', src:u }));
     return slides;
-  }, [article.videoUrl, article.images, article.image]);
+  }, [article.images, article.image]);
+  const allHeroImagesLoaded = loadedImages >= heroSlides.length && heroSlides.length > 0;
 
-    // Call useVideoPlayer for the first three slides at the top level, unconditionally
-    const videoPlayer0 = useVideoPlayer({ uri: heroSlides[0]?.type === 'video' ? heroSlides[0].src : '' });
-    const videoPlayer1 = useVideoPlayer({ uri: heroSlides[1]?.type === 'video' ? heroSlides[1].src : '' });
-    const videoPlayer2 = useVideoPlayer({ uri: heroSlides[2]?.type === 'video' ? heroSlides[2].src : '' });
-
-
-  const [slideIndex, setSlideIndex] = useState(0);
-  const [footerHeight, setFooterHeight] = useState(0);
-  const [titleHeight, setTitleHeight] = useState(0);
-  const [maxBodyLines, setMaxBodyLines] = useState<number | undefined>(undefined);
-  const displayBody = useMemo(() => {
-    const txt = (article.body && article.body.trim()) || (article.summary && article.summary.trim()) || '';
-    return txt;
-  }, [article.body, article.summary]);
-  // Toggle for right-side rail (now disabled; engagement is in footer)
-  const SHOW_RIGHT_RAIL = false;
-  // Comments count hidden on rail (icons only); keep logic minimal
-  // Small-screen adjustments
-  const isSmallScreen = width <= 360 || Dimensions.get('window').height <= 680;
-  // (Removed appUrl since we rely on canonical or fallback web domain for sharing.)
-  // Auto-advance hero slides
   useEffect(() => {
-    if (heroSlides.length < 2) return;
-    let i = slideIndex;
-    const id = setInterval(() => {
-      i = (i + 1) % heroSlides.length;
-      setSlideIndex(i);
-      const x = i * width;
-      heroRef.current?.scrollTo({ x, y: 0, animated: true });
-    }, 3500);
+    if (heroSlides.length < 2) return; let i = slideIndex;
+    const id = setInterval(() => { i = (i + 1) % heroSlides.length; setSlideIndex(i); heroRef.current?.scrollTo({ x: i * width, y:0, animated:true }); }, 3500);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [heroSlides.length]);
+  }, [heroSlides.length, slideIndex]);
 
-  const handleLike = () => {
-    reaction.like();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const relativeTime = useMemo(() => {
+    const iso = article.createdAt; if (!iso) return '';
+    const d = new Date(iso); if (isNaN(d.getTime())) return '';
+    const diffMs = Date.now() - d.getTime(); const mins = Math.floor(diffMs/60000); if (mins < 60) return `${Math.max(1,mins)}m`;
+    const hrs = Math.floor(mins/60); if (hrs <= 24) return `${hrs}h`; const days = Math.floor(hrs/24); return `${days} ${days===1?'day':'days'}`;
+  }, [article.createdAt]);
+
+  const truncatedTitle = useMemo(() => { const t = article.title || ''; return t.length > 50 ? t.slice(0,50).trimEnd() + '…' : t; }, [article.title]);
+  const titleColor = useMemo(() => {
+    const key = String((article as any).id ?? article.title ?? '');
+    let hash = 0;
+    for (let i = 0; i < key.length; i++) {
+      hash = ((hash << 5) - hash) + key.charCodeAt(i);
+      hash |= 0;
+    }
+    const idx = Math.abs(hash) % TITLE_COLOR_PALETTE.length;
+    return TITLE_COLOR_PALETTE[idx];
+  }, [article]);
+  const bodyText = (article as any).body || (article as any).description || '';
+  // Runtime renders full body; overlay uses shareBodyText
+  // Share-only body: always exactly OVERLAY_BODY_WORDS words, no ellipsis, so all 60 words show
+  const shareBodyText = useMemo(() => {
+    const words = bodyText.split(/\s+/).filter(Boolean);
+    return words.slice(0, OVERLAY_BODY_WORDS).join(' ');
+  }, [bodyText]);
+
+  const effectiveRuntimeHeroRatio = Math.max(RUNTIME_HERO_RATIO, MIN_HERO_RATIO);
+  const heroHeight = Math.round(width * effectiveRuntimeHeroRatio) + HERO_HEIGHT_EXTRA_PX;
+  const overlayHeroHeight = Math.round(width * OVERLAY_HERO_RATIO) + HERO_HEIGHT_EXTRA_PX;
+  const isBigHero = effectiveRuntimeHeroRatio >= 0.85 || heroHeight >= Math.round(windowHeight * 0.5);
+
+  // Removed line clamp calculation; content scrolls fully
+
+  const buildSharePayload = () => {
+    const fallbackWeb = `${WEB_BASE_URL.replace(/\/$/, '')}/article/${encodeURIComponent(article.id)}`;
+    // Prefer shortUrl if provided by backend; fall back to canonicalUrl then constructed web URL
+    const shortUrl = (article as any).shortUrl || (article as any).short_url || null;
+    const canonical = article.canonicalUrl || fallbackWeb;
+    const shareLink = shortUrl || canonical;
+    const shareTitle = article.metaTitle || article.title;
+    // Only include HTTPS link; WhatsApp won't auto-link custom schemes.
+    const message = [shareTitle, `Read: ${shareLink}`].join('\n');
+    return { shareTitle, message, shareLink };
   };
 
-  const handleDislike = () => {
-    reaction.dislike();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
+  const handleLike = () => { reaction.like(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); };
+  const handleDislike = () => { reaction.dislike(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); };
+  const handleComment = () => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); };
+  const formatCount = useCallback((n?: number) => { const v = typeof n === 'number' ? n : 0; if (v < 1000) return String(v); if (v < 1_000_000) return `${(v/1000).toFixed(v%1000>=100?1:0)}K`; return `${(v/1_000_000).toFixed(v%1_000_000>=100_000?1:0)}M`; }, []);
 
-  const handleComment = () => {
-    // Align with upstream main params while keeping compatibility with our comments screen
-    router.push({
-      pathname: '/comments',
-      params: {
-        articleId: article.id,
-        shortNewsId: article.id,
-        authorId: (article as any)?.author?.id || (article as any)?.author?.name || undefined,
-      },
-    });
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  };
-
-  // Prefetch comments for faster open
-  useEffect(() => {
-    prefetchCommentsByShortNews(String(article.id)).catch(() => {});
-  }, [article?.id]);
-
-  // Comments count: hydrate from cache/server and live update via events
-  const [commentsCount, setCommentsCount] = useState<number>(0);
-  const countReplies = React.useCallback((nodes?: { replies?: any[] }[]): number => {
-    const list = Array.isArray(nodes) ? nodes : [];
-    let total = 0;
-    const walk = (arr: any[]) => {
-      for (const n of arr) {
-        total += 1;
-        if (Array.isArray(n?.replies) && n.replies.length) walk(n.replies);
+    const handleShareTap = async () => {
+      setShareMode(true);
+      try {
+        const { shareTitle, message } = buildSharePayload();
+        const captureRef = captureRefFnRef.current;
+        // Stabilize overlay (3 frames + 80ms)
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))));
+        await new Promise(r => setTimeout(r, 80));
+        // Wait hero images or timeout
+        const startWait = Date.now();
+        while (!(overlayHeroLoaded || allHeroImagesLoaded) && Date.now() - startWait < 1500) await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => InteractionManager.runAfterInteractions(() => r(undefined)));
+        let capturedUri: string | undefined;
+        // Calculate export pixel size
+        const win = Dimensions.get('window');
+        const exportW = Math.round(win.width * SHARE_EXPORT_SCALE);
+        const exportH = Math.round(win.height * SHARE_EXPORT_SCALE);
+        if (typeof captureRef === 'function') {
+          // 1) Overlay capture png
+          if (!capturedUri && overlayRef.current) {
+            try { const ov = await captureRef(overlayRef.current, { format:'png', quality:1, result:'tmpfile', width: exportW, height: exportH }); if (ov) capturedUri = ov.startsWith('file://') ? ov : `file://${ov}`; } catch(e){ if(__DEV__) console.warn('[ShareCapture] overlay png', e); }
+          }
+          // 2) Root png
+          if (!capturedUri && rootRef.current) {
+            try {
+              const r1 = await captureRef(rootRef.current, { format:'png', quality:1, result:'tmpfile', width: exportW, height: exportH });
+              if (r1) capturedUri = r1.startsWith('file://') ? r1 : `file://${r1}`;
+            } catch(e){ if(__DEV__) console.warn('[ShareCapture] root png', e); }
+          }
+          // 3) Root jpg fallback
+          if (!capturedUri && rootRef.current) {
+            try { const r2 = await captureRef(rootRef.current, { format:'jpg', quality:0.95, result:'tmpfile', width: exportW, height: exportH }); if (r2) capturedUri = r2.startsWith('file://') ? r2 : `file://${r2}`; } catch(e){ if(__DEV__) console.warn('[ShareCapture] root jpg', e); }
+          }
+          // 4) Hero fallback (last resort)
+          if (!capturedUri && heroRef.current) {
+            try {
+              const hu = await captureRef(heroRef.current, { format:'jpg', quality:0.9, result:'tmpfile' });
+              if (hu) capturedUri = hu.startsWith('file://') ? hu : `file://${hu}`;
+            } catch(e){ if(__DEV__) console.warn('[ShareCapture] hero', e); }
+          }
+        }
+        // Copy caption
+        try { await Clipboard.setStringAsync(message); if (Platform.OS==='android') ToastAndroid.show('Caption copied', ToastAndroid.SHORT); } catch {}
+        // Share with caption preferred (react-native-share), then expo-sharing, then text-only
+        if (capturedUri) {
+          try {
+            // 1) Try react-native-share to attach image + caption
+            try {
+              if (Platform.OS !== 'web') {
+                const mod: any = await import('react-native-share').catch(() => null);
+                const nativeShare = mod?.default;
+                if (nativeShare?.open) {
+                  await nativeShare.open({ title: shareTitle, message, url: capturedUri, type: 'image/png', failOnCancel: false });
+                  return;
+                }
+              }
+            } catch {
+              // fall through
+            }
+            // 2) Fallback to expo-sharing (image only)
+            try {
+              if (await Sharing.isAvailableAsync()) {
+                await Sharing.shareAsync(capturedUri, { mimeType: 'image/png', dialogTitle: shareTitle });
+                return;
+              }
+            } catch {}
+            // 3) Final fallback: RN core Share text-only
+            try {
+              await RnCoreShare.share({ title: shareTitle, message }, { dialogTitle: 'Share article' });
+              return;
+            } catch {}
+          } catch(err){ console.warn('[Share] image+caption share failed -> text fallback', err); }
+        }
+        // Text-only fallback
+        await RnCoreShare.share({ title:shareTitle, message }, { dialogTitle:'Share article' });
+      } catch(err) {
+        console.error('[Share] failed', err);
+      } finally {
+        setShareMode(false);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
     };
-    walk(list as any[]);
-    return total;
-  }, []);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const cached = getCachedCommentsByShortNews(String(article.id));
-        if (cached) {
-          if (!cancelled) setCommentsCount(countReplies(cached));
-          // still refresh in background to ensure accuracy
-        }
-        const fresh = await getCommentsByShortNews(String(article.id));
-        if (!cancelled) setCommentsCount(countReplies(fresh));
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, [article?.id, countReplies]);
 
-  // Listen for live comment updates from comments screen
-  useEffect(() => {
-    const off = on('comments:updated', (p) => {
-      if (String(p.shortNewsId) === String(article.id)) {
-        setCommentsCount(p.total);
-      }
-    });
-    return () => off();
-  }, [article?.id]);
-
-  // Build share text (metadata prioritized). Separate function so we can reuse.
-  const buildSharePayload = () => {
-    // Assume canonicalUrl already normalized server-side. If missing, fall back to configured WEB_BASE_URL.
-    const fallbackWeb = `${WEB_BASE_URL.replace(/\/$/, '')}/article/${encodeURIComponent(article.id)}`;
-    const canonical = article.canonicalUrl || fallbackWeb;
-    const deepLink = `khabarx://article/${article.id}`;
-    const shareTitle = article.metaTitle || article.title;
-    // Meta description intentionally removed per user request
-    const messageLines = [
-      shareTitle,
-      `\nRead: ${canonical}`,
-      `Open in App: ${deepLink}`
-    ];
-    const message = messageLines.filter(Boolean).join('\n');
-    return { shareTitle, message, canonical, deepLink };
-  };
-
-  // Tap share: capture hero image ONLY (no text baked) and attempt to send image + caption.
-  const waitFor = (cond: () => boolean, ms: number, tries: number) => new Promise<void>(async (res) => {
-    let left = tries;
-    while (left-- > 0) {
-      if (cond()) break;
-      await new Promise(r => setTimeout(r, ms));
-    }
-    res();
-  });
-
-  const handleShareTap = async () => {
-    try {
-      setShareMode(true);
-      // allow any pending hero rendering (video poster/image) to stabilize
-  await new Promise(r => setTimeout(r, 150));
-      // Give the off-screen full-share image a moment to load to avoid falling back to hero-only
-  await waitFor(() => shareImageReady, 150, 10); // up to ~1.5s
-  const { shareTitle, message } = buildSharePayload();
-  // Capture full article (hero + title + body) from off-screen composition
-      let capturedUri = await fullShareRef.current?.capture?.();
-      if (!capturedUri) {
-        // Fallback: capture just the hero area if full composition isn't ready
-        try { capturedUri = await heroCaptureRef.current?.capture?.(); } catch {}
-      }
-      if (!capturedUri) {
-        // Try downloading the primary image as a last resort to ensure we share an image
-        const firstImage = heroSlides.find((s) => s.type === 'image')?.src || article.image || (Array.isArray(article.images) ? article.images[0] : null);
-        if (firstImage) {
-          try {
-            const ext = (firstImage.split('?')[0].split('.').pop() || 'jpg').toLowerCase();
-            const fileName = `khabarx-share-${article.id}.${['jpg','jpeg','png','webp'].includes(ext) ? ext : 'jpg'}`;
-            const baseDir = (((FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory || '')) as string;
-            const dest = baseDir + fileName;
-            const dl = await FileSystem.downloadAsync(firstImage, dest);
-            if (dl?.uri) {
-              capturedUri = dl.uri;
-            }
-          } catch (dlErr) {
-            console.warn('[Share] image download fallback failed', dlErr);
-          }
-        }
-        if (!capturedUri) {
-          // Web fallback: try navigator.share if available
-          if (Platform.OS === 'web' && (navigator as any)?.share) {
-            try { await (navigator as any).share({ title: shareTitle, text: message }); return; } catch {}
-          }
-          // As a last resort, share text only
-          await RnShare.share({ title: shareTitle, message }, { dialogTitle: 'Share article' });
-          return;
-        }
-      }
-      // Normalize URI (react-native-share expects file://)
-      const imgUri = capturedUri.startsWith('file://') ? capturedUri : `file://${capturedUri}`;
-      // Prefer react-native-share (supports EXTRA_STREAM + EXTRA_TEXT properly on Android) when available
-      try {
-        await ensureNativeShareLibs();
-  const runtime: any = shareRuntimeGetter();
-        if (runtime?.open) {
-          let didWhatsApp = false;
-          try {
-            const Social = (ShareLib as any)?.Social || (runtime as any)?.Social;
-            if (runtime.shareSingle && Social?.WHATSAPP && Platform.OS === 'android') {
-              await runtime.shareSingle({ social: Social.WHATSAPP, url: imgUri, type: 'image/jpeg', message, filename: 'khabarx-news.jpg' });
-              didWhatsApp = true;
-            }
-          } catch (waErr) { console.warn('[Share] WhatsApp shareSingle failed, falling back to generic share', waErr); }
-          if (!didWhatsApp) {
-            await runtime.open({ url: imgUri, type: 'image/jpeg', message, title: shareTitle, failOnCancel: false });
-          }
-          if (Platform.OS === 'android') {
-            try { await Clipboard.setStringAsync(message); ToastAndroid.show('Caption copied (paste if missing)', ToastAndroid.SHORT); } catch {}
-          }
-          return; // success path using react-native-share
-        }
-      } catch (primaryErr) {
-        console.warn('[Share] react-native-share open failed, fallback to RN Share', primaryErr);
-      }
-      if (Platform.OS === 'web') {
-        // Pure web fallback chain
-        try {
-          if ((navigator as any)?.share) {
-            await (navigator as any).share({ title: shareTitle, text: message });
-          } else {
-            await Clipboard.setStringAsync(message);
-            alert('Link copied to clipboard');
-          }
-        } catch (errWeb) {
-          console.warn('[Share:web] fallback failed', errWeb);
-        }
-      } else {
-        // Prefer expo-sharing with a local image when react-native-share isn't available
-        const available = await Sharing.isAvailableAsync();
-        if (available) {
-          try { await Sharing.shareAsync(imgUri, { mimeType: 'image/jpeg', dialogTitle: shareTitle }); } catch (ee) { console.error('expo-sharing failed', ee); }
-        } else {
-          // As a fallback, try RN Share API (may share text only on Android)
-          try { await RnShare.share({ title: shareTitle, url: imgUri, message }, { dialogTitle: 'Share article' }); } catch {}
-        }
-        if (Platform.OS === 'android') {
-          try { await Clipboard.setStringAsync(message); ToastAndroid.show('Caption copied (paste if missing)', ToastAndroid.SHORT); } catch {}
-        }
-      }
-    } catch (e) {
-      console.error('Tap share failed', e);
-    } finally {
-      setShareMode(false);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-  };
-
-  // Don't block rendering while fonts load; fall back gracefully
-
-
-  const bg = useThemeColor({}, 'background');
-  const textColor = useThemeColor({}, 'text');
-  const border = useThemeColor({}, 'border');
-  const card = useThemeColor({}, 'card');
-  const muted = useThemeColor({}, 'muted');
-  const countColor = muted;
-
-  const formatCount = React.useCallback((n?: number) => {
-    const v = typeof n === 'number' ? n : 0;
-    if (v < 1000) return String(v);
-    if (v < 1000000) return `${(v / 1000).toFixed(v % 1000 >= 100 ? 1 : 0)}K`;
-    return `${(v / 1000000).toFixed(v % 1000000 >= 100000 ? 1 : 0)}M`;
-  }, []);
-
-  // Compute max lines for body text so page fits the screen without scrolling
-  useEffect(() => {
-    const winH = Dimensions.get('window').height;
-    const heroH = width * 0.8;
-    // paddings and spacing in content area (approx): 15 (container pad) + 10 (title margin) + 15 (bottom padding)
-    const extraPad = 15 + (isSmallScreen ? 8 : 10) + 15;
-    const available = winH - heroH - footerBottomOffset - footerHeight - extraPad;
-  const lineHeight = isSmallScreen ? 26 : 30; // updated to match increased body lineHeight
-    const remainingForBody = Math.max(0, available - titleHeight);
-    const lines = Math.floor(remainingForBody / lineHeight);
-    // Guard against negative or excessively large counts
-    let clamped = Math.max(0, Math.min(lines, 18));
-    // Ensure we show at least a few lines if there is text content
-    if (displayBody && clamped < 3) clamped = 3;
-    setMaxBodyLines(clamped);
-  }, [footerBottomOffset, footerHeight, titleHeight, isSmallScreen, displayBody]);
   return (
-    <View style={[styles.container, { backgroundColor: bg }]}>
-  <ViewShotComp ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }} style={{ flex: 1 }}>
-      <ScrollView
-        style={styles.scrollContainer}
-        contentContainerStyle={[styles.scrollContentContainer, { paddingTop: insets.top }]}
-        scrollEnabled={false}
-        onScrollBeginDrag={() => { if (NAV_DEBUG) console.log('[Article] onScrollBeginDrag -> hide'); hide(); setTabBarVisible(false); }}
-        onScroll={(e) => {
-          const now = Date.now();
-          const y = e.nativeEvent.contentOffset.y;
-          const dy = y - (lastScrollYRef.current || 0);
-          lastScrollYRef.current = y;
-          // If bar is visible and even a tiny upward swipe (content moves up => dy>0) happens, hide immediately
-          if (isTabBarVisible && dy > 1) {
-            hide();
-            setTabBarVisible(false);
-            return;
-          }
-          // console.log('[Article] onScroll dy=', dy);
-          if (Math.abs(dy) < 12) return; // ignore micro scroll noise when bar hidden
-          if (now - (lastScrollAtRef.current || 0) > scrollThrottle) {
-            lastScrollAtRef.current = now;
-            // Hide when swiping (scrolling)
-            hide();
-            setTabBarVisible(false);
-          }
-        }}
-        scrollEventThrottle={16}
-      >
-          {/* Hero carousel: images and optional video */}
-          <ViewShotComp ref={heroCaptureRef} options={{ format: 'jpg', quality: 0.9 }} style={styles.heroContainer} collapsable={false}>
-            {heroSlides.length === 0 && (
-              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: '#fff' }}>No media</Text>
-              </View>
+    <View style={styles.container} ref={rootRef} collapsable={false}>
+      {shareMode && (
+        <View style={[styles.shareOverlay, { pointerEvents: 'none' }]} ref={overlayRef} collapsable={false}>
+          <View style={[styles.overlayHero, { height: overlayHeroHeight }]} collapsable={false}>
+            {heroSlides[0] ? (
+              <Image
+                source={{ uri: heroSlides[0].src }}
+                style={styles.overlayHeroImage}
+                cachePolicy="memory-disk"
+                contentFit="cover"
+                onLoad={(event) => {
+                  setOverlayHeroLoaded(true);
+                }}
+              />
+            ) : (
+              <View style={styles.overlayHeroFallback}><Text style={{ color:'#666' }}>No media</Text></View>
             )}
-            <ScrollView
-              ref={heroRef}
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              onMomentumScrollEnd={(e) => {
-                const i = Math.round(e.nativeEvent.contentOffset.x / width);
-                setSlideIndex(i);
-              }}
-            >
-              {heroSlides.map((s, i) => (
-                <View key={`${s.type}-${i}`} style={{ width, height: width * 0.8 }}>
-                  {s.type === 'image' ? (
-                    <Image source={{ uri: s.src }} style={styles.heroMediaImage} cachePolicy="memory-disk" />
-                  ) : (
-                    <VideoWrapper
-                      player={i === 0 ? videoPlayer0 : i === 1 ? videoPlayer1 : videoPlayer2}
-                      style={styles.heroMedia}
-                      contentFit="cover"
-                      nativeControls={true}
-                    />
-                  )}
+            {article.author ? (() => { const a: any = article.author || {}; const fullName: string = a.fullName || a.name || 'Reporter'; const photo: string | null = a.profilePhotoUrl || a.avatar || null; const place: string | null = a.placeName || null; const initials = fullName.split(/\s+/).filter(Boolean).slice(0,2).map(p=>p[0]?.toUpperCase()).join(''); const posStyle = AUTHOR_CHIP_POSITION === 'bottom-left' ? { top: undefined as any, bottom: 10 } : null; return (
+              <View style={[styles.overlayAuthorChip, posStyle, { pointerEvents: 'none' }]}
+              >
+                {AUTHOR_CHIP_VARIANT === 'avatar' ? (
+                  photo ? <Image source={{ uri: photo }} style={styles.overlayAuthorChipAvatar} /> : <View style={[styles.overlayAuthorChipAvatar, styles.avatarFallbackSmall]}><Text style={styles.avatarInitialsSmall}>{initials || 'R'}</Text></View>
+                ) : null}
+                <Text style={styles.overlayAuthorChipText} numberOfLines={1}>{fullName}{place ? ` • ${place}` : ''}</Text>
+              </View>
+            ); })() : null}
+            <View style={[styles.overlayBrandBanner, { pointerEvents: 'none' }]}>
+              <Text style={styles.overlayBrandText} numberOfLines={1}>{BRAND_TEXT}</Text>
+              <Image source={BRAND_LOGO} style={styles.overlayBrandLogo} contentFit="contain" />
+            </View>
+          </View>
+          <View style={[styles.overlayPadded, { flex:1 }]}>
+            <Text style={[styles.title, { color: titleColor }, fontsLoaded ? { fontFamily:'Ramabhadra_400Regular' } : null]} numberOfLines={2}>{truncatedTitle}</Text>
+            <Text style={styles.body}>{shareBodyText}</Text>
+            <View style={styles.overlayFooter}>
+              <Text style={styles.infoText}>{relativeTime} • {index + 1} of {totalArticles}</Text>
+              <Text style={styles.categoryPill}>{article.category || 'General'}</Text>
+            </View>
+          </View>
+        </View>
+      )}
+      {(() => {
+        const Wrapper: any = ViewShotComponent || View;
+        const wrapperProps: any = ViewShotComponent
+          ? { ref: viewShotRef, options: { format: 'jpg', quality: 0.9, snapshotContentContainer: true }, style: { flex: 1 } }
+          : { style: { flex: 1 } };
+        return (
+          <Wrapper {...wrapperProps}>
+            <View style={{ flex:1 }} collapsable={false}>
+          {/* Replace author section with brand card when sharing */}
+        <ScrollView
+          style={styles.scrollContainer}
+          contentContainerStyle={styles.scrollContentContainer}
+          scrollEnabled={false}
+          onScroll={(e) => {
+            const now = Date.now(); const y = e.nativeEvent.contentOffset.y; const dy = y - (lastScrollYRef.current||0); lastScrollYRef.current = y;
+            if (isTabBarVisible && dy > 1) { hide(); setTabBarVisible(false); return; }
+            if (Math.abs(dy) < 12) return; if (now - (lastScrollAtRef.current||0) > scrollThrottle) { lastScrollAtRef.current = now; hide(); setTabBarVisible(false); }
+          }}
+          scrollEventThrottle={16}
+        >
+          <View style={[styles.heroContainer, { height: heroHeight }]}>
+            {heroSlides.length === 0 && (
+              <View style={{ flex:1, alignItems:'center', justifyContent:'center' }}><Text style={{ color:'#666' }}>No media</Text></View>
+            )}
+            <ScrollView ref={heroRef} horizontal pagingEnabled showsHorizontalScrollIndicator={false} onMomentumScrollEnd={(e)=>{ const i = Math.round(e.nativeEvent.contentOffset.x / width); setSlideIndex(i); }}>
+              {heroSlides.map((s,i)=>(
+                <View key={`${s.type}-${i}`} style={{ width, height: heroHeight }}>
+                  <Image
+                    source={{ uri: s.src }}
+                    style={styles.heroMediaImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    onLoad={(event) => {
+                      setLoadedImages(v => v + 1);
+                    }}
+                  />
                 </View>
               ))}
             </ScrollView>
-            {/* Overlays: author info and dots */}
-            <View style={[styles.header]}>
-              {/* Author overlay: transparent in normal time, background chip only during share */}
+            <View style={styles.header}>
               {article.author ? (() => {
-                const a: any = article.author;
-                const fullName: string = a.fullName || a.name || 'Reporter';
-                const photo: string | null = a.profilePhotoUrl || a.avatar || null;
-                const roleName: string | null = a.roleName || null;
-                // Prefer address fields for location display
-                const address: string | null = a.address || (article as any)?.location?.address || a.placeName || null;
-                const initials = fullName
-                  .split(/\s+/)
-                  .filter(Boolean)
-                  .slice(0,2)
-                  .map((p: string) => p[0]?.toUpperCase())
-                  .join('');
-                const humanRole = roleName ? String(roleName).replace(/_/g,' ').toLowerCase().replace(/\b([a-z])/g,(m)=>m.toUpperCase()) : null;
-                const Inner = (
-                  <View style={styles.authorCompact}>
-                    {photo ? (
-                      <Image source={{ uri: photo }} style={styles.avatarSmallImg} cachePolicy="memory-disk" />
-                    ) : (
-                      <View style={[styles.avatarSmall, styles.avatarFallbackSmall]}>
-                        <Text style={styles.avatarInitialsSmall}>{initials || 'R'}</Text>
-                      </View>
-                    )}
-                    <Text style={[styles.authorNameCompact, shareMode ? styles.authorNameOnDark : null]} numberOfLines={1}>{fullName}</Text>
-                    {humanRole && (
-                      <Text style={[styles.roleTiny, shareMode ? styles.roleTinyOnDark : null]} numberOfLines={1}>{humanRole}</Text>
-                    )}
-                    {address && (
-                      <View style={styles.dotSep} />
-                    )}
-                    {address && (
-                      <Text style={[styles.placeTiny, shareMode ? styles.placeTinyOnDark : null]} numberOfLines={1}>{address}</Text>
-                    )}
-                  </View>
-                );
-                return shareMode ? (
-                  <View style={[styles.authorChip, { alignSelf: 'flex-start' }]}>
-                    {Inner}
-                  </View>
-                ) : Inner;
-              })() : <View />}
-              {/* Header right area left empty; brand moves to bottom overlay */}
-            </View>
-            {/* Bottom brand banner across hero (visible during share for preview clarity) */}
-            {shareMode ? (
-              <View style={{ position:'absolute', left:10, right:10, bottom:10 }}>
-                <View style={styles.brandBannerFull}>
-                  <Text style={styles.brandSingleLine} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{BRAND_EN}</Text>
-                  <Image source={require('../assets/images/brand_icon.jpg')} style={styles.brandLogo} contentFit="contain" />
-                </View>
-              </View>
-            ) : null}
-            {heroSlides.length > 1 && (
-              <View style={styles.dotsContainer}>
-                {heroSlides.map((_, i) => (
-                  <View key={i} style={[styles.dot, i === slideIndex ? styles.dotActive : undefined]} />
-                ))}
-              </View>
-            )}
-          </ViewShotComp>
-
-          <View style={[styles.articleArea, { backgroundColor: bg }] }>
-            <View
-              style={styles.articleContent}
-              onTouchStart={(e) => {
-                lastTouchYRef.current = e.nativeEvent.pageY;
-                lastTouchStartAtRef.current = Date.now();
-                lastTouchMovedRef.current = false;
-              }}
-              onTouchMove={(e) => {
-                const y = e.nativeEvent.pageY;
-                const dy = y - (lastTouchYRef.current || y);
-                if (Math.abs(dy) > 2) lastTouchMovedRef.current = true;
-                lastTouchYRef.current = y;
-                // If visible and user slightly swipes up, hide immediately
-                if (isTabBarVisible && dy < -2) {
-                  if (NAV_DEBUG) console.log('[Article] small upward glide -> hide');
-                  hide();
-                  setTabBarVisible(false);
-                }
-              }}
-              onTouchEnd={() => {
-                const dt = Date.now() - (lastTouchStartAtRef.current || 0);
-                const isTap = !lastTouchMovedRef.current && dt < 300;
-                if (isTap) {
-                  // Toggle on content tap only
-                  if (isTabBarVisible) {
-                    hide();
-                    setTabBarVisible(false);
-                  } else {
-                    show();
-                    setTabBarVisible(true);
-                  }
-                }
-              }}
-            >
-              <Text style={[
-                styles.title,
-                fontsLoaded ? { fontFamily: 'Ramabhadra_400Regular' } : null,
-                { color: textColor, letterSpacing: 0.2, textAlign: 'left' },
-                isSmallScreen ? { fontSize: 24, marginBottom: 10 } : { fontSize: 26 },
-              ]}
-                numberOfLines={2}
-                ellipsizeMode="tail"
-                onLayout={(e) => setTitleHeight(e.nativeEvent.layout.height)}
-              >
-                {article.title}
-              </Text>
-              <Text style={[ 
-                styles.body,
-                { color: textColor, letterSpacing: 0.1, textAlign: 'left' },
-                isSmallScreen ? { fontSize: 17, lineHeight: 26 } : { fontSize: 19, lineHeight: 30 },
-              ]} numberOfLines={maxBodyLines || undefined} ellipsizeMode="tail">
-                {displayBody}
-              </Text>
-              {/* Gallery moved to top hero; no inline gallery here */}
-            </View>
-            {/* Right-side vertical engagement rail (disabled in favor of footer) */}
-            {SHOW_RIGHT_RAIL && !shareMode && (
-              <>
-                <View style={[styles.railDivider, { borderLeftColor: border }]} />
-                <View style={styles.engagementRail}>
-                  <EngagementButton
-                    icon={<Feather name="thumbs-up" size={24} color={reaction.reaction === 'LIKE' ? '#fa7c05' : textColor} />}
-                    onPress={handleLike}
-                    accessibilityLabel={`Like this article.`}
-                    disabled={reaction.updating || reaction.loading}
-                  />
-                  <EngagementButton
-                    icon={<Feather name="thumbs-down" size={24} color={reaction.reaction === 'DISLIKE' ? '#fa7c05' : textColor} />}
-                    onPress={handleDislike}
-                    accessibilityLabel={`Dislike this article.`}
-                    disabled={reaction.updating || reaction.loading}
-                  />
-                  <EngagementButton
-                    icon={<Feather name="message-circle" size={24} color={textColor} />}
-                    onPress={handleComment}
-                  />
-                  <EngagementButton
-                    icon={<Feather name="share-2" size={24} color={textColor} />}
-                    onPress={handleShareTap}
-                  />
-                </View>
-              </>
-            )}
-          </View>
-      </ScrollView>
-  <View style={[styles.footerContainer, { bottom: 0, paddingBottom: footerBottomOffset, backgroundColor: card }]} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
-        <View style={[styles.footerInfo, { borderTopColor: border }]}>
-          <View style={styles.footerLeft}>
-            <Feather name="clock" size={14} color={muted} />
-            <Text style={[styles.infoText, { color: muted }]}>{formatRelativeTime(article.createdAt)} • {index + 1} of {totalArticles}</Text>
-          </View>
-          <Text
-            numberOfLines={1}
-            style={[styles.categoryPill, { backgroundColor: card, color: textColor, borderColor: border, borderWidth: 1 }]}
-            accessibilityLabel={`Category ${article.category || 'General'}`}
-          >
-            {article.category || 'General'}
-          </Text>
-        </View>
-        {/* Footer engagement row: icons-only, evenly spaced */}
-        {!shareMode && (
-          <View style={[styles.footerEngagement, { borderTopColor: border }] }>
-            <EngagementButton
-              icon={<Feather name="thumbs-up" size={24} color={reaction.reaction === 'LIKE' ? '#fa7c05' : textColor} />}
-              onPress={handleLike}
-              accessibilityLabel={`Like this article.`}
-              disabled={reaction.updating || reaction.loading}
-              text={formatCount(reaction.likes)}
-              textStyle={{ color: countColor, fontSize: 12, fontWeight: '600' }}
-              layout="row"
-            />
-            <EngagementButton
-              icon={<Feather name="thumbs-down" size={24} color={reaction.reaction === 'DISLIKE' ? '#fa7c05' : textColor} />}
-              onPress={handleDislike}
-              accessibilityLabel={`Dislike this article.`}
-              disabled={reaction.updating || reaction.loading}
-              text={formatCount(reaction.dislikes)}
-              textStyle={{ color: countColor, fontSize: 12, fontWeight: '600' }}
-              layout="row"
-            />
-            <EngagementButton
-              icon={<Feather name="message-circle" size={24} color={textColor} />}
-              onPress={handleComment}
-              text={formatCount(commentsCount)}
-              textStyle={{ color: countColor, fontSize: 12, fontWeight: '600' }}
-              layout="row"
-            />
-            <EngagementButton
-              icon={<Feather name="share-2" size={24} color={textColor} />}
-              onPress={handleShareTap}
-              layout="row"
-            />
-          </View>
-        )}
-      </View>
-      {/* Small watermark shown only during share */}
-      {/* No bottom promo banner; promo appears in the author area during shareMode */}
-      {/* Off-screen branded card for sharing */}
-      {/* Card composition removed: sharing hero image + real text caption */}
-  </ViewShotComp>
-      {/* Off-screen full share composition (no engagement bar, no footer) */}
-  <View style={{ position: 'absolute', top: 0, left: 0, right: 0, opacity: 0, pointerEvents: 'none' }}>
-  <ViewShotComp ref={fullShareRef} options={{ format: 'jpg', quality: 0.9 }} collapsable={false}>
-          <View style={{ width, backgroundColor: bg }}>
-            {/* Hero area */}
-            <View style={styles.heroContainer}>
-              {heroSlides.length > 0 ? (
-                <Image
-                  source={{ uri: heroSlides[slideIndex].type === 'image' ? heroSlides[slideIndex].src : (article.image || (Array.isArray(article.images) ? article.images[0] : undefined) || '') }}
-                  style={styles.heroMediaImage}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  onLoadEnd={() => setShareImageReady(true)}
-                  onError={() => setShareImageReady(false)}
-                />
-              ) : (
-                <View style={{ flex:1, backgroundColor: '#000' }} />
-              )}
-              {/* Author chip */}
-              {article.author ? (() => {
-                const a: any = article.author;
-                const fullName: string = a.fullName || a.name || 'Reporter';
-                const photo: string | null = a.profilePhotoUrl || a.avatar || null;
-                const roleName: string | null = a.roleName || null;
-                const address: string | null = a.address || (article as any)?.location?.address || a.placeName || null;
-                const initials = fullName
-                  .split(/\s+/)
-                  .filter(Boolean)
-                  .slice(0,2)
-                  .map((p: string) => p[0]?.toUpperCase())
-                  .join('');
-                const humanRole = roleName ? String(roleName).replace(/_/g,' ').toLowerCase().replace(/\b([a-z])/g,(m)=>m.toUpperCase()) : null;
+                const a: any = article.author || {}; const fullName: string = a.fullName || a.name || 'Reporter'; const photo: string | null = a.profilePhotoUrl || a.avatar || null; const role: string | null = a.roleName || null; const place: string | null = a.placeName || null; const initials = fullName.split(/\s+/).filter(Boolean).slice(0,2).map(p=>p[0]?.toUpperCase()).join(''); const humanRole = role ? role.replace(/_/g,' ').toLowerCase().replace(/\b([a-z])/g,m=>m.toUpperCase()) : null;
                 return (
-                  <View style={[styles.authorChip, { position:'absolute', top:10, left:10 }] }>
-                    <View style={styles.authorCompact}>
-                      {photo ? (
-                        <Image source={{ uri: photo }} style={styles.avatarSmallImg} cachePolicy="memory-disk" />
-                      ) : (
-                        <View style={[styles.avatarSmall, styles.avatarFallbackSmall]}>
-                          <Text style={styles.avatarInitialsSmall}>{initials || 'R'}</Text>
-                        </View>
-                      )}
-                      <Text style={[styles.authorNameCompact, styles.authorNameOnDark]} numberOfLines={1}>{fullName}</Text>
-                      {humanRole && (
-                        <Text style={[styles.roleTiny, styles.roleTinyOnDark]} numberOfLines={1}>{humanRole}</Text>
-                      )}
-                      {address && (
-                        <View style={styles.dotSep} />
-                      )}
-                      {address && (
-                        <Text style={[styles.placeTiny, styles.placeTinyOnDark]} numberOfLines={1}>{address}</Text>
-                      )}
-                    </View>
+                  <View style={styles.authorCompact}>
+                    {photo ? <Image source={{ uri: photo }} style={styles.avatarSmallImg} cachePolicy="memory-disk" /> : <View style={[styles.avatarSmallImg, styles.avatarFallbackSmall]}><Text style={styles.avatarInitialsSmall}>{initials || 'R'}</Text></View>}
+                    <Text style={styles.authorNameCompact} numberOfLines={1}>{fullName}</Text>
+                    {humanRole && <Text style={styles.roleTiny} numberOfLines={1}>{humanRole}</Text>}
+                    {place && <View style={styles.dotSep} />}
+                    {place && <Text style={styles.placeTiny} numberOfLines={1}>{place}</Text>}
                   </View>
                 );
-              })() : null}
-              {/* Bottom brand banner */}
-              <View style={{ position:'absolute', left:10, right:10, bottom:10 }}>
-                <View style={styles.brandBannerFull}>
-                  <Text style={styles.brandSingleLine} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{BRAND_EN}</Text>
-                  <Image source={require('../assets/images/brand_icon.jpg')} style={styles.brandLogo} contentFit="contain" />
-                </View>
-              </View>
+              })() : <View />}
             </View>
-            {/* Article content area */}
-            <View style={[styles.articleArea, { backgroundColor: bg }]}>
-              <View style={styles.articleContent}>
-                <Text style={[styles.title, { color: textColor }, fontsLoaded ? { fontFamily: 'Ramabhadra_400Regular' } : null]} numberOfLines={2}>
-                  {article.title}
-                </Text>
-                <Text style={[styles.body, { color: textColor }]} numberOfLines={maxBodyLines || undefined}>
-                  {displayBody}
-                </Text>
+            {shareMode && (
+              <View style={[styles.brandBanner, { pointerEvents: 'none' }]}>
+                <Text style={styles.brandBannerText} numberOfLines={1}>{BRAND_TEXT}</Text>
+                <Image source={BRAND_LOGO} style={styles.brandBannerLogo} contentFit="contain" />
               </View>
-            </View>
-            {/* Footer (info only; engagement hidden in capture) */}
-            <View style={[styles.footerContainer, { position: 'relative', backgroundColor: card }] }>
-              <View style={[styles.footerInfo, { borderTopColor: border }]}>
-                <View style={styles.footerLeft}>
-                  <Feather name="clock" size={14} color={muted} />
-                  <Text style={[styles.infoText, { color: muted }]}>{formatRelativeTime(article.createdAt)} • {index + 1} of {totalArticles}</Text>
-                </View>
-                <Text numberOfLines={1} style={[styles.categoryPill, { backgroundColor: card, color: textColor, borderColor: border, borderWidth: 1 }]}> 
-                  {article.category || 'General'}
-                </Text>
-              </View>
-            </View>
+            )}
           </View>
-  </ViewShotComp>
-      </View>
+          <View style={[styles.articleArea, isBigHero && styles.articleAreaCompact, shareMode && styles.hiddenDuringShare]} ref={scrollCaptureRef}
+            onTouchStart={(e)=>{ lastTouchYRef.current = e.nativeEvent.pageY; lastTouchStartAtRef.current = Date.now(); lastTouchMovedRef.current=false; }}
+            onTouchMove={(e)=>{ const y = e.nativeEvent.pageY; const dy = y - (lastTouchYRef.current||y); if (Math.abs(dy)>2) lastTouchMovedRef.current=true; lastTouchYRef.current=y; if (isTabBarVisible && dy<-2){ hide(); setTabBarVisible(false);} }}
+            onTouchEnd={()=>{ const dt = Date.now() - (lastTouchStartAtRef.current||0); const isTap = !lastTouchMovedRef.current && dt<300; if (isTap){ if (isTabBarVisible){ hide(); setTabBarVisible(false);} else { show(); setTabBarVisible(true);} } }}
+          >
+            <Text style={[styles.title, { color: titleColor }, isBigHero && styles.titleCompact, fontsLoaded ? { fontFamily:'Ramabhadra_400Regular' } : null]} numberOfLines={2}>{truncatedTitle}</Text>
+            <Text style={[styles.body, isBigHero && styles.bodyCompact]}>{shareBodyText}</Text>
+          </View>
+        </ScrollView>
+        <View style={[styles.footerContainer, { paddingBottom: insets.bottom + 8 }, shareMode && styles.hiddenDuringShare]}>
+          <View style={styles.footerInfo}>
+            <View style={styles.footerLeft}><Feather name="clock" size={14} color="#888" /><Text style={styles.infoText}>{relativeTime} • {index + 1} of {totalArticles}</Text></View>
+            <Text numberOfLines={1} style={styles.categoryPill}>{article.category || 'General'}</Text>
+          </View>
+          {!shareMode && (
+            <View style={styles.footerEngagement}>
+              <EngagementButton icon={<Feather name="thumbs-up" size={24} color={reaction.reaction==='LIKE' ? '#fa7c05' : '#555'} />} text={formatCount(reaction.likes)} onPress={handleLike} disabled={reaction.updating || reaction.loading} />
+              <EngagementButton icon={<Feather name="thumbs-down" size={24} color={reaction.reaction==='DISLIKE' ? '#fa7c05' : '#555'} />} text={formatCount(reaction.dislikes)} onPress={handleDislike} disabled={reaction.updating || reaction.loading} />
+              <EngagementButton icon={<Feather name="message-circle" size={24} color="#555" />} text={formatCount((article as any).commentsCount)} onPress={handleComment} />
+              <EngagementButton icon={<Feather name="share-2" size={24} color="#555" />} onPress={handleShareTap} />
+            </View>
+          )}
+        </View>
+            </View>
+          </Wrapper>
+        );
+      })()}
+      {/* Removed WebView composer */}
     </View>
   );
 };
 
-const { width } = Dimensions.get('window');
-
-type Styles = {
-  container: ViewStyle;
-  scrollContainer: ViewStyle;
-  scrollContentContainer: ViewStyle;
-  image: ViewStyle;
-  heroContainer: ViewStyle;
-  heroMedia: ViewStyle; // for Video/View usages
-  heroMediaImage: ImageStyle; // for Image usages
-  dotsContainer: ViewStyle;
-  dot: ViewStyle;
-  dotActive: ViewStyle;
-  authorCompact: ViewStyle;
-  avatarSmall: ViewStyle; // used on View fallback
-  avatarSmallImg: ImageStyle; // used on Image
-  avatarFallbackSmall: ViewStyle;
-  avatarInitialsSmall: TextStyle;
-  authorNameCompact: TextStyle;
-  roleTiny: TextStyle;
-  dotSep: ViewStyle;
-  placeTiny: TextStyle;
-  authorChip: ViewStyle;
-  authorNameOnDark: TextStyle;
-  roleTinyOnDark: TextStyle;
-  placeTinyOnDark: TextStyle;
-  header: ViewStyle;
-  headerGradient: ViewStyle;
-  authorInfo: ViewStyle;
-  authorPanel: ViewStyle;
-  avatar: ImageStyle;
-  avatarWrapper: ViewStyle;
-  avatarRing: ViewStyle;
-  avatarInitials: TextStyle;
-  authorName: TextStyle;
-  authorMetaRow: ViewStyle;
-  roleBadge: ViewStyle;
-  roleBadgeText: TextStyle;
-  placeName: TextStyle;
-  placePill: ViewStyle;
-  avatarFallback: ViewStyle;
-  authorDesignation: TextStyle;
-  brandInfo: ViewStyle;
-  publisherLogo: ImageStyle;
-  brandName: TextStyle;
-  brandLocation: TextStyle;
-  headerShare: ViewStyle;
-  promoAuthor: ViewStyle;
-  promoFiller: ViewStyle;
-  promoLogo: ImageStyle;
-  brandCard: ViewStyle;
-  brandCardLeft: ViewStyle;
-  brandBannerFull: ViewStyle;
-  brandLogo: ImageStyle;
-  brandSingleLine: TextStyle;
-  brandPlace: TextStyle;
-  brandTagline: TextStyle;
-  articleArea: ViewStyle;
-  articleContent: ViewStyle;
-  title: TextStyle;
-  body: TextStyle;
-  engagementBar: ViewStyle;
-  engagementButton: ViewStyle;
-  engagementButtonText: TextStyle;
-  engagementRail: ViewStyle;
-  railDivider: ViewStyle;
-  footerEngagement: ViewStyle;
-  footerContainer: ViewStyle;
-  footerInfo: ViewStyle;
-  footerLeft: ViewStyle;
-  infoText: TextStyle;
-  categoryPill: TextStyle;
-  watermark: ViewStyle;
-  watermarkText: TextStyle;
-  languageRow: ViewStyle;
-  languagePill: TextStyle;
-};
-
-const styles = StyleSheet.create<Styles>({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  scrollContainer: {
-    flex: 1,
-  },
-  scrollContentContainer: {
-    paddingBottom: 60, // Space for the fixed footer
-  },
-  image: {
-    width: '100%',
-    height: width * 0.8,
-    justifyContent: 'flex-end',
-  },
-  heroContainer: {
-    width: '100%',
-    height: width * 0.8,
-    backgroundColor: '#f8f8f8',
-  },
-  heroMedia: {
-    width: '100%',
-    height: '100%',
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    backgroundColor: '#f2f2f2',
-  },
-  heroMediaImage: {
-    width: '100%',
-    height: '100%',
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    backgroundColor: '#f2f2f2',
-  },
-  dotsContainer: {
-    position: 'absolute',
-    bottom: 10,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 6,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-  },
-  dotActive: {
-    backgroundColor: '#fff',
-  },
-  authorCompact: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    // Removed pill background to avoid obstructing hero image
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    gap: 6,
-    maxWidth: '92%',
-  },
-  avatarSmall: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#eee',
-  },
-  avatarSmallImg: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#eee',
-  },
-  avatarFallbackSmall: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#e2e2e2',
-  },
-  avatarInitialsSmall: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#444'
-  },
-  authorNameCompact: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#222',
-    maxWidth: 120,
-    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.35)'),
-  },
-  roleTiny: {
-    fontSize: 11,
-    color: '#666',
-    maxWidth: 90,
-    ...makeTextShadow(0,1,1.5,'rgba(0,0,0,0.25)'),
-  },
-  dotSep: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#bbb',
-  },
-  placeTiny: {
-    fontSize: 11,
-    color: '#666',
-    maxWidth: 90,
-    ...makeTextShadow(0,1,1.5,'rgba(0,0,0,0.25)'),
-  },
-  authorChip: {
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)'
-  },
-  authorNameOnDark: {
-    color: '#fff',
-    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.5)')
-  },
-  roleTinyOnDark: {
-    color: '#eee',
-    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.45)')
-  },
-  placeTinyOnDark: {
-    color: '#ddd',
-    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.45)')
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    padding: 10,
-    backgroundColor: 'transparent',
-  },
-  headerGradient: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)'
-  },
-  authorInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  authorPanel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.38)',
-    padding: 10,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    ...makeShadow(6, { opacity: 0.35, y: 4, blur: 16 }),
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 10,
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
-  avatarWrapper: {
-    width: 44,
-    height: 44,
-    marginRight: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarRing: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 22,
-    zIndex: -1,
-    opacity: 0.9,
-  },
-  avatarInitials: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  authorName: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  authorMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-    gap: 6,
-  },
-  roleBadge: {
-    backgroundColor: 'rgba(255,215,121,0.18)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,215,121,0.45)'
-  },
-  roleBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.5
-  },
-  placeName: {
-    color: '#eee',
-    fontSize: 11,
-    maxWidth: 120
-  },
-  placePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-    maxWidth: 130,
-    gap: 2,
-  },
-  avatarFallback: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  authorDesignation: {
-    color: '#fff',
-    fontSize: 12,
-  },
-  brandInfo: {
-    alignItems: 'flex-end',
-  },
-  publisherLogo: {
-    width: 28,
-    height: 28,
-    borderRadius: 4,
-    marginBottom: 4,
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
-  brandName: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  brandLocation: {
-    color: '#fff',
-    fontSize: 12,
-  },
-  headerShare: {
-    backgroundColor: 'rgba(255,255,255,0.85)',
-  },
-  // Promo variant rendered in author header area during shareMode
-  promoAuthor: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flex: 1,
-    gap: 12,
-  },
-  promoFiller: { flex: 1 },
-  promoLogo: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-  },
-  brandCard: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-    alignItems: 'center',
-    maxWidth: '86%',
-    gap: 10,
-  },
-  brandCardLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  brandBannerFull: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    flex: 1,
-    marginLeft: 10,
-  },
-  brandLogo: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-  },
-  brandSingleLine: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.5)'),
-    letterSpacing: 0.2,
-  },
-  brandPlace: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 2,
-    ...makeTextShadow(0,1,2,'rgba(0,0,0,0.45)'),
-  },
-  brandTagline: {
-    fontSize: 12,
-    color: '#f3f3f3',
-    letterSpacing: 0.5,
-  },
-  articleArea: {
-    flexDirection: 'row',
-    padding: 15,
-    paddingRight: 10,
-    backgroundColor: '#fff',
-    alignItems: 'flex-start',
-  },
-  articleContent: {
-    // Let content take natural height so engagement bar sits right below
-    flex: 1,
-    paddingRight: 4,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    color: '#000',
-    lineHeight: 30,
-  },
-  body: {
-    fontSize: 18,
-    lineHeight: 28,
-    color: '#333',
-  },
-  engagementBar: {
-    paddingLeft: 0,
-    paddingRight: 15,
-    marginTop: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    gap: 0,
-  },
-  engagementButton: {
-    alignItems: 'flex-end',
-    paddingLeft: 0,
-  },
-  engagementButtonText: {
-    color: '#555',
-    marginTop: 0,
-    fontSize: 0,
-  },
-  engagementRail: {
-    // Remove fixed width so the rail hugs the icons
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    paddingLeft: 0,
-    paddingTop: 0,
-    // small gutter between content and icons
-    marginLeft: 4,
-    gap: 30,
-  },
-  railDivider: {
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch',
-    marginHorizontal: 6,
-    opacity: 0.6,
-  },
-  footerEngagement: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  footerContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    zIndex: 10,
-    elevation: 10,
-  },
-  footerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 4,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    justifyContent: 'space-between',
-  },
-  footerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  infoText: {
-    fontSize: 11,
-    color: '#888',
-  },
-  categoryPill: {
-    maxWidth: '50%',
-    backgroundColor: '#f3f4f6',
-    color: '#444',
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-    borderRadius: 10,
-    fontSize: 11,
-  },
-  watermark: {
-    position: 'absolute',
-    bottom: 64,
-    right: 12,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  watermarkText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  languageRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 8,
-  },
-  languagePill: {
-    backgroundColor: '#eef2ff',
-    color: '#1e3a8a',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 14,
-    fontSize: 12,
-    fontWeight: '600',
-    overflow: 'hidden',
-    maxHeight: 26,
-  },
-  // share card composite styles removed
-  // previously used bottom promo banner styles removed
+const styles = StyleSheet.create({
+  container:{ flex:1, backgroundColor:'#fff' },
+  // Overlay styles
+  shareOverlay:{ position:'absolute', top:0, left:0, right:0, bottom:0, backgroundColor:'#fff', zIndex:60, paddingTop:8, paddingBottom:16 },
+  overlayPadded:{ paddingHorizontal:16 },
+  overlayAuthorCard:{ flexDirection:'row', alignItems:'center', padding:6, borderWidth:1, borderColor:'#eee', borderRadius:12, backgroundColor:'#fff', marginBottom:6 },
+  overlayAuthorAvatar:{ width:36, height:36, borderRadius:18, backgroundColor:'#eee', marginRight:10 },
+  overlayAuthorName:{ fontSize:15, fontWeight:'700', color:'#111' },
+  overlayAuthorPlace:{ fontSize:11, color:'#666', marginTop:1 },
+  overlayAuthorChip:{ position:'absolute', top:10, left:10, flexDirection:'row', alignItems:'center', paddingHorizontal:10, paddingVertical:10, borderRadius:14, backgroundColor:'#fff', elevation:3 },
+  overlayAuthorChipAvatar:{ width:26, height:26, borderRadius:13, backgroundColor:'#eee', marginRight:8 },
+  overlayAuthorChipText:{ fontSize:12, color:'#111', maxWidth: width * 0.6 },
+  overlayHero:{ width:'100%', backgroundColor:'#000', position:'relative', marginBottom:18 },
+  overlayHeroImage:{ width:'100%', height:'100%', resizeMode:'cover' },
+  overlayHeroFallback:{ flex:1, alignItems:'center', justifyContent:'center' },
+  overlayBrandBanner:{ position:'absolute', left:0, right:0, bottom:0, height: BRAND_STRIP_HEIGHT, backgroundColor: BRAND_STRIP_BG, flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingHorizontal:16 },
+  overlayBrandText:{ color:'#fff', fontSize: BRAND_TEXT_SIZE, fontWeight:'600', marginRight:10, flex:1 },
+  overlayBrandLogo:{ width: BRAND_LOGO_LARGE, height: BRAND_LOGO_LARGE },
+  overlayFooter:{ marginTop:'auto', flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingTop:10, borderTopWidth:1, borderTopColor:'#eee' },
+  hiddenDuringShare:{ opacity:0 },
+  shareCaptureLayer:{ position:'absolute', top:0, left:0, right:0, bottom:0, backgroundColor:'#fff', zIndex:20 },
+  shareCaptureInner:{ flex:1, flexDirection:'column', paddingTop:14, paddingBottom:16 },
+  authShareCard:{ flexDirection:'row', alignItems:'center', padding:12, borderWidth:1, borderColor:'#eee', borderRadius:14, backgroundColor:'#fff', marginBottom:12 },
+  authShareAvatar:{ width:54, height:54, borderRadius:27, backgroundColor:'#eee', marginRight:14 },
+  avatarInitialsLarge:{ fontSize:18, fontWeight:'600', color:'#444' },
+  authShareName:{ fontSize:19, fontWeight:'700', color:'#111' },
+  authSharePlace:{ fontSize:14, color:'#666', marginTop:2 },
+  shareHeroFullWidth:{ width:'100%', height: width*0.6, backgroundColor:'#000', marginBottom:14, position:'relative' },
+  shareHeroImageEdge:{ width:'100%', height:'100%', resizeMode:'cover' },
+  shareHeroFallback:{ flex:1, alignItems:'center', justifyContent:'center' },
+  brandBanner:{ position:'absolute', left:0, right:0, bottom:0, height: BRAND_STRIP_HEIGHT, backgroundColor: BRAND_STRIP_BG, flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingHorizontal:14 },
+  brandBannerText:{ color:'#fff', fontSize: BRAND_TEXT_SIZE, fontWeight:'600', marginRight:10, flex:1 },
+  brandBannerLogo:{ width: BRAND_LOGO_LARGE, height: BRAND_LOGO_LARGE },
+  shareContent:{ paddingHorizontal:0, paddingBottom:8 },
+  shareFooterPinned:{ marginTop:'auto', flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingHorizontal:20, paddingTop:8, borderTopWidth:1, borderTopColor:'#eee', backgroundColor:'#fff' },
+  brandCardHeader:{ flexDirection:'row', alignItems:'center', backgroundColor:'#fff', paddingHorizontal:10, paddingVertical:6, borderRadius:12, borderWidth:1, borderColor:'#eee' },
+  brandLogoHeader:{ width:40, height:40, borderRadius:8, marginRight:10 },
+  brandTextHeader:{ fontSize:14, fontWeight:'600', color:'#111', flexShrink:1 },
+  scrollContainer:{ flex:1 },
+  scrollContentContainer:{ paddingBottom:0 },
+  heroContainer:{ width:'100%', backgroundColor:'#f8f8f8', overflow:'hidden' },
+  heroMediaImage:{ width:'100%', height:'100%', backgroundColor:'#f2f2f2' },
+  header:{ flexDirection:'row', justifyContent:'space-between', alignItems:'flex-end', padding:10 },
+  authorCompact:{ flexDirection:'row', alignItems:'center', gap:6, maxWidth:'92%' },
+  avatarSmallImg:{ width:26, height:26, borderRadius:13, backgroundColor:'#eee' },
+  avatarFallbackSmall:{ alignItems:'center', justifyContent:'center' },
+  avatarInitialsSmall:{ fontSize:11, fontWeight:'600', color:'#444' },
+  authorNameCompact:{ fontSize:13, fontWeight:'600', color:'#222', maxWidth:120 },
+  roleTiny:{ fontSize:11, color:'#666', maxWidth:90 },
+  dotSep:{ width:4, height:4, borderRadius:2, backgroundColor:'#bbb' },
+  placeTiny:{ fontSize:11, color:'#666', maxWidth:90 },
+  // Removed top brand banner styles
+  articleArea:{ flexDirection:'column', padding:15, backgroundColor:'#fff' },
+  articleAreaCompact:{ paddingHorizontal:14, paddingTop:10, paddingBottom:8 },
+  // Base color isn't used when titleColor is applied, but keep it non-black anyway.
+  title:{ fontSize:24, fontWeight:'bold', marginBottom:10, color: Colors.light.primary },
+  titleCompact:{ fontSize:23, marginBottom:8 },
+  body:{ fontSize:18, lineHeight:28, color:'#333' },
+  bodyCompact:{ fontSize:17, lineHeight:26 },
+  footerContainer:{ backgroundColor:'#fff' },
+  footerInfo:{ flexDirection:'row', alignItems:'center', paddingHorizontal:16, paddingVertical:4, borderTopWidth:1, borderTopColor:'#eee', justifyContent:'space-between' },
+  footerLeft:{ flexDirection:'row', alignItems:'center', gap:8 },
+  infoText:{ fontSize:11, color:'#888' },
+  categoryPill:{ maxWidth:'50%', backgroundColor:'#f3f4f6', color:'#444', paddingHorizontal:10, paddingVertical:2, borderRadius:10, fontSize:11 },
+  footerEngagement:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingHorizontal:16, paddingVertical:10, gap:12 },
+  engagementButton:{ flexDirection:'row', alignItems:'center', paddingVertical:4, paddingHorizontal:8, borderRadius:8 },
+  engagementButtonText:{ color:'#555', marginLeft:6, fontSize:11 },
 });
 
 export default ArticlePage;
+// Removed escapeHtml helper (unused after composer removal)

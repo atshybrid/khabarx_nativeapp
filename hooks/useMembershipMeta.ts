@@ -1,5 +1,5 @@
 import { CellMeta, CountryMeta, DesignationMeta, DistrictMeta, fetchCells, fetchCountries, fetchDesignations, fetchDistricts, fetchLevels, fetchLocations, fetchMandals, fetchStates, LevelMeta, LocationMeta, MandalMeta, StateMeta } from '@/services/membershipMeta';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface UseMembershipMetaOptions {
   autoLoad?: boolean;
@@ -16,7 +16,7 @@ interface UseMembershipMetaResult {
   mandals: MandalMeta[];
   loading: boolean;
   error: string | null;
-  selected: { level?: string; cellId?: string; designationId?: string; locationId?: string; countryId?: string; stateId?: string; districtId?: string; mandalId?: string };
+  selected: { level?: string; cellId?: string; designationId?: string; locationId?: string; countryId?: string; stateId?: string; districtId?: string; districtIds?: string[]; mandalId?: string };
   selectLevel: (level: string | undefined) => void;
   selectCell: (id: string | undefined) => void;
   selectDesignation: (id: string | undefined) => void;
@@ -24,6 +24,7 @@ interface UseMembershipMetaResult {
   selectCountry: (id: string | undefined) => void;
   selectState: (id: string | undefined) => void;
   selectDistrict: (id: string | undefined) => void;
+  selectDistricts: (ids: string[] | undefined) => void;
   selectMandal: (id: string | undefined) => void;
   reload: () => void;
 }
@@ -34,7 +35,7 @@ export function useMembershipMeta(options: UseMembershipMetaOptions = {}): UseMe
   const [cells, setCells] = useState<CellMeta[]>([]);
   const [designations, setDesignations] = useState<DesignationMeta[]>([]);
   const [locations, setLocations] = useState<LocationMeta[]>([]);
-  const [selected, setSelected] = useState<{ level?: string; cellId?: string; designationId?: string; locationId?: string; countryId?: string; stateId?: string; districtId?: string; mandalId?: string }>({});
+  const [selected, setSelected] = useState<{ level?: string; cellId?: string; designationId?: string; locationId?: string; countryId?: string; stateId?: string; districtId?: string; districtIds?: string[]; mandalId?: string }>({});
   const [countries, setCountries] = useState<CountryMeta[]>([]);
   const [states, setStates] = useState<StateMeta[]>([]);
   const [districts, setDistricts] = useState<DistrictMeta[]>([]);
@@ -42,11 +43,16 @@ export function useMembershipMeta(options: UseMembershipMetaOptions = {}): UseMe
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Prevent older in-flight loads from overwriting newer selections.
+  const loadSeqRef = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     setError(null);
     try {
       const lv = await fetchLevels();
+      if (seq !== loadSeqRef.current) return;
       setLevels(lv);
       const lvlCode = selected.level; // we treat id as level code
       const [cellList, designationList, locationList] = await Promise.all([
@@ -54,23 +60,27 @@ export function useMembershipMeta(options: UseMembershipMetaOptions = {}): UseMe
         fetchDesignations(lvlCode),
         fetchLocations(lvlCode),
       ]);
+      if (seq !== loadSeqRef.current) return;
       setCells(cellList);
       setDesignations(designationList);
       setLocations(locationList);
       const countryList = await fetchCountries();
+      if (seq !== loadSeqRef.current) return;
       setCountries(countryList);
       const [stateList, districtList, mandalList] = await Promise.all([
         fetchStates(selected.countryId),
         fetchDistricts(selected.stateId),
         fetchMandals(selected.districtId),
       ]);
+      if (seq !== loadSeqRef.current) return;
       setStates(stateList);
       setDistricts(districtList);
       setMandals(mandalList);
     } catch (e: any) {
+      if (seq !== loadSeqRef.current) return;
       setError(e?.message || 'Failed loading meta');
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }, [selected.level, selected.countryId, selected.stateId, selected.districtId]);
 
@@ -78,16 +88,28 @@ export function useMembershipMeta(options: UseMembershipMetaOptions = {}): UseMe
 
   // When level changes, clear downstream selections for consistency
   const selectLevel = (level: string | undefined) => {
-    setSelected(prev => ({ ...prev, level, cellId: undefined, designationId: undefined, locationId: undefined }));
+    setSelected(prev => ({
+      ...prev,
+      level,
+      cellId: undefined,
+      designationId: undefined,
+      locationId: undefined,
+      countryId: undefined,
+      stateId: undefined,
+      districtId: undefined,
+      districtIds: undefined,
+      mandalId: undefined,
+    }));
   };
   const selectCell = (id: string | undefined) => { setSelected(prev => ({ ...prev, cellId: id })); };
   const selectDesignation = (id: string | undefined) => { setSelected(prev => ({ ...prev, designationId: id })); };
   const selectLocation = (id: string | undefined) => { setSelected(prev => ({ ...prev, locationId: id })); };
   const selectCountry = (id: string | undefined) => { setSelected(prev => ({ ...prev, countryId: id, stateId: undefined, districtId: undefined, mandalId: undefined })); };
   const selectState = (id: string | undefined) => { setSelected(prev => ({ ...prev, stateId: id, districtId: undefined, mandalId: undefined })); };
-  const selectDistrict = (id: string | undefined) => { setSelected(prev => ({ ...prev, districtId: id, mandalId: undefined })); };
+  const selectDistrict = (id: string | undefined) => { setSelected(prev => ({ ...prev, districtId: id, districtIds: id ? [id] : undefined, mandalId: undefined })); };
+  const selectDistricts = (ids: string[] | undefined) => { setSelected(prev => ({ ...prev, districtIds: ids, districtId: ids && ids.length === 1 ? ids[0] : undefined, mandalId: undefined })); };
   const selectMandal = (id: string | undefined) => { setSelected(prev => ({ ...prev, mandalId: id })); };
 
-  return { levels, cells, designations, locations, countries, states, districts, mandals, loading, error, selected, selectLevel, selectCell, selectDesignation, selectLocation, selectCountry, selectState, selectDistrict, selectMandal, reload: load };
+  return { levels, cells, designations, locations, countries, states, districts, mandals, loading, error, selected, selectLevel, selectCell, selectDesignation, selectLocation, selectCountry, selectState, selectDistrict, selectDistricts, selectMandal, reload: load };
 }
 export default useMembershipMeta;

@@ -184,7 +184,7 @@ export default function AdminDonorWallScreen() {
 
       {/* Full-screen loader during API call */}
       {apiLoading && (
-        <View style={styles.loaderOverlay} pointerEvents="none">
+        <View style={[styles.loaderOverlay, { pointerEvents: 'none' }]}>
           <LottieLoader size={96} />
         </View>
       )}

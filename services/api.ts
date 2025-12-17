@@ -116,6 +116,23 @@ export async function updateUserProfile(partial: UserProfileUpdateInput): Promis
   }
 }
 
+// Update current user's profile using PUT /profiles/me (as per backend contract).
+// We still GET first to avoid accidentally clearing fields when callers provide partial updates.
+export async function updateUserProfilePut(partial: UserProfileUpdateInput): Promise<UserProfileResponse> {
+  const endpoint = '/profiles/me';
+  try {
+    const existing = await request<UserProfileResponse>(endpoint, { method: 'GET' });
+    const merged = { ...existing, ...partial };
+    return await request<UserProfileResponse>(endpoint, { method: 'PUT', body: merged });
+  } catch (e: any) {
+    // If profile doesn't exist yet, allow creating it.
+    if (e instanceof HttpError && e.status === 404) {
+      return await request<UserProfileResponse>(endpoint, { method: 'POST', body: partial });
+    }
+    throw e;
+  }
+}
+
 // -------- Preferences (language, device, location) --------
 const LAST_SYNC_AT_KEY = 'last_prefs_sync_at';
 
@@ -634,6 +651,7 @@ function normalizeArticleFromAny(a: any): Article {
     language: a.languageCode || a.inLanguage || a.language,
     tags: a.tags ?? [],
     canonicalUrl: a.canonicalUrl || a.seo?.canonical || jsonLd?.mainEntityOfPage?.['@id'] || jsonLd?.url || undefined,
+    shortUrl: a.shortUrl || a.short_url || a.shorturl || a.short || a.shareUrl || a.share_url || undefined,
     metaTitle: a.metaTitle || a.seo?.metaTitle || jsonLd?.headline || undefined,
     metaDescription: a.metaDescription || a.seo?.metaDescription || jsonLd?.description || undefined,
   } as Article;
@@ -1263,6 +1281,7 @@ export const getArticleById = async (id: string): Promise<Article | undefined> =
       language: a.languageCode || a.inLanguage || a.language,
       tags: a.tags ?? [],
       canonicalUrl: a.canonicalUrl || a.seo?.canonical || jsonLd?.mainEntityOfPage?.['@id'] || jsonLd?.url || undefined,
+      shortUrl: a.shortUrl || a.short_url || a.shorturl || a.short || a.shareUrl || a.share_url || undefined,
       metaTitle: a.metaTitle || a.seo?.metaTitle || jsonLd?.headline || undefined,
       metaDescription: a.metaDescription || a.seo?.metaDescription || jsonLd?.description || undefined,
     } as Article;
@@ -1302,6 +1321,48 @@ export type TransliterateResult = {
   candidates?: string[];
   error?: 'unsupported_language' | string;
 };
+
+export type ArticleResolveResult = {
+  id: string;
+  canonicalUrl?: string;
+  shortUrl?: string;
+  originalUrl?: string;
+};
+
+export async function resolveArticleReference(url?: string | null): Promise<ArticleResolveResult | null> {
+  const trimmed = typeof url === 'string' ? url.trim() : '';
+  if (!trimmed) return null;
+  const qs = new URLSearchParams({ url: trimmed });
+  const endpoints = [
+    `/api/v1/articles/resolve?${qs.toString()}`,
+    `/articles/resolve?${qs.toString()}`,
+    `/shortnews/resolve?${qs.toString()}`,
+  ];
+  let lastError: any = null;
+  for (const ep of endpoints) {
+    try {
+      const res = await request<any>(ep as any, { method: 'GET', noAuth: true, timeoutMs: 15000 });
+      const payload = (res as any)?.data || (res as any)?.article || res;
+      const articleId = payload?.articleId || payload?.id || payload?.article?.id || payload?.resolvedId || payload?.newsId;
+      if (!articleId) continue;
+      return {
+        id: String(articleId),
+        canonicalUrl: payload?.canonicalUrl || payload?.canonical || payload?.url || payload?.article?.canonicalUrl,
+        shortUrl: payload?.shortUrl || payload?.short_url || payload?.article?.shortUrl || payload?.article?.short_url,
+        originalUrl: payload?.originalUrl || payload?.original_url || trimmed,
+      };
+    } catch (err) {
+      lastError = err;
+      if (DEBUG_API) {
+        try { console.warn('[API] resolveArticleReference failed', ep, (err as any)?.message || err); } catch {}
+      }
+    }
+  }
+  if (DEBUG_API && lastError) {
+    try { console.warn('[API] resolveArticleReference exhausted candidates', (lastError as any)?.message || lastError); } catch {}
+  }
+  return null;
+}
 
 function langCodeToScript(code: string): 'telugu' | 'devanagari' | 'tamil' | 'kannada' | undefined {
   const c = (code || '').toLowerCase();
@@ -1862,9 +1923,11 @@ export const registerGuestUser = async (data: { languageId: string; deviceDetail
       const body = (err as any)?.body;
       const serverMsg = body?.message || body?.error || err?.message;
       console.warn('Guest registration attempt failed', { attempt: label, status, message: serverMsg });
-      // Only retry on validation-ish 400 errors; otherwise break early
-      if (!(status === 400 || status === 422)) break;
-      // If this was the last attempt we'll surface below
+      const shouldRetry = status === 400 || status === 404 || status === 409 || status === 410 || status === 412 || status === 415 || status === 422 || (status >= 500 && status < 600) || status === undefined;
+      if (!shouldRetry) {
+        break;
+      }
+      // Otherwise continue to next payload variant
     }
   }
 

@@ -4,6 +4,7 @@ import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { PostArticleIcon } from '@/icons';
 import { checkPostArticleAccess } from '@/services/auth';
+import { emit as emitEvent } from '@/services/events';
 import { makeShadow } from '@/utils/shadow';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { usePathname, useRouter } from 'expo-router';
@@ -82,9 +83,9 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
       const authCheck = await checkPostArticleAccess();
       
       if (!authCheck.canAccess) {
-        // For guest users or expired tokens, direct navigate to login
+        // For guest users or expired tokens, open inline login sheet (no navigation)
         if (authCheck.isGuest || !authCheck.hasToken) {
-          router.push('/auth/login?from=post');
+          try { emitEvent('login:open', { from: 'post' }); } catch {}
           return;
         }
         
@@ -99,7 +100,7 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
             },
             {
               text: 'Go to Login',
-              onPress: () => router.push('/auth/login?from=post')
+              onPress: () => { try { emitEvent('login:open', { from: 'post' }); } catch {} }
             }
           ]
         );
@@ -110,8 +111,8 @@ export default function AutoHideTabBar(props: BottomTabBarProps) {
       router.push('/explore');
     } catch (error) {
       console.warn('[FAB] goToPostArticle auth check failed:', error);
-      // On error, default to login
-      router.push('/auth/login');
+      // On error, default to inline login
+      try { emitEvent('login:open', { from: 'post' }); } catch {}
     }
   };
 

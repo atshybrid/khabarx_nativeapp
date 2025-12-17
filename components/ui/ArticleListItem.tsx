@@ -1,7 +1,8 @@
 
-import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { Article } from '@/types';
+import { makeShadow } from '@/utils/shadow';
+import React from 'react';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface ArticleListItemProps {
   article: Article;
@@ -30,11 +31,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginVertical: 8,
     marginHorizontal: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...makeShadow(3, { opacity: 0.1, y: 2, blur: 8 }),
     flexDirection: 'row',
   },
   image: {

@@ -6,10 +6,11 @@ import { Article } from '@/types';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { WebView } from 'react-native-webview';
 
 
 export default function ArticleDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, url } = useLocalSearchParams<{ id: string; url?: string }>();
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +47,14 @@ export default function ArticleDetailScreen() {
       <View style={styles.center}>
         <Text style={styles.errorText}>Error: {error}</Text>
       </View>
+    );
+  }
+
+  // Fallback: if the backend couldn't resolve this ID, but we have the original URL,
+  // show the web article so users can still read the content.
+  if (!article && url) {
+    return (
+      <WebView source={{ uri: String(url) }} startInLoadingState={true} />
     );
   }
 

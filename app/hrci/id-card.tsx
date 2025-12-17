@@ -6,11 +6,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import ViewShot from 'react-native-view-shot';
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 
 import { request } from '@/services/http';
+import { makeShadow } from '@/utils/shadow';
 
 type Profile = {
   id?: string;
@@ -61,9 +62,6 @@ export default function IdCardScreen() {
     else if (!paramCardNumber && envCardNumber && !manualCardNumber) setManualCardNumber((envCardNumber || '').toLowerCase());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramCardNumber, envCardNumber]);
-
-  const frontRef = useRef<ViewShot | null>(null);
-  const backRef = useRef<ViewShot | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -417,11 +415,7 @@ const styles = StyleSheet.create({
   },
   tabActive: { 
     backgroundColor: 'rgba(255,255,255,0.25)', 
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2
+    ...makeShadow(2, { opacity: 0.1, y: 2, blur: 8 })
   },
   tabInactive: { backgroundColor: 'transparent' },
   tabText: { fontSize: 16, fontWeight: '800', textAlign: 'center' },
@@ -434,11 +428,7 @@ const styles = StyleSheet.create({
     right: 0, 
     top: 0, 
     bottom: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8
+    ...makeShadow(8, { opacity: 0.15, y: 4, blur: 16 })
   },
   stageHidden: { position: 'absolute', left: -9999, top: -9999, opacity: 0, width: 0, height: 0 },
   actionsContainer: { 
@@ -455,11 +445,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14, 
     borderRadius: 16, 
     gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...makeShadow(3, { opacity: 0.1, y: 2, blur: 8 }),
     minWidth: 120
   },
   actionText: { fontSize: 15, fontWeight: '700', color: '#ffffff' },

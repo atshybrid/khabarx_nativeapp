@@ -10,7 +10,7 @@ export interface MembershipFilters {
   userId?: string;
   hrcCountryId?: string;
   hrcStateId?: string;
-  hrcDistrictId?: string;
+  hrcDistrictId?: string | string[];
   hrcMandalId?: string;
   search?: string;
 }

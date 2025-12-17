@@ -14,6 +14,8 @@ export type AppEvents = {
   'toast:show': { message: string };
   // Ask News tab to reload items (e.g., after login/logout/language change)
   'news:refresh': { reason?: 'login' | 'logout' | 'language' | 'manual' };
+  // Open global mobile login sheet inline without navigation
+  'login:open': { from?: 'post' | 'generic' };
 };
 
 type Handler<T> = (payload: T) => void;

@@ -1,19 +1,27 @@
 import { safeBack } from '@/utils/navigation';
 import { makeShadow } from '@/utils/shadow';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import {
+    BottomSheetBackdrop,
+    BottomSheetModal,
+    BottomSheetScrollView,
+    BottomSheetTextInput
+} from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     Animated,
     Image,
     Linking,
+    Platform,
     RefreshControl,
     ScrollView,
     StyleSheet,
@@ -23,17 +31,23 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useHrciOnboarding } from '../../context/HrciOnboardingContext';
+import { updateUserProfilePut } from '../../services/api';
 import { loadTokens } from '../../services/auth';
 import { on } from '../../services/events';
 import { downloadPdfWithFallbacks } from '../../services/fileDownload';
 import { canCreateHrciCase, getHrciCasesSummary, HrciCasesSummary } from '../../services/hrciCases';
 import { getBaseUrl, request } from '../../services/http';
 import { getKYCStatus } from '../../services/kyc';
-import { getMembershipProfile } from '../../services/membership';
+import { getMembershipProfile, MembershipProfileData } from '../../services/membership';
 
 type Profile = {
   fullName?: string;
   profilePhotoUrl?: string;
+  gender?: string | null;
+  dob?: string | null;
+  maritalStatus?: string | null;
+  bio?: string | null;
+  emergencyContactNumber?: string | null;
   designation?: string;
   cell?: string;
   level?: string;
@@ -134,6 +148,106 @@ export default function HrciDashboard() {
   const photoPromptShownRef = useRef(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingLetter, setDownloadingLetter] = useState(false);
+
+  const meProfileSheetRef = useRef<BottomSheetModal>(null);
+  const meProfileSnapPoints = useMemo(() => ['75%', '95%'], []);
+  const [meProfileLoading, setMeProfileLoading] = useState(false);
+  const [meProfileData, setMeProfileData] = useState<MembershipProfileData | null>(null);
+  const [meProfileEditMode, setMeProfileEditMode] = useState(false);
+  const [meProfileSaving, setMeProfileSaving] = useState(false);
+  const [editFullName, setEditFullName] = useState('');
+  const [editGender, setEditGender] = useState('');
+  const [editDob, setEditDob] = useState('');
+  const [showDobPicker, setShowDobPicker] = useState(false);
+
+  const normalizeGender = (v?: string) => {
+    const s = String(v || '').trim().toUpperCase();
+    if (s === 'M' || s === 'MALE') return 'MALE';
+    if (s === 'F' || s === 'FEMALE') return 'FEMALE';
+    if (s === 'O' || s === 'OTHER') return 'OTHER';
+    return '';
+  };
+  const genderLabel = (v?: string) => {
+    const s = normalizeGender(v);
+    if (s === 'MALE') return 'Male';
+    if (s === 'FEMALE') return 'Female';
+    if (s === 'OTHER') return 'Other';
+    return '';
+  };
+
+  const parseIsoDate = (v?: string) => {
+    const s = String(v || '').trim();
+    const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(s);
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    if (!y || !mo || !d) return null;
+    const dt = new Date(y, mo - 1, d);
+    if (Number.isNaN(dt.getTime())) return null;
+    return dt;
+  };
+  const formatIsoDate = (dt: Date) => {
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const renderSheetBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        pressBehavior="close"
+      />
+    ),
+    []
+  );
+
+  const openMeProfileSheet = useCallback(async () => {
+    try {
+      setMeProfileEditMode(false);
+      meProfileSheetRef.current?.present();
+      setMeProfileLoading(true);
+      const data = await getMembershipProfile();
+      setMeProfileData(data);
+      // Prefer /profiles/me values when available (they are the editable source of truth).
+      setEditFullName(profile?.fullName || data?.user?.profile?.fullName || '');
+      setEditGender(normalizeGender(((profile as any)?.gender as any) || (data?.user?.profile?.gender as any) || ''));
+      setEditDob(((profile as any)?.dob as any) || (data?.user?.profile?.dob as any) || '');
+      setShowDobPicker(false);
+    } finally {
+      setMeProfileLoading(false);
+    }
+  }, [profile]);
+
+  const saveMeProfile = useCallback(async () => {
+    try {
+      setMeProfileSaving(true);
+      await updateUserProfilePut({
+        fullName: editFullName?.trim() ? editFullName.trim() : undefined,
+        gender: normalizeGender(editGender) ? normalizeGender(editGender) : undefined,
+        dob: editDob?.trim() ? editDob.trim() : undefined,
+      });
+
+      // Refresh /profiles/me (this is what the top card uses)
+      const refreshedProfile = await request<any>(`/profiles/me`, { method: 'GET' });
+      setProfile(refreshedProfile?.data || refreshedProfile);
+
+      // Refresh composite sheet data (membership/card may also change)
+      const fresh = await getMembershipProfile();
+      setMeProfileData(fresh);
+      setMeProfileEditMode(false);
+      // Close sheet to return user to dashboard
+      meProfileSheetRef.current?.dismiss();
+    } catch (e: any) {
+      Alert.alert('Update Failed', e?.message || 'Unable to update profile.');
+    } finally {
+      setMeProfileSaving(false);
+    }
+  }, [editDob, editFullName, editGender]);
 
 
   const loadProfile = async () => {
@@ -615,6 +729,7 @@ export default function HrciDashboard() {
                   </View>
                 )}
                 </TouchableOpacity>
+                <TouchableOpacity style={styles.profileInfoPressable} onPress={openMeProfileSheet} activeOpacity={0.85}>
                 <View style={styles.profileInfo}>
                 {(() => {
                   // Name
@@ -684,6 +799,7 @@ export default function HrciDashboard() {
                   );
                 })()}
                 </View>
+                </TouchableOpacity>
               </View>
               <TouchableOpacity onPress={downloadIdCardPdf} style={[styles.idCardFullBtn, downloadingPdf ? { opacity: 0.85 } : null]} disabled={downloadingPdf}>
                 {downloadingPdf ? (
@@ -696,6 +812,176 @@ export default function HrciDashboard() {
             </View>
           </View>
         </LinearGradient>
+
+        <BottomSheetModal
+          ref={meProfileSheetRef}
+          snapPoints={meProfileSnapPoints}
+          enableDismissOnClose
+          backdropComponent={renderSheetBackdrop}
+          onDismiss={() => setMeProfileEditMode(false)}
+        >
+          <BottomSheetScrollView contentContainerStyle={styles.meSheetContent} keyboardShouldPersistTaps="handled">
+            <View style={styles.meSheetHeader}>
+              <Text style={styles.meSheetTitle}>My Profile</Text>
+              <TouchableOpacity
+                onPress={() => setMeProfileEditMode((v) => !v)}
+                style={styles.meSheetHeaderBtn}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.meSheetHeaderBtnText}>{meProfileEditMode ? 'Cancel' : 'Edit'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            {meProfileLoading ? (
+              <View style={styles.meSheetLoading}>
+                <ActivityIndicator size="small" color="#111827" />
+                <Text style={styles.meSheetLoadingText}>Loading…</Text>
+              </View>
+            ) : meProfileEditMode ? (
+              <View>
+                <Text style={styles.meSheetSectionTitle}>Edit</Text>
+
+                <Text style={styles.meSheetLabel}>Full Name</Text>
+                <BottomSheetTextInput
+                  value={editFullName}
+                  onChangeText={setEditFullName}
+                  style={styles.meSheetInput}
+                  placeholder="Full Name"
+                  placeholderTextColor="#9ca3af"
+                />
+
+                <Text style={styles.meSheetLabel}>Gender</Text>
+                <TouchableOpacity
+                  style={styles.meSheetSelect}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    Alert.alert('Select Gender', '', [
+                      { text: 'Male', onPress: () => setEditGender('MALE') },
+                      { text: 'Female', onPress: () => setEditGender('FEMALE') },
+                      { text: 'Other', onPress: () => setEditGender('OTHER') },
+                      { text: 'Cancel', style: 'cancel' },
+                    ]);
+                  }}
+                >
+                  <Text style={genderLabel(editGender) ? styles.meSheetSelectText : styles.meSheetSelectPlaceholder}>
+                    {genderLabel(editGender) || 'Select gender'}
+                  </Text>
+                  <MaterialCommunityIcons name="chevron-down" size={18} color="#6b7280" />
+                </TouchableOpacity>
+
+                <Text style={styles.meSheetLabel}>Date of Birth</Text>
+                <TouchableOpacity
+                  style={styles.meSheetSelect}
+                  activeOpacity={0.85}
+                  onPress={() => setShowDobPicker(true)}
+                >
+                  <Text style={editDob?.trim() ? styles.meSheetSelectText : styles.meSheetSelectPlaceholder}>
+                    {editDob?.trim() ? editDob.trim() : 'Select date'}
+                  </Text>
+                  <MaterialCommunityIcons name="calendar" size={18} color="#6b7280" />
+                </TouchableOpacity>
+                {showDobPicker ? (
+                  <View style={{ marginTop: 8 }}>
+                    <DateTimePicker
+                      value={parseIsoDate(editDob) || new Date(1990, 0, 1)}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      maximumDate={new Date()}
+                      onChange={(_: DateTimePickerEvent, date?: Date) => {
+                        if (Platform.OS !== 'ios') setShowDobPicker(false);
+                        if (date) setEditDob(formatIsoDate(date));
+                      }}
+                    />
+                    {Platform.OS === 'ios' ? (
+                      <TouchableOpacity
+                        onPress={() => setShowDobPicker(false)}
+                        style={[styles.meSheetHeaderBtn, { alignSelf: 'flex-end', marginTop: 8 }]}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.meSheetHeaderBtnText}>Done</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                <TouchableOpacity
+                  onPress={saveMeProfile}
+                  style={[styles.meSheetSaveBtn, meProfileSaving ? { opacity: 0.85 } : null]}
+                  disabled={meProfileSaving}
+                  activeOpacity={0.9}
+                >
+                  {meProfileSaving ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <Text style={styles.meSheetSaveBtnText}>Save</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View>
+                {(() => {
+                  const u = meProfileData?.user || {};
+                  const p = u?.profile || {};
+                  const m = meProfileData?.membership || {};
+                  const c = meProfileData?.card || {};
+                  const hrci: any = (m as any)?.hrci || {};
+                  const device: any = (meProfileData as any)?.device || {};
+
+                  const nameOf = (v: any) => {
+                    if (!v) return '';
+                    if (typeof v === 'string') return humanize(v) || v;
+                    if (typeof v === 'object') return v.name || v.title || '';
+                    return '';
+                  };
+
+                  const fmtDate = (v?: string | null) => {
+                    if (!v) return '';
+                    const d = new Date(v);
+                    if (Number.isNaN(d.getTime())) return String(v);
+                    return d.toLocaleDateString();
+                  };
+
+                  return (
+                    <>
+                      <Text style={styles.meSheetSectionTitle}>Personal</Text>
+                      <DetailRow label="Name" value={p?.fullName || profile?.fullName || ''} />
+                      <DetailRow label="Mobile" value={(u as any)?.mobileNumber || ''} />
+                      <DetailRow label="Gender" value={(p as any)?.gender || ''} />
+                      <DetailRow label="DOB" value={(p as any)?.dob || ''} />
+
+                      <Text style={styles.meSheetSectionTitle}>Membership</Text>
+                      <DetailRow label="Level" value={humanize((m as any)?.level) || ''} />
+                      <DetailRow label="Status" value={humanize((m as any)?.status) || ''} />
+                      <DetailRow label="Designation" value={nameOf((m as any)?.designation) || ''} />
+                      <DetailRow label="Cell" value={nameOf((m as any)?.cell) || ''} />
+                      <DetailRow label="KYC" value={humanize((m as any)?.kyc?.status) || ''} />
+                      <DetailRow label="Activated" value={fmtDate((m as any)?.activatedAt) || ''} />
+                      <DetailRow label="Expires" value={fmtDate((m as any)?.expiresAt) || ''} />
+
+                      <Text style={styles.meSheetSectionTitle}>Location</Text>
+                      <DetailRow label="Zone" value={nameOf(hrci?.zone) || ''} />
+                      <DetailRow label="Country" value={nameOf(hrci?.country) || ''} />
+                      <DetailRow label="State" value={nameOf(hrci?.state) || ''} />
+                      <DetailRow label="District" value={nameOf(hrci?.district) || ''} />
+                      <DetailRow label="Mandal" value={nameOf(hrci?.mandal) || ''} />
+
+                      <Text style={styles.meSheetSectionTitle}>ID Card</Text>
+                      <DetailRow label="Card Status" value={humanize((c as any)?.status) || humanize((m as any)?.idCardStatus) || ''} />
+                      <DetailRow label="Card Number" value={(c as any)?.cardNumber || cardInfo?.cardNumber || ''} />
+
+                      <Text style={styles.meSheetSectionTitle}>Device</Text>
+                      <DetailRow label="Type" value={humanize(device?.type) || ''} />
+                      <DetailRow label="Brand" value={device?.brand || ''} />
+                      <DetailRow label="Model" value={device?.model || ''} />
+                      <DetailRow label="OS" value={device?.os || ''} />
+                      <DetailRow label="App Version" value={device?.appVersion || ''} />
+                    </>
+                  );
+                })()}
+              </View>
+            )}
+          </BottomSheetScrollView>
+        </BottomSheetModal>
 
         {/* Smart Stats Mini-Cards */}
         <View style={styles.statsContainer}>
@@ -966,6 +1252,7 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   profileInfo: { flex: 1 },
+  profileInfoPressable: { flex: 1 },
   profileName: { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 4 },
   profileDesignation: { fontSize: 14, fontWeight: '600', color: '#FE0002', marginBottom: 2 },
   profileCode: { fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 2 },
@@ -1010,6 +1297,25 @@ const styles = StyleSheet.create({
   kycStatusCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, marginBottom: 12, flexBasis: '100%' },
   kycTitle: { fontSize: 16, fontWeight: '700' },
   kycSubtitle: { fontSize: 12, marginTop: 2 }
+  ,
+  meSheetContent: { padding: 16, paddingBottom: 28 },
+  meSheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  meSheetTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
+  meSheetHeaderBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: '#f3f4f6' },
+  meSheetHeaderBtnText: { fontSize: 13, fontWeight: '800', color: '#111827' },
+  meSheetLoading: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
+  meSheetLoadingText: { fontSize: 13, fontWeight: '700', color: '#6b7280' },
+  meSheetSectionTitle: { fontSize: 14, fontWeight: '900', color: '#111827', marginTop: 14, marginBottom: 8 },
+  meSheetRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', gap: 12 },
+  meSheetRowLabel: { flex: 1, fontSize: 12, fontWeight: '800', color: '#6b7280' },
+  meSheetRowValue: { flex: 1, fontSize: 12, fontWeight: '700', color: '#111827', textAlign: 'right' },
+  meSheetLabel: { fontSize: 12, fontWeight: '800', color: '#6b7280', marginTop: 10, marginBottom: 6 },
+  meSheetInput: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#111827' },
+  meSheetSelect: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12 },
+  meSheetSelectText: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  meSheetSelectPlaceholder: { fontSize: 14, fontWeight: '700', color: '#9ca3af' },
+  meSheetSaveBtn: { marginTop: 14, backgroundColor: '#FE0002', paddingVertical: 12, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  meSheetSaveBtnText: { color: '#ffffff', fontSize: 14, fontWeight: '800' }
 });
 
 // KYC helpers for consistent status & styling
@@ -1061,4 +1367,13 @@ function kycCardConfig(status: ReturnType<typeof normalizeKycStatus>) {
         containerStyle: { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1 },
       };
   }
+}
+
+function DetailRow({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <View style={styles.meSheetRow}>
+      <Text style={styles.meSheetRowLabel}>{label}</Text>
+      <Text style={styles.meSheetRowValue}>{value && String(value).trim().length ? String(value) : '-'}</Text>
+    </View>
+  );
 }

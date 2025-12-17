@@ -7,7 +7,7 @@
     "icon": "./assets/images/khabarx_icon_1024.png",
     "scheme": "khabarx",
     "userInterfaceStyle": "automatic",
-  "newArchEnabled": true,
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -59,7 +59,8 @@
       ],
       "@react-native-google-signin/google-signin",
       "expo-video",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-font"
     ],
     "extra": {
       "google": {

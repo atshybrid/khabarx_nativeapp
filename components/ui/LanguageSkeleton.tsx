@@ -1,4 +1,4 @@
-import React from 'react';
+import { makeShadow } from '@/utils/shadow';
 import { Dimensions, StyleSheet, View } from 'react-native';
 import { Skeleton } from './Skeleton';
 
@@ -66,11 +66,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 1.2,
+    ...makeShadow(1, { opacity: 0.06, y: 1, blur: 2 }),
   },
   leftText: {
     flex: 1,

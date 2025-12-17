@@ -1,5 +1,7 @@
 import AppLockGate from '@/components/AppLockGate';
+import MobileLoginModal from '@/components/MobileLoginModal';
 import Toast from '@/components/Toast';
+import { resolveArticleReference } from '@/services/api';
 import { ensureFirebaseAuthAsync, isFirebaseConfigComplete, logFirebaseGoogleAlignment } from '@/services/firebaseClient';
 import { makeShadow } from '@/utils/shadow';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
@@ -12,6 +14,7 @@ import React from 'react';
 import { LogBox, Platform, StyleSheet, Text, View } from 'react-native';
 // removed duplicate react-native import (merged above)
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { emit, on } from '@/services/events';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { AuthProvider } from '../context/AuthContextNew';
@@ -111,27 +114,79 @@ function ThemedApp() {
     })();
   }, []);
 
-  // Deep link & initial URL handling for khabarx://article/<id>
+  // Deep link & initial URL handling for khabarx://article/<id> and HTTPS App Links
   React.useEffect(() => {
-    const handleUrl = (url?: string | null) => {
+    const handleUrl = async (url?: string | null) => {
       if (!url) return;
+      const pushArticle = (articleId?: string | null, resolvedUrl?: string | null) => {
+        if (!articleId) return false;
+        try {
+          router.push({ pathname: '/article/[id]', params: { id: articleId, url: resolvedUrl || url } as any });
+          return true;
+        } catch (err) {
+          console.log('[DEEP_LINK] navigation failed', err);
+          return false;
+        }
+      };
       try {
         const parsed = Linking.parse(url);
-        const segments = parsed?.path ? parsed.path.split('/') : [];
-        if (segments[0] === 'article' && segments[1]) {
-          const articleId = segments[1];
-          // Navigate only if not already on that screen
-          router.push({ pathname: '/article/[id]', params: { id: articleId } });
+        const host = (parsed?.hostname || '').toLowerCase();
+        const path = parsed?.path || '';
+        const segments = path ? path.split('/') : [];
+
+        // 1) App scheme khabarx://article/<id>
+        if (segments[0] === 'article' && segments[1] && pushArticle(segments[1], url)) {
+          return;
+        }
+
+        // 2) HTTPS canonical links from our domain -> try to extract article id quickly
+        if (host === 'app.hrcitodaynews.in') {
+          if (segments[0] === 'article' && segments[1] && pushArticle(segments[1], url)) {
+            return;
+          }
+          const last = segments[segments.length - 1] || '';
+          const m = last.match(/-([A-Za-z0-9]+)$/);
+          if (m && m[1] && pushArticle(m[1], url)) {
+            return;
+          }
         }
       } catch (e) {
         console.log('[DEEP_LINK] failed to parse', url, e);
       }
+
+      try {
+        const resolved = await resolveArticleReference(url);
+        if (resolved?.id) {
+          pushArticle(resolved.id, resolved.canonicalUrl || resolved.originalUrl || url);
+          return;
+        }
+      } catch (err) {
+        console.log('[DEEP_LINK] resolver failed', (err as any)?.message || err);
+      }
     };
     // Initial
-    Linking.getInitialURL().then(handleUrl).catch(()=>{});
+    Linking.getInitialURL().then(handleUrl).catch(() => {});
     // Listener
-    const sub = Linking.addEventListener('url', (e) => handleUrl(e.url));
+    const sub = Linking.addEventListener('url', (e) => { handleUrl(e.url); });
     return () => { try { sub.remove(); } catch {} };
+  }, [router]);
+
+  // Global inline login sheet controller (opens without route change)
+  const [loginVisible, setLoginVisible] = React.useState(false);
+  const loginOriginRef = React.useRef<'post' | 'generic'>('generic');
+  React.useEffect(() => {
+    const off = on('login:open', (p) => {
+      loginOriginRef.current = (p?.from as any) || 'generic';
+      setLoginVisible(true);
+    });
+    return () => { try { off(); } catch {} };
+  }, []);
+  const handleLoginSuccess = React.useCallback((data: { jwt: string; refreshToken: string; user?: any }) => {
+    try { setLoginVisible(false); } catch {}
+    try { emit('news:refresh', { reason: 'login' } as any); } catch {}
+    if (loginOriginRef.current === 'post') {
+      try { router.replace('/explore'); } catch {}
+    }
   }, [router]);
 
   return (
@@ -187,6 +242,11 @@ function ThemedApp() {
             <StatusBar style={effective === 'dark' ? 'light' : 'dark'} />
             <Toast />
             <AppLockGate />
+            <MobileLoginModal
+              visible={loginVisible}
+              onClose={() => setLoginVisible(false)}
+              onSuccess={handleLoginSuccess}
+            />
           </ThemeProvider>
         </AuthProvider>
       </BottomSheetModalProvider>

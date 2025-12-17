@@ -69,6 +69,41 @@ app.get('/news', (req, res) => {
   res.json({ page: 1, pageSize: 10, total: 1, data: sample });
 });
 
+// Android App Links: serve Digital Asset Links from env configuration
+// Env vars:
+//   ANDROID_APP_PACKAGE        e.g., com.amoghnya.khabarx
+//   ANDROID_SHA256_DEBUG       e.g., FA:C6:...:9C
+//   ANDROID_SHA256_RELEASE     e.g., <your release fingerprint>
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  try {
+    const pkg = process.env.ANDROID_APP_PACKAGE || 'com.amoghnya.khabarx';
+    // Collect fingerprints from env (support comma-separated or multiple vars)
+    const fps = [];
+    const d = process.env.ANDROID_SHA256_DEBUG;
+    const r = process.env.ANDROID_SHA256_RELEASE;
+    if (d && d.trim()) fps.push(...d.split(',').map(s => s.trim()).filter(Boolean));
+    if (r && r.trim()) fps.push(...r.split(',').map(s => s.trim()).filter(Boolean));
+    if (fps.length === 0) {
+      return res.status(500).json({ error: 'Missing ANDROID_SHA256_* environment variables' });
+    }
+    const body = [
+      {
+        relation: ["delegate_permission/common.handle_all_urls"],
+        target: {
+          namespace: "android_app",
+          package_name: pkg,
+          sha256_cert_fingerprints: fps,
+        },
+      },
+    ];
+    res.set('Content-Type', 'application/json');
+    res.set('Cache-Control', 'public, max-age=600');
+    res.send(JSON.stringify(body));
+  } catch (e) {
+    res.status(500).json({ error: 'assetlinks generation failed' });
+  }
+});
+
 // Comments API (demo only; in-memory)
 app.get('/comments', (req, res) => {
   const { articleId } = req.query;

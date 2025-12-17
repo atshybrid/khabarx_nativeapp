@@ -207,7 +207,7 @@ export default function DonationStoryDetailScreen() {
                 </Pressable>
                 {selectedId === item.id ? (
                   <>
-                    <View pointerEvents="none" style={styles.selectionOverlay} />
+                    <View style={[styles.selectionOverlay, { pointerEvents: 'none' }]} />
                     <Pressable
                       onPress={() => confirmDelete(item.id)}
                       disabled={deletingId === item.id}

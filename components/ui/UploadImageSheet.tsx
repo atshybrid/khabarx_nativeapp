@@ -135,7 +135,7 @@ export default function UploadImageSheet({ visible, onClose, storyId, onUploaded
 
         {/* Uploading overlay */}
         {uploading ? (
-          <View style={styles.loaderOverlay} pointerEvents="none">
+          <View style={[styles.loaderOverlay, { pointerEvents: 'none' as any }]}>
             <LottieLoader size={96} />
           </View>
         ) : null}

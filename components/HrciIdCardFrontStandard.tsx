@@ -470,7 +470,7 @@ export const HrciIdCardFrontStandard: React.FC<HrciIdCardFrontStandardProps> = (
           <Text style={styles.pBottomText} numberOfLines={3}>{bottomTextOverride ?? 'We take help 24x7 From (Police, CBI, Vigilance, NIA) & other Govt. Dept.'}</Text>
         </View>
         {showSectionDebug && (
-          <View style={styles.debugOverlay} pointerEvents="none">
+          <View style={[styles.debugOverlay, { pointerEvents: 'none' }]}>
             <Text style={styles.debugText}>
               Top: {( (topBandPx ?? fallbackBandPx) / pxPerIn ).toFixed(4)} in\n
               Blue: {( (blueBandPx ?? fallbackBandPx) / pxPerIn ).toFixed(4)} in\n
@@ -823,7 +823,7 @@ export const HrciIdCardFrontStandard: React.FC<HrciIdCardFrontStandardProps> = (
         <Text style={[styles.bottomText]} numberOfLines={1}>24x7 SUPPORT WITH GOVT AGENCIES AGAINST CRIME & CORRUPTION</Text>
       </View>
       {showSectionDebug && (
-        <View style={styles.debugOverlay} pointerEvents="none">
+            <View style={[styles.debugOverlay, { pointerEvents: 'none' }]}>
           <Text style={styles.debugText}>
             Top: {( (topBandPx ?? fallbackBandPx) / pxPerIn ).toFixed(4)} in\n
             Blue: {( (blueBandPx ?? fallbackBandPx) / pxPerIn ).toFixed(4)} in\n

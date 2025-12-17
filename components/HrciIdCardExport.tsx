@@ -1,9 +1,17 @@
 import * as Sharing from 'expo-sharing';
 import React, { useCallback, useImperativeHandle, useRef } from 'react';
 import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import ViewShot from 'react-native-view-shot';
 import { HrciIdCardFrontExact, HrciIdCardFrontProps } from './HrciIdCardFrontExact';
 import { HrciIdCardFrontStandard } from './HrciIdCardFrontStandard';
+
+function getViewShotComponent(): any | null {
+  if (Platform.OS === 'web') return null;
+  try {
+    return require('react-native-view-shot')?.default;
+  } catch {
+    return null;
+  }
+}
 
 export type CardVariant = 'exact' | 'standard';
 
@@ -86,7 +94,9 @@ export interface HrciIdCardExportHandle {
  * It renders a hidden high‑DPI card for capture to ensure print-friendly quality.
  */
 export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdCardExportProps>(({ previewWidth = 360, exportWidth = 2160, showActions = true, ...cardProps }, ref) => {
-  const shotRef = useRef<ViewShot>(null);
+  const shotRef = useRef<any>(null);
+  const ViewShot = getViewShotComponent();
+  const Wrapper: any = ViewShot || View;
   const {
     variant = 'standard',
     orientation = 'landscape',
@@ -394,11 +404,11 @@ export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdC
       )}
 
       {/* Hidden high‑DPI render for capture */}
-      <View style={styles.hiddenCapture} pointerEvents="none" accessibilityElementsHidden>
+      <View style={[styles.hiddenCapture, { pointerEvents: 'none' }]} accessibilityElementsHidden>
         {/* If padding to target aspect, wrap card centered inside a container of the target aspect */}
-        <ViewShot
-          ref={shotRef}
-          options={{ format: exportFormat, quality: jpegQuality, result: 'tmpfile' }}
+        <Wrapper
+          ref={ViewShot ? shotRef : undefined}
+          {...(ViewShot ? { options: { format: exportFormat, quality: jpegQuality, result: 'tmpfile' } } : {})}
           style={[
             styles.captureWrapper,
             doPad
@@ -538,11 +548,11 @@ export const HrciIdCardExport = React.forwardRef<HrciIdCardExportHandle, HrciIdC
               <HrciIdCardFrontExact {...cardProps} width={effectiveExportWidth} />
             )
           )}
-        </ViewShot>
+        </Wrapper>
       </View>
 
       {showActions && (
-        <View style={styles.actionBar} pointerEvents="box-none">
+        <View style={[styles.actionBar, { pointerEvents: 'box-none' }]}>
           <TouchableOpacity style={[styles.actionBtn, styles.download]} onPress={onDownload}>
             <Text style={styles.actionText}>Download JPEG</Text>
           </TouchableOpacity>

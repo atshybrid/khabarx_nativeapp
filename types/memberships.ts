@@ -83,7 +83,7 @@ export interface MembershipFilters {
   designationId?: string;
   hrcCountryId?: string;
   hrcStateId?: string;
-  hrcDistrictId?: string;
+  hrcDistrictId?: string | string[];
   hrcMandalId?: string;
   search?: string; // Search term for names, card numbers, etc.
   limit?: number; // default 20

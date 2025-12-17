@@ -2,19 +2,6 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-// --- Release signing (conditional) -------------------------------------------------------------
-// We load keystore properties only if a keystore.properties file exists. This allows local devs
-// to build a release variant signed with their own keystore without committing secrets. If the
-// file is absent we fall back to the debug keystore for the release build (NOT for Play Store!).
-def keystoreProperties = new Properties()
-def keystorePropertiesFile = file("keystore.properties") // located in android/app/
-def hasReleaseKeystore = false
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-    hasReleaseKeystore = keystoreProperties.containsKey('storeFile')
-}
-// -----------------------------------------------------------------------------------------------
-
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
@@ -105,8 +92,8 @@ android {
         applicationId 'com.amoghnya.khabarx'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0.1"
+        versionCode 1
+        versionName "1.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -117,12 +104,31 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        if (hasReleaseKeystore) {
-            release {
-                storeFile file(keystoreProperties['storeFile'])
-                storePassword keystoreProperties['storePassword']
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
+        release {
+            // Best practice: do NOT commit your keystore or passwords.
+            // Configure these in android/gradle.properties or via environment.
+            // Example gradle.properties:
+            //   MYAPP_UPLOAD_STORE_FILE=android/app/khabarx-release.keystore
+            //   MYAPP_UPLOAD_KEY_ALIAS=khabarx
+            //   MYAPP_UPLOAD_STORE_PASSWORD=***
+            //   MYAPP_UPLOAD_KEY_PASSWORD=***
+            def storeFileProp = findProperty('MYAPP_UPLOAD_STORE_FILE') ?: System.getenv('MYAPP_UPLOAD_STORE_FILE')
+            def storePasswordProp = findProperty('MYAPP_UPLOAD_STORE_PASSWORD') ?: System.getenv('MYAPP_UPLOAD_STORE_PASSWORD')
+            def keyAliasProp = findProperty('MYAPP_UPLOAD_KEY_ALIAS') ?: System.getenv('MYAPP_UPLOAD_KEY_ALIAS')
+            def keyPasswordProp = findProperty('MYAPP_UPLOAD_KEY_PASSWORD') ?: System.getenv('MYAPP_UPLOAD_KEY_PASSWORD')
+
+            if (storeFileProp && keyAliasProp && storePasswordProp && keyPasswordProp) {
+                storeFile file(storeFileProp)
+                storePassword storePasswordProp
+                keyAlias keyAliasProp
+                keyPassword keyPasswordProp
+            } else {
+                // Fall back to debug signing only if release props are missing (dev convenience)
+                // NOTE: Real production builds should set the release keystore properties above.
+                storeFile file('debug.keystore')
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
             }
         }
     }
@@ -131,9 +137,8 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // If keystore.properties is present we use the real release keystore, otherwise we
-            // fall back to debug signing (NOT for Play Store distribution!).
-            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
+            // Use proper release signing when configured; otherwise falls back as defined above
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

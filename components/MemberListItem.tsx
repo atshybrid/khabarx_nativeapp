@@ -1,22 +1,43 @@
 import { Theme } from '@/constants/Theme';
+import { reissueAdminMembershipIdCard } from '@/services/hrciAdmin';
 import type { MembershipRecord } from '@/types/memberships';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 interface Props {
   membership: MembershipRecord;
+  onPress?: () => void;
 }
 
-export function MemberListItem({ membership }: Props) {
+export function MemberListItem({ membership, onPress }: Props) {
   const { designation, cell } = membership;
-  const fullName = membership.fullName || membership.idCard?.fullName || 'Unknown';
-  const initials = fullName.split(/\s+/).slice(0,2).map(part => part[0]?.toUpperCase()).join('');
-  const photo = membership.profilePhotoUrl || (membership.idCard as any)?.photoUrl || (membership.idCard?.meta?.photoUrl) || null;
-  const location = membership.hrcCountryName || membership.hrcStateName || membership.hrcDistrictName || membership.hrcMandalName || membership.zone || 'Location N/A';
+  // Prefer top-level `fullName` (API returns it), then idCard fullName, then user profile name
+  const fullName = (membership as any).fullName || membership.idCard?.fullName || (membership as any).user?.profile?.fullName || 'Unknown';
+  const initials = String(fullName || '').split(/\s+/).slice(0,2).map((part: string) => part[0]?.toUpperCase()).join('');
+  const photo = (membership as any).profilePhotoUrl || (membership.idCard as any)?.photoUrl || (membership.idCard?.meta?.photoUrl) || null;
+  const location = (membership as any).hrcCountryName || (membership as any).hrcStateName || (membership as any).hrcDistrictName || (membership as any).hrcMandalName || membership.zone || 'Location N/A';
   const created = membership.createdAt ? (() => { try { return new Date(membership.createdAt).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }); } catch { return membership.createdAt; } })() : undefined;
-  const mobileMasked = membership.mobileNumber ? (String(membership.mobileNumber).replace(/^(\d{3})(\d+)(\d{2})$/, '$1***$3')) : undefined;
+  const mobileMasked = (membership.idCard?.mobileNumber || (membership as any).mobileNumber || (membership as any).mobileNumber) ? (String(membership.idCard?.mobileNumber || (membership as any).mobileNumber).replace(/^(\d{3})(\d+)(\d{2})$/, '$1***$3')) : undefined;
+  // cardNumber may be provided either nested under idCard or top-level as idCardNumber
+  const cardNumber = membership.idCard?.cardNumber || (membership as any).idCardNumber;
+  const [reissuing, setReissuing] = useState(false);
+
+  const Container: any = onPress ? Pressable : View;
+  const containerProps: any = onPress
+    ? {
+        onPress,
+        style: ({ pressed }: any) => [styles.card, pressed && { opacity: 0.9 }],
+        accessibilityRole: 'button',
+        accessibilityLabel: `${fullName}, ${designation?.name || ''}, ${membership.level || ''}`,
+      }
+    : {
+        style: styles.card,
+        accessibilityRole: 'button',
+        accessibilityLabel: `${fullName}, ${designation?.name || ''}, ${membership.level || ''}`,
+      };
 
   return (
-    <View style={styles.card} accessibilityRole="button" accessibilityLabel={`${fullName}, ${designation?.name || ''}, ${membership.level || ''}`}>      
+    <Container {...containerProps}>
       <View style={styles.row}>
         {photo ? (
           <Image source={{ uri: photo }} style={styles.avatar} />
@@ -37,9 +58,35 @@ export function MemberListItem({ membership }: Props) {
             {mobileMasked ? <Text style={styles.mobileText}>{mobileMasked}</Text> : null}
           </View>
           {created ? <Text style={styles.createdText}>Joined {created}</Text> : null}
+          {cardNumber ? (
+            <View style={{ marginTop: 8 }}>
+              <Pressable onPress={async (e) => {
+                // Avoid triggering the card onPress when tapping this action.
+                try { (e as any)?.stopPropagation?.(); } catch {}
+                if (!membership.id) return;
+                const cn = cardNumber;
+                Alert.alert('Reissue ID Card', `Reissue ID card for ${fullName}?`, [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Reissue', style: 'destructive', onPress: async () => {
+                    try {
+                      setReissuing(true);
+                      await reissueAdminMembershipIdCard(membership.id, cn || undefined);
+                      Alert.alert('Success', 'ID card reissue request sent.');
+                    } catch (e: any) {
+                      Alert.alert('Failed', e?.message || 'Failed to reissue ID card');
+                    } finally {
+                      setReissuing(false);
+                    }
+                  } }
+                ]);
+              }} style={({ pressed }) => [{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#eef2ff', alignSelf: 'flex-start' }, pressed && { opacity: 0.9 }]} accessibilityRole="button" accessibilityLabel="Reissue ID Card">
+                {reissuing ? <ActivityIndicator /> : <Text style={{ color: '#1e3a8a', fontWeight: '700' }}>Reissue ID Card</Text>}
+              </Pressable>
+            </View>
+          ) : null}
         </View>
       </View>
-    </View>
+    </Container>
   );
 }
 

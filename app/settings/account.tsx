@@ -3,7 +3,7 @@ import { Colors } from '@/constants/Colors';
 import { Language, LANGUAGES } from '@/constants/languages';
 import { afterPreferencesUpdated, getLanguages, getUserPreferences, pickPreferenceLanguage, pickPreferenceLocation, resolveEffectiveLanguage, updatePreferences } from '@/services/api';
 import { checkPostArticleAccess, isCitizenReporter, loadTokens, logoutAndClearProfile } from '@/services/auth';
-import { emit, on } from '@/services/events';
+import { emit as emitEvent, on } from '@/services/events';
 
 import { getMembershipProfile, MembershipProfileData } from '@/services/membership';
 import { Feather } from '@expo/vector-icons';
@@ -239,6 +239,68 @@ export default function AccountScreen() {
     try { Alert.alert('Developer mode', next ? 'Enabled' : 'Disabled'); } catch {}
   };
 
+  const openExternalUrl = useCallback(async (url: string) => {
+    const clean = String(url || '').trim();
+    if (!clean) return;
+    try {
+      const supported = await Linking.canOpenURL(clean);
+      if (!supported) {
+        Alert.alert('Cannot open link', clean);
+        return;
+      }
+      await Linking.openURL(clean);
+    } catch {
+      Alert.alert('Error', 'Failed to open link.');
+    }
+  }, []);
+
+  const legalLinks = useMemo(() => {
+    return [
+      {
+        title: 'Privacy Policy',
+        subtitle: 'humanrightscouncilforindia.org',
+        url: 'https://humanrightscouncilforindia.org/khabarx/privacy-policy',
+        icon: 'file-text' as const,
+      },
+      {
+        title: 'Terms & Conditions',
+        subtitle: 'humanrightscouncilforindia.org',
+        url: 'https://humanrightscouncilforindia.org/khabarx/terms',
+        icon: 'file-text' as const,
+      },
+      {
+        title: 'Disclaimer',
+        subtitle: 'humanrightscouncilforindia.org',
+        url: 'https://humanrightscouncilforindia.org/khabarx/disclaimer',
+        icon: 'alert-circle' as const,
+      },
+      {
+        title: 'Content Guidelines',
+        subtitle: 'humanrightscouncilforindia.org',
+        url: 'https://humanrightscouncilforindia.org/khabarx/content',
+        icon: 'book-open' as const,
+      },
+      {
+        title: 'Contact',
+        subtitle: 'humanrightscouncilforindia.org',
+        url: 'https://humanrightscouncilforindia.org/khabarx/contact',
+        icon: 'phone' as const,
+      },
+      {
+        title: 'Refund Policy',
+        subtitle: 'humanrightscouncilforindia.org',
+        url: 'https://humanrightscouncilforindia.org/khabarx/refund',
+        icon: 'refresh-ccw' as const,
+      },
+      {
+        title: 'Data Safety',
+        subtitle: 'humanrightscouncilforindia.org',
+        url: 'https://humanrightscouncilforindia.org/khabarx/data-safety',
+        icon: 'shield' as const,
+      },
+    ];
+  }, []);
+
   const formatLang = (x: any) => {
     try {
       if (!x) return '—';
@@ -296,7 +358,7 @@ export default function AccountScreen() {
       // Resolve effective language after change
       try { const eff = await resolveEffectiveLanguage(); setEffectiveLangObj(eff); } catch {}
       // Ask News screen to refresh feed immediately
-      try { emit('news:refresh', { reason: 'language' } as any); } catch {}
+      try { emitEvent('news:refresh', { reason: 'language' } as any); } catch {}
       try { bottomSheetRef.current?.dismiss(); } catch {}
     } finally {
       setUpdatingLanguage(false);
@@ -447,7 +509,7 @@ export default function AccountScreen() {
                       if (res.canAccess || res.hasValidRole) {
                         router.push('/explore');
                       } else {
-                        router.push('/auth/login?from=post');
+                        try { emitEvent('login:open', { from: 'post' }); } catch {}
                       }
                     }}
                     style={({ pressed }) => [styles.secondaryBtn, pressed && { opacity: 0.8 }]}
@@ -505,7 +567,7 @@ export default function AccountScreen() {
                     if (res.canAccess || res.hasValidRole) {
                         router.push('/explore');
                     } else {
-                      router.push('/auth/login?from=post');
+                      try { emitEvent('login:open', { from: 'post' }); } catch {}
                     }
                   }}
                   style={({ pressed }) => [styles.secondaryBtn, pressed && { opacity: 0.8 }]}
@@ -548,6 +610,21 @@ export default function AccountScreen() {
           />
         </View>
 
+        {/* Policies & Links (Play Store) */}
+        <Text style={styles.sectionTitle}>Policies & Links</Text>
+        <View style={styles.card}>
+          {legalLinks.map((l, idx) => (
+            <View key={l.url} style={{ marginBottom: idx === legalLinks.length - 1 ? 0 : 10 }}>
+              <SettingsRow
+                icon={<Feather name={l.icon as any} size={20} color={Colors.light.primary} />}
+                title={l.title}
+                subtitle={l.subtitle}
+                onPress={() => openExternalUrl(l.url)}
+              />
+            </View>
+          ))}
+        </View>
+
         {/* Location (collapsible) */}
         <View style={styles.card}>
           <SettingsRow
@@ -564,7 +641,6 @@ export default function AccountScreen() {
             </View>
           ) : null}
         </View>
-
         {/* Reporter card (hidden as requested) */}
         {false && roleReporter ? (
           <View style={styles.card}>
@@ -614,7 +690,7 @@ export default function AccountScreen() {
 
       {/* Overlay during update */}
       {updatingLanguage && (
-        <View style={styles.overlayFull} pointerEvents="auto">
+        <View style={[styles.overlayFull, { pointerEvents: 'auto' }]}>
           <View style={styles.overlayCardCenter}>
             <LottieLoader size={72} />
             <Text style={{ marginTop: 8, color: '#111', fontWeight: '700' }}>Applying language…</Text>

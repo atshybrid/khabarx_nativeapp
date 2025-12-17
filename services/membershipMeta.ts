@@ -30,13 +30,15 @@ export async function fetchLevels(): Promise<LevelMeta[]> {
 }
 
 export async function fetchCells(level?: string): Promise<CellMeta[]> {
-  const qs = level ? `?level=${encodeURIComponent(level)}` : '';
-  return safeFetch(`/memberships/meta/cells${qs}`, []);
+  // Use HRCI cells endpoint (limit to 50 active cells). The backend currently
+  // doesn't accept level as a query param for this route, so ignore `level`.
+  return safeFetch(`/hrci/cells?isActive=true&limit=50`, []);
 }
 
 export async function fetchDesignations(level?: string): Promise<DesignationMeta[]> {
-  const qs = level ? `?level=${encodeURIComponent(level)}` : '';
-  return safeFetch(`/memberships/meta/designations${qs}`, []);
+  // Fetch designations via HRCI endpoint (limit to 100). Level-specific filtering
+  // may be applied client-side if needed later.
+  return safeFetch(`/hrci/designations?limit=100`, []);
 }
 
 export async function fetchLocations(level?: string): Promise<LocationMeta[]> {
@@ -51,20 +53,21 @@ export interface DistrictMeta { id: string; name: string; stateId: string }
 export interface MandalMeta { id: string; name: string; districtId: string }
 
 export async function fetchCountries(): Promise<CountryMeta[]> {
-  return safeFetch('/hrc/countries', []);
+  // Keep in sync with services/hrciGeo.ts
+  return safeFetch('/hrci/geo/countries', []);
 }
 
 export async function fetchStates(countryId?: string): Promise<StateMeta[]> {
   if (!countryId) return [];
-  return safeFetch(`/hrc/states?countryId=${encodeURIComponent(countryId)}`, []);
+  return safeFetch(`/hrci/geo/states?countryId=${encodeURIComponent(countryId)}`, []);
 }
 
 export async function fetchDistricts(stateId?: string): Promise<DistrictMeta[]> {
   if (!stateId) return [];
-  return safeFetch(`/hrc/districts?stateId=${encodeURIComponent(stateId)}`, []);
+  return safeFetch(`/hrci/geo/districts?stateId=${encodeURIComponent(stateId)}`, []);
 }
 
 export async function fetchMandals(districtId?: string): Promise<MandalMeta[]> {
   if (!districtId) return [];
-  return safeFetch(`/hrc/mandals?districtId=${encodeURIComponent(districtId)}`, []);
+  return safeFetch(`/hrci/geo/mandals?districtId=${encodeURIComponent(districtId)}`, []);
 }

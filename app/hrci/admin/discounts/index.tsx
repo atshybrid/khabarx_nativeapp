@@ -177,7 +177,7 @@ export default function AdminDiscountsList() {
       </Pressable>
 
       {cancellingId && (
-        <View style={styles.overlay} pointerEvents="auto">
+        <View style={[styles.overlay, { pointerEvents: 'auto' }]}>
           <View style={styles.overlayBox}>
             <ActivityIndicator size="large" color={Colors.light.primary} />
             <Text style={styles.overlayText}>Cancelling…</Text>

@@ -6,7 +6,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { FullScreenLoader, LOADER_SIZES } from '@/components/ui/Loader';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function HrciNewCaseScreen() {
   const [title, setTitle] = useState('');

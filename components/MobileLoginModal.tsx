@@ -1,8 +1,10 @@
 import { Loader } from '@/components/ui/Loader';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useRef, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createCitizenReporterMobile, getMpinStatus, loginWithMpin } from '../services/api';
+import { saveTokens } from '../services/auth';
 import { gatherRegistrationContext } from '../services/contextGather';
 
 interface Props {
@@ -15,6 +17,7 @@ interface Props {
 type Status = 'idle' | 'mpin' | 'register';
 
 export default function MobileLoginModal({ visible, onClose, onSuccess }: Props) {
+  const insets = useSafeAreaInsets();
   const [mobile, setMobile] = useState('');
   const [mpin, setMpin] = useState('');
   const [fullName, setFullName] = useState('');
@@ -157,6 +160,28 @@ export default function MobileLoginModal({ visible, onClose, onSuccess }: Props)
     }
   }, [mpin, status]);
 
+  const persistAuthState = async (data: { jwt: string; refreshToken: string; user?: any }) => {
+    try {
+      await saveTokens({
+        jwt: data.jwt,
+        refreshToken: data.refreshToken,
+        user: data.user,
+        languageId: data.user?.languageId,
+      });
+    } catch (err) {
+      console.warn('[MOBILE_LOGIN] saveTokens failed, falling back to direct storage', (err as any)?.message);
+      try {
+        await AsyncStorage.multiSet([
+          ['jwt', data.jwt],
+          ['refreshToken', data.refreshToken],
+        ]);
+      } catch {}
+    }
+    if (data.user?.languageId) {
+      try { await AsyncStorage.setItem('languageId', data.user.languageId); } catch {}
+    }
+  };
+
   const doLogin = async () => {
     console.log('[MOBILE_LOGIN] doLogin called', { mobile, mpinLength: mpin.length, loading });
     
@@ -183,9 +208,7 @@ export default function MobileLoginModal({ visible, onClose, onSuccess }: Props)
       const data = await loginWithMpin({ mobileNumber: mobile, mpin });
       console.log('[MOBILE_LOGIN] Login successful', { hasJwt: !!data.jwt, hasUser: !!data.user });
       
-      await AsyncStorage.setItem('jwt', data.jwt);
-      await AsyncStorage.setItem('refreshToken', data.refreshToken);
-      if (data.user?.languageId) await AsyncStorage.setItem('languageId', data.user.languageId);
+      await persistAuthState(data);
       
       console.log('[MOBILE_LOGIN] Calling onSuccess callback');
       onSuccess({ jwt: data.jwt, refreshToken: data.refreshToken, user: data.user });
@@ -264,9 +287,7 @@ export default function MobileLoginModal({ visible, onClose, onSuccess }: Props)
       });
       console.log('[MOBILE_LOGIN] Registration successful', { hasJwt: !!data.jwt, hasUser: !!data.user });
       
-      await AsyncStorage.setItem('jwt', data.jwt);
-      await AsyncStorage.setItem('refreshToken', data.refreshToken);
-      if (data.user?.languageId) await AsyncStorage.setItem('languageId', data.user.languageId);
+      await persistAuthState(data);
       
       console.log('[MOBILE_LOGIN] Calling onSuccess callback');
       onSuccess({ jwt: data.jwt, refreshToken: data.refreshToken, user: data.user });
@@ -388,23 +409,31 @@ export default function MobileLoginModal({ visible, onClose, onSuccess }: Props)
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.backdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.card}>
-          <View style={styles.headerRow}>
-            <Text style={styles.title}>Citizen Reporter</Text>
-            <TouchableOpacity onPress={() => { reset(); onClose(); }}><Text style={styles.close}>✕</Text></TouchableOpacity>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <KeyboardAvoidingView
+          style={[styles.backdrop]}
+          behavior={Platform.select({ ios: 'padding', android: 'padding' })}
+          keyboardVerticalOffset={0}
+        >
+          <View style={[styles.card, { paddingBottom: Math.max(16, insets.bottom + 10) }]}>
+            <View style={styles.headerRow}>
+              <Text style={styles.title}>Citizen Reporter</Text>
+              <TouchableOpacity onPress={() => { reset(); onClose(); }}><Text style={styles.close}>✕</Text></TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={{ paddingBottom: 8 }} keyboardShouldPersistTaps="handled">
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+              {renderBody()}
+            </ScrollView>
           </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          {renderBody()}
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  card: { backgroundColor: '#fff', padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
+  card: { backgroundColor: '#fff', padding: 20, borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '85%' },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   title: { fontSize: 18, fontWeight: '600' },
   close: { fontSize: 18 },

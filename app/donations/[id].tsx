@@ -118,7 +118,7 @@ export default function CampaignDetail() {
           ) : (
             <View style={styles.hero} />
           )}
-          <SafeAreaView style={styles.heroBar} pointerEvents="box-none">
+          <SafeAreaView style={[styles.heroBar, { pointerEvents: 'box-none' }]}>
             <View style={{ flex: 1 }} />
             <Pressable
               onPress={async () => {

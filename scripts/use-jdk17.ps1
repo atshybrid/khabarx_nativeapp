@@ -31,7 +31,23 @@ if($sepIndex -ge 0){
       if($which){ $resolved = $which.Path }
     }
     if(-not $resolved){ Write-Error "Executable not found in PATH or locally: $exe"; exit 1 }
-    & $resolved @exeArgs
-    exit $LASTEXITCODE
+    $exit = 0
+    $exeLeaf = Split-Path -Leaf $resolved
+    $ranInSubdir = $false
+    try {
+      if ($exeLeaf -ieq 'gradlew.bat') {
+        $parent = Split-Path -Parent $resolved
+        if (Test-Path $parent) {
+          Write-Host "Changing directory to $parent for Gradle build" -ForegroundColor Yellow
+          Push-Location $parent
+          $ranInSubdir = $true
+        }
+      }
+      & $resolved @exeArgs
+      $exit = $LASTEXITCODE
+    } finally {
+      if ($ranInSubdir) { Pop-Location }
+    }
+    exit $exit
   }
 }

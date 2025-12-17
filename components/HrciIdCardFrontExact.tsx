@@ -182,7 +182,7 @@ export const HrciIdCardFrontExact: React.FC<HrciIdCardFrontProps> = ({
         </Text>
       </View>
       {/* Signature Overlay anchored to card (always above footer) */}
-      <View style={[styles.signatureOverlay, { right: 28, bottom: cardSignBottom }]} pointerEvents="box-none">
+      <View style={[styles.signatureOverlay, { right: 28, bottom: cardSignBottom, pointerEvents: 'box-none' as any }]}>
         <View style={styles.signatureContainer}>
           {authorSignUri ? (
             <Image source={{ uri: authorSignUri }} style={[styles.authorSign, { backgroundColor: signBg }]} resizeMode="contain" />

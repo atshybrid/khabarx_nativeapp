@@ -314,6 +314,49 @@ export async function updateDonationEventStatus(id: string, status: string): Pro
   return data as DonationEvent;
 }
 
+// -------------------------
+// Short News (Admin)
+// -------------------------
+
+export type ShortNewsItem = {
+  id: string;
+  title?: string | null;
+  content?: string | null;
+  language?: string | null;
+  authorId?: string | null;
+  status?: string | null; // PENDING, AI_APPROVED, DESK_PENDING, DESK_APPROVED, REJECTED
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  readCount?: number | null;
+  author?: { id?: string; mobileNumber?: string | null; email?: string | null } | null;
+  primaryImageUrl?: string | null;
+  categoryName?: string | null;
+  authorName?: string | null;
+};
+
+export async function listAdminShortNews(params: { languageId?: string; status?: string; limit?: number; cursor?: string } = {}) {
+  const q = new URLSearchParams();
+  if (params.languageId) q.set('languageId', params.languageId);
+  if (params.status) q.set('status', params.status);
+  q.set('limit', String(Math.min(Math.max(params.limit ?? 10, 1), 100)));
+  if (params.cursor) q.set('cursor', params.cursor);
+  const res = await request<any>(`/shortnews/all${q.toString() ? `?${q.toString()}` : ''}`);
+  return {
+    success: Boolean((res as any)?.success ?? true),
+    count: (res as any)?.count ?? (Array.isArray((res as any)?.data) ? (res as any).data.length : 0),
+    nextCursor: (res as any)?.pageInfo?.nextCursor ?? (res as any)?.nextCursor ?? null,
+    data: ((res as any)?.data ?? []) as ShortNewsItem[],
+  } as { success: boolean; count: number; nextCursor: string | null; data: ShortNewsItem[] };
+}
+
+export async function updateAdminShortNewsStatus(id: string, status: string, aiRemark?: string | null) {
+  const body: any = { status };
+  if (aiRemark != null) body.aiRemark = aiRemark;
+  const res = await request<any>(`/shortnews/${encodeURIComponent(id)}/status`, { method: 'PATCH', body });
+  const data = (res as any)?.data ?? res;
+  return data as ShortNewsItem;
+}
+
 export async function getCasesAdminAnalytics(days: number = 7): Promise<CasesAnalytics> {
   const q = new URLSearchParams({ days: String(Math.min(Math.max(days, 1), 60)) });
   const res = await request<any>(`/hrci/cases/admin/analytics?${q.toString()}`);
@@ -525,4 +568,65 @@ export async function createAdminMember(payload: CreateAdminMemberPayload): Prom
   const res = await request<any>(`/memberships/admin/create-member`, { method: 'POST', body });
   const data = (res as any)?.data ?? res;
   return data as AdminMembership;
+}
+
+// Reissue or create ID card for a membership (admin)
+export async function reissueAdminMembershipIdCard(membershipId: string, cardNumber?: string): Promise<any> {
+  const body: any = {};
+  if (cardNumber) body.cardNumber = cardNumber;
+  const res = await request<any>(`/memberships/admin/${encodeURIComponent(membershipId)}/idcard`, { method: 'POST', body });
+  const data = (res as any)?.data ?? res;
+  return data;
+}
+
+// Update membership (admin)
+// Backend contracts can vary; we attempt PATCH first then fall back to PUT.
+export async function updateAdminMembership(membershipId: string, body: Record<string, any>): Promise<AdminMembership | any> {
+  const path = `/memberships/admin/${encodeURIComponent(membershipId)}`;
+  try {
+    const res = await request<any>(path, { method: 'PATCH', body });
+    return (res as any)?.data ?? res;
+  } catch (e) {
+    const res = await request<any>(path, { method: 'PUT', body });
+    return (res as any)?.data ?? res;
+  }
+}
+
+// Assign seat / change designation (admin)
+// Endpoint: PUT /memberships/admin/{id}/assign
+// Backend supports dryRun=true for preview and dryRun=false for commit.
+export type AssignAdminMembershipSeatPayload = {
+  cell: string; // cell code
+  designationCode: string;
+  level: string; // NATIONAL | ZONE | STATE | DISTRICT | MANDAL
+  dryRun: boolean;
+  zone?: string;
+  hrcCountryId?: string;
+  hrcStateId?: string;
+  hrcDistrictId?: string;
+  hrcMandalId?: string;
+};
+
+export type AssignAdminMembershipSeatResponse = {
+  accepted?: boolean;
+  message?: string;
+  deltaDue?: number;
+  from?: any;
+  to?: any;
+  status?: { from?: string; to?: string };
+  [k: string]: any;
+};
+
+export async function assignAdminMembershipSeat(membershipId: string, payload: AssignAdminMembershipSeatPayload): Promise<AssignAdminMembershipSeatResponse> {
+  const res = await request<any>(`/memberships/admin/${encodeURIComponent(membershipId)}/assign`, { method: 'PUT', body: payload });
+  return ((res as any)?.data ?? res) as AssignAdminMembershipSeatResponse;
+}
+
+export async function changeAdminMembershipDesignation(membershipId: string, designationId: string): Promise<AdminMembership | any> {
+  return updateAdminMembership(membershipId, { designationId });
+}
+
+export async function deleteAdminMembership(membershipId: string): Promise<any> {
+  const res = await request<any>(`/memberships/admin/${encodeURIComponent(membershipId)}`, { method: 'DELETE' });
+  return (res as any)?.data ?? res;
 }

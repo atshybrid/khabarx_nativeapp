@@ -387,7 +387,7 @@ export default function PostCreateScreen() {
       if (result.canAccess) return true;
 
       if (result.isGuest || !result.hasToken) {
-        router.push('/auth/login?from=post');
+        router.push('/reporter/login?from=post');
         return false;
       }
 
@@ -396,13 +396,13 @@ export default function PostCreateScreen() {
         result.reason || 'Reporter, Member or HRCI Admin role required to create posts.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Login', onPress: () => router.push('/auth/login?from=post') }
+          { text: 'Login', onPress: () => router.push('/reporter/login?from=post') }
         ]
       );
       return false;
     } catch (e:any) {
       Alert.alert('Authentication Error', e?.message || 'Please login to continue.');
-      router.push('/auth/login?from=post');
+      router.push('/reporter/login?from=post');
       return false;
     }
   };

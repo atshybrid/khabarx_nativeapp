@@ -27,6 +27,10 @@ export default function Toast() {
       const errMsg: string = err?.message || bodyMsg || '';
       const raw = (bodyMsg || errMsg || '').toLowerCase();
 
+      // Friendly network/timeout messages
+      if (raw.includes('timed out') || raw.includes('timeout')) return 'Request timed out. Please try again.';
+      if (raw.includes('network request failed') || raw.includes('failed to fetch')) return 'Network error. Please check your connection.';
+
       // Suppress very common / noisy validation 400 toasts; UI often handles them locally
       if (err?.status === 400) {
         if (raw.startsWith('http 400')) return null; // generic
